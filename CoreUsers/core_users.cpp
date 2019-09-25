@@ -5,13 +5,6 @@
 #include <math.h>
 #include <sys/time.h>
 #include <thrust/sort.h>
-#ifdef WINDOWS
-#include <direct.h>
-#define GetCurrentDir _getcwd
-#else
-#include <unistd.h>
-#define GetCurrentDir getcwd
-#endif
 
  
 #if defined(WIN32) || defined(_WIN32) || defined(WIN64) || defined(_WIN64)
@@ -71,13 +64,6 @@ bool Conserve_GPU_Mem = 0;
 
 
 
-std::string GetCurrentWorkingDir( void ) {
-  char buff[FILENAME_MAX];
-  GetCurrentDir( buff, FILENAME_MAX );
-  std::string current_working_dir(buff);
-  return current_working_dir;
-}
-
 
 
 
@@ -127,8 +113,6 @@ int main(int argc, char *argv[])
 
     printf("%s Starting...\n\n", sSDKname);
     std::cout << "Current Date and Time :" << currentDateTime() << std::endl<< std::endl;
-    std::string current_path = GetCurrentWorkingDir();
-    std::cout << "Current path is " << current_path << '\n';
     LOG("Debug = "<<Debug);
 
     /* initialize random seed: */
@@ -220,9 +204,9 @@ int main(int argc, char *argv[])
     int case_ = 2;
 
     std::string preamble = "";
-    if( current_path == "/bridges/REC_SYS/CoreUsers"){
-        preamble = "/Users/amynesky";
-    }
+    // if( current_path == "/bridges/REC_SYS/CoreUsers"){
+    //     preamble = "/Users/amynesky";
+    // }
 
 
     switch (case_)
@@ -231,16 +215,16 @@ int main(int argc, char *argv[])
 
             Dataset_Name = "MovieLens 20 million";
 
-            csv_Ratings_Path = preamble + "/pylon5/ac560rp/nesky/REC_SYS/datasets/ml-20m/ratings.csv";
-            csv_keyWords_path = preamble + "/pylon5/ac560rp/nesky/REC_SYS/datasets/ml-20m/movies.csv";
+            csv_Ratings_Path = (preamble + "/pylon5/ac560rp/nesky/REC_SYS/datasets/ml-20m/ratings.csv").c_str();
+            csv_keyWords_path = (preamble + "/pylon5/ac560rp/nesky/REC_SYS/datasets/ml-20m/movies.csv").c_str();
             //temp_num_entries = csv_Ratings.num_rows() - 1; // the first row is a title row
             Content_Based = 0;
             temp_num_entries = 20000264 - 1;   // MovieLens 20 million
             break;
         }case 2:{ // code to be executed if n = 2;
             Dataset_Name = "Rent The Runaway";
-            csv_Ratings_Path = preamble + "/pylon5/ac560rp/nesky/REC_SYS/datasets/renttherunway_final_data.json";
-            csv_keyWords_path = preamble + "/pylon5/ac560rp/nesky/REC_SYS/datasets/renttherunway_final_data.json";
+            csv_Ratings_Path = (preamble + "/pylon5/ac560rp/nesky/REC_SYS/datasets/renttherunway_final_data.json").c_str();
+            csv_keyWords_path = (preamble + "/pylon5/ac560rp/nesky/REC_SYS/datasets/renttherunway_final_data.json").c_str();
             Content_Based = 0;
             temp_num_entries = 192544;           // use for Rent The Runaway dataset
             break;
@@ -248,7 +232,10 @@ int main(int argc, char *argv[])
             ABORT_IF_EQ(0, 1, "no valid dataset selected");
     }
 
-    LOG("Training using the "<< Dataset_Name <<" dataset"<<std::endl);
+    LOG("Training using the "<< Dataset_Name <<" dataset");
+    LOG("csv_Ratings_Path : "<< csv_Ratings_Path);
+    LOG("csv_keyWords_path : "<< csv_keyWords_path <<" dataset");
+    LOG("Content_Based : "<< Content_Based<<std::endl);
 
 
 

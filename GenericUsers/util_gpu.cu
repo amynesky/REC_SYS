@@ -2789,21 +2789,21 @@ __global__ void gpu_supplement_training_mtx_with_content_based_kernel(const long
 {
 
   CUDA_KERNEL_LOOP(b, how_many){
-    long long int i = (long long int)b + start;
+    long long int mtx_index = (long long int)b + start;
     int user = 0;
     int movie = 0;
     if(row_major_ordering){
-      user = i / ratings_cols_training;
-      movie = i % ratings_cols_training;
+      user = mtx_index / ratings_cols_training;
+      movie = mtx_index % ratings_cols_training;
     }else{
-      user = i % ratings_rows_training;
-      movie = i / ratings_rows_training;
+      user = mtx_index % ratings_rows_training;
+      movie = mtx_index / ratings_rows_training;
     }
 
     bool could_estimate = true;
-    for(int j = csr_format_ratingsMtx_userID_dev_training[user]; j < csr_format_ratingsMtx_userID_dev_training[user + 1]; j++){
-      if(coo_format_ratingsMtx_itemID_dev_training[j] == movie) could_estimate = false;
-      if(coo_format_ratingsMtx_itemID_dev_training[j]  > movie) break;
+    for(int coo_index = csr_format_ratingsMtx_userID_dev_training[user]; coo_index < csr_format_ratingsMtx_userID_dev_training[user + 1]; coo_index++){
+      if(coo_format_ratingsMtx_itemID_dev_training[coo_index] == movie) could_estimate = false;
+      if(coo_format_ratingsMtx_itemID_dev_training[coo_index]  > movie) break;
     }
     if (could_estimate){
       int   count  = 0;
@@ -2822,15 +2822,17 @@ __global__ void gpu_supplement_training_mtx_with_content_based_kernel(const long
               }else{
                 rating += full_training_ratings_mtx[(long long int)user + (long long int)other_movie * ratings_rows_training];
               }
+            } else if (keyword > other_keyWord){
+              break;
             }
           }
         }
       }
       if (count > 0){
-        full_training_ratings_mtx[i] = rating / (float)count;
+        full_training_ratings_mtx[mtx_index] = rating / (float)count;
       }
     }
-    if (::isinf(full_training_ratings_mtx[i]) || ::isnan(full_training_ratings_mtx[i])){
+    if (::isinf(full_training_ratings_mtx[mtx_index]) || ::isnan(full_training_ratings_mtx[mtx_index])){
       isBad[0] = true;
     };
       

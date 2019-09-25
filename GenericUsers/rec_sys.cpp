@@ -229,7 +229,10 @@ int main(int argc, char *argv[])
             ABORT_IF_EQ(0, 1, "no valid dataset selected");
     }
 
-    LOG("Training using the "<< Dataset_Name <<" dataset"<<std::endl);
+    LOG("Training using the "<< Dataset_Name <<" dataset");
+    LOG("csv_Ratings_Path : "<< csv_Ratings_Path);
+    LOG("csv_keyWords_path : "<< csv_keyWords_path <<" dataset");
+    LOG("Content_Based : "<< Content_Based<<std::endl);
 
 
 
@@ -283,39 +286,6 @@ int main(int argc, char *argv[])
     }
  
 
-    long long int num_entries_keyWord_mtx_temp = (long long int)0;
-    long long int num_keyWords_temp            = (long long int)0;
-
-    int*   coo_format_keyWordMtx_itemID_host  = NULL;
-    int*   coo_format_keyWordMtx_keyWord_host = NULL;
-    int*   coo_format_keyWordMtx_itemID_dev   = NULL;
-    int*   coo_format_keyWordMtx_keyWord_dev  = NULL;
-    if(Content_Based){
-        num_entries_keyWord_mtx_temp = csv_keyWords.num_entries();
-        //num_entries_keyWord_mtx = 48087;
-        LOG("num_entries_keyWord_mtx : "<<num_entries_keyWord_mtx_temp);
-
-        coo_format_keyWordMtx_itemID_host  = (int *)malloc(num_entries_keyWord_mtx_temp *  sizeof(int)); 
-        coo_format_keyWordMtx_keyWord_host = (int *)malloc(num_entries_keyWord_mtx_temp *  sizeof(int)); 
-        checkErrors(coo_format_keyWordMtx_itemID_host);
-        checkErrors(coo_format_keyWordMtx_keyWord_host);
-
-        num_keyWords_temp  = csv_keyWords.makeContentBasedcooKeyWordMtx(coo_format_keyWordMtx_itemID_host,
-                                                                        coo_format_keyWordMtx_keyWord_host,
-                                                                        num_entries_keyWord_mtx_temp);
-        LOG("num_keyWords : "<<num_keyWords_temp);
-
-        checkCudaErrors(cudaMalloc((void**)&coo_format_keyWordMtx_itemID_dev,   num_entries_keyWord_mtx_temp * sizeof(int)));
-        checkCudaErrors(cudaMalloc((void**)&coo_format_keyWordMtx_keyWord_dev,  num_entries_keyWord_mtx_temp * sizeof(int)));
-        update_Mem(2 * num_entries_keyWord_mtx_temp * sizeof(int) );
-
-        checkCudaErrors(cudaMemcpy(coo_format_keyWordMtx_itemID_dev,   coo_format_keyWordMtx_itemID_host,   num_entries_keyWord_mtx_temp * sizeof(int), cudaMemcpyHostToDevice));
-        checkCudaErrors(cudaMemcpy(coo_format_keyWordMtx_keyWord_dev,  coo_format_keyWordMtx_keyWord_host,  num_entries_keyWord_mtx_temp * sizeof(int), cudaMemcpyHostToDevice));
-        free(coo_format_keyWordMtx_itemID_host);
-        free(coo_format_keyWordMtx_keyWord_host);
-    }
-    const long long int num_entries_keyWord_mtx = num_entries_keyWord_mtx_temp;
-    const long long int num_keyWords            = num_keyWords_temp;
 
     int*   coo_format_ratingsMtx_userID_dev;
     int*   coo_format_ratingsMtx_itemID_dev;
@@ -350,6 +320,62 @@ int main(int argc, char *argv[])
     const long long int ratings_rows = (long long int)(gpu_abs_max<int>(num_entries, coo_format_ratingsMtx_userID_dev) + 1); 
     const long long int ratings_cols = (long long int)(gpu_abs_max<int>(num_entries, coo_format_ratingsMtx_itemID_dev) + 1); 
 
+    LOG(std::endl<<"The sparse data matrix has "<<ratings_rows<<" users and "<<ratings_cols<<" items with "<<num_entries<<" specified entries.");
+
+    long long int num_entries_keyWord_mtx_temp = (long long int)0;
+    long long int num_keyWords_temp            = (long long int)0;
+
+    int*   coo_format_keyWordMtx_itemID_host  = NULL;
+    int*   coo_format_keyWordMtx_keyWord_host = NULL;
+    int*   coo_format_keyWordMtx_itemID_dev   = NULL;
+    int*   coo_format_keyWordMtx_keyWord_dev  = NULL;
+    if(Content_Based){
+        //num_entries_keyWord_mtx_temp = csv_keyWords.num_entries();
+        switch (case_)
+        {
+            case 1:{ // code to be executed if n = 1;
+                //Dataset_Name = "MovieLens 20 million";
+                num_entries_keyWord_mtx_temp = ratings_cols;
+                break;
+            }case 2:{ // code to be executed if n = 2;
+                //Dataset_Name = "Rent The Runaway";
+                //num_entries_keyWord_mtx_temp = 48087;
+                break;
+            }default: 
+                ABORT_IF_EQ(0, 1, "no valid dataset selected");
+        }
+        //num_entries_keyWord_mtx = 48087;
+        LOG("num_entries_keyWord_mtx : "<<num_entries_keyWord_mtx_temp);
+
+        if(num_entries_keyWord_mtx_temp <= 0 ){
+            return 0;
+        }
+
+        coo_format_keyWordMtx_itemID_host  = (int *)malloc(num_entries_keyWord_mtx_temp *  sizeof(int)); 
+        coo_format_keyWordMtx_keyWord_host = (int *)malloc(num_entries_keyWord_mtx_temp *  sizeof(int)); 
+        checkErrors(coo_format_keyWordMtx_itemID_host);
+        checkErrors(coo_format_keyWordMtx_keyWord_host);
+
+        num_keyWords_temp  = csv_keyWords.makeContentBasedcooKeyWordMtx(coo_format_keyWordMtx_itemID_host,
+                                                                        coo_format_keyWordMtx_keyWord_host,
+                                                                        num_entries_keyWord_mtx_temp);
+        LOG("num_keyWords : "<<num_keyWords_temp);
+        if(num_keyWords_temp <= 0 ){
+            return 0;
+        }
+
+        checkCudaErrors(cudaMalloc((void**)&coo_format_keyWordMtx_itemID_dev,   num_entries_keyWord_mtx_temp * sizeof(int)));
+        checkCudaErrors(cudaMalloc((void**)&coo_format_keyWordMtx_keyWord_dev,  num_entries_keyWord_mtx_temp * sizeof(int)));
+        update_Mem(2 * num_entries_keyWord_mtx_temp * sizeof(int) );
+
+        checkCudaErrors(cudaMemcpy(coo_format_keyWordMtx_itemID_dev,   coo_format_keyWordMtx_itemID_host,   num_entries_keyWord_mtx_temp * sizeof(int), cudaMemcpyHostToDevice));
+        checkCudaErrors(cudaMemcpy(coo_format_keyWordMtx_keyWord_dev,  coo_format_keyWordMtx_keyWord_host,  num_entries_keyWord_mtx_temp * sizeof(int), cudaMemcpyHostToDevice));
+        free(coo_format_keyWordMtx_itemID_host);
+        free(coo_format_keyWordMtx_keyWord_host);
+    }
+    const long long int num_entries_keyWord_mtx = num_entries_keyWord_mtx_temp;
+    const long long int num_keyWords            = num_keyWords_temp;
+
 
     int*   csr_format_ratingsMtx_userID_dev;
     checkCudaErrors(cudaMalloc((void**)&csr_format_ratingsMtx_userID_dev, (ratings_rows + 1) * sizeof(int)));
@@ -362,7 +388,7 @@ int main(int argc, char *argv[])
         return 1; 
     } 
 
-    LOG("The sparse data matrix has "<<ratings_rows<<" users and "<<ratings_cols<<" movies with "<<num_entries<<" specified entries.");
+    
     if(Debug){
         // save_device_array_to_file<int>(csr_format_ratingsMtx_userID_dev, ratings_rows + 1, "csr_format_ratingsMtx_userID_dev");
         // LOG("csr_format_ratingsMtx_userID_dev : ");
@@ -823,6 +849,15 @@ int main(int argc, char *argv[])
                                                             full_ratingsMtx_dev_GU,
                                                             csr_format_keyWordMtx_itemID_dev,
                                                             coo_format_keyWordMtx_keyWord_dev);
+
+            const float max_training_supplement   = gpu_max<float>(ratings_rows_GU * ratings_cols, full_ratingsMtx_dev_GU);
+            if (max_training_supplement > max_training) {
+                LOG("max_training_supplement : "<<max_training_supplement);
+            }
+            const float min_training_supplement   = gpu_min<float>(ratings_rows_GU * ratings_cols, full_ratingsMtx_dev_GU);
+            if (min_training_supplement < min_training) {
+                LOG("min_training_supplement : "<<min_training_supplement);
+            }
         }
 
         if(Debug && 0){
@@ -1074,7 +1109,8 @@ int main(int argc, char *argv[])
         int count_tests = 0;
         for(int batch = 0; batch < num_batches; batch ++){
             if( print_training_error){
-                LOG(std::endl<<"                                       ~ITERATION "<<it<<", BATCH "<<batch<<"~"<<std::endl);
+                //LOG(std::endl<<"                                       ~ITERATION "<<it<<", BATCH "<<batch<<"~"<<std::endl);
+                LOG(std::endl<<"                              ITERATION "<<it<<" ( / "<<num_iterations<<" ), BATCH "<<batch<<" ( / "<<num_batches<<" )");
             }
             if(Debug && 0){
                 //LOG(std::endl<<"                              ITERATION "<<it<<", BATCH "<<batch);
@@ -1135,8 +1171,8 @@ int main(int argc, char *argv[])
                 LOG("full_ratingsMtx_dev_GU_current_batch_abs_max = "<<R_GU_abs_max) ;
                 LOG("full_ratingsMtx_dev_GU_current_batch_abs_exp = "<<R_GU_abs_exp) ;
                 ABORT_IF_EQ(R_GU_abs_max, R_GU_abs_exp, "R_GU is constant");
-                ABORT_IF_LESS((float)2.0 * abs_max_training, std::abs(R_GU_abs_max), 'unstable growth');
-                ABORT_IF_LESS( std::abs(R_GU_abs_max), abs_max_training / (float)2.0 , 'unstable shrinking');
+                ABORT_IF_LESS((float)2.0 * abs_max_training, std::abs(R_GU_abs_max), "unstable growth");
+                ABORT_IF_LESS( std::abs(R_GU_abs_max), abs_max_training / (float)2.0 , "unstable shrinking");
                 // LOG("Press Enter to continue.") ;
                 // std::cin.ignore();
             }
