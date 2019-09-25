@@ -44,6 +44,20 @@
 #include "util.h"
 #include "util_gpu.cuh"
 
+
+// Get current date/time, format is YYYY-MM-DD.HH:mm:ss
+const std::string currentDateTime() {
+    time_t     now = time(0);
+    struct tm  tstruct;
+    char       buf[80];
+    tstruct = *localtime(&now);
+    // Visit http://en.cppreference.com/w/cpp/chrono/c/strftime
+    // for more information about date/time format
+    strftime(buf, sizeof(buf), "%Y-%m-%d.%X", &tstruct);
+
+    return buf;
+}
+
 //============================================================================================
 // manipulate memory
 //============================================================================================
@@ -410,9 +424,21 @@ std::string ToString(const Dtype val)
 }
 template std::string ToString<bool>(const bool val);
 template std::string ToString<int>(const int val);
-template std::string ToString<long long int>(const long long int val);
+//template std::string ToString<long long int>(const long long int val);
 template std::string ToString<float>(const float val);
 template std::string ToString<double>(const double val);
+
+extern "C" std::string readable_time(double ms){
+  int ms_int = (int)ms;
+  int hours = ms_int / 3600000;
+  ms_int = ms_int % 3600000;
+  int minutes = ms_int / 60000;
+  ms_int = ms_int % 60000;
+  int seconds = ms_int / 1000;
+  ms_int = ms_int % 1000;
+
+  return (ToString<int>(hours) + ":" +ToString<int>(minutes) + ":" + ToString<int>(seconds) + ":" + ToString<int>(ms_int));
+}
 
 template<typename Dtype>
 void printPartialMatrices(Dtype * A, Dtype * B, int rows, int cols , int ld)
@@ -520,7 +546,7 @@ void save_host_arrays_side_by_side_to_file(const int* A_host, const int* B_host,
 
 
 template<typename Dtype>
-void save_host_mtx_to_file(const Dtype* A_host, int lda, int sda, std::string title)
+void save_host_mtx_to_file(const Dtype* A_host, const int lda, const int sda, std::string title)
 {
   std::stringstream filename;
   filename << title<< ".txt";
@@ -535,10 +561,10 @@ void save_host_mtx_to_file(const Dtype* A_host, int lda, int sda, std::string ti
   }
 }
 
-template void save_host_mtx_to_file<int>(const int* A_host, int lda, int sda, std::string title);
-template void save_host_mtx_to_file<long long int>(const long long int* A_host, int lda, int sda, std::string title);
-template void save_host_mtx_to_file<float>(const float* A_host, int lda, int sda, std::string title);
-template void save_host_mtx_to_file<double>(const double* A_host, int lda, int sda, std::string title);
+template void save_host_mtx_to_file<int>(const int* A_host, const int lda, const int sda, std::string title);
+//template void save_host_mtx_to_file<long long int>(const long long int* A_host, int lda, int sda, std::string title);
+template void save_host_mtx_to_file<float>(const float* A_host, const int lda, const int sda, std::string title);
+template void save_host_mtx_to_file<double>(const double* A_host, const int lda, const int sda, std::string title);
 
 
 //============================================================================================
@@ -547,9 +573,9 @@ template void save_host_mtx_to_file<double>(const double* A_host, int lda, int s
 
 void cpu_fill_training_mtx(const long long int ratings_rows_training, const long long int ratings_cols_training,  
  const long long int num_entries_CU, const bool row_major_ordering,
- const int* csr_format_ratingsMtx_userID_dev_training,
- const int* coo_format_ratingsMtx_itemID_dev_training,
- const float* coo_format_ratingsMtx_rating_dev_training,
+ const int* csr_format_ratingsMtx_userID_host_training,
+ const int* coo_format_ratingsMtx_itemID_host_training,
+ const float* coo_format_ratingsMtx_rating_host_training,
  float* full_training_ratings_mtx)
 {
   bool Debug = false;
@@ -557,9 +583,9 @@ void cpu_fill_training_mtx(const long long int ratings_rows_training, const long
   LOG("ratings_cols_training : "<< ratings_cols_training);
   //row major ordering
   for(long long int row = 0; row < ratings_rows_training; row ++){
-    for(long long int i = csr_format_ratingsMtx_userID_dev_training[row]; i < csr_format_ratingsMtx_userID_dev_training[row + 1]; i++){
-      long long int col = coo_format_ratingsMtx_itemID_dev_training[i];
-      float val = coo_format_ratingsMtx_rating_dev_training[i]; 
+    for(long long int i = csr_format_ratingsMtx_userID_host_training[row]; i < csr_format_ratingsMtx_userID_host_training[row + 1]; i++){
+      long long int col = coo_format_ratingsMtx_itemID_host_training[i];
+      float val = coo_format_ratingsMtx_rating_host_training[i]; 
       if(row_major_ordering){
         if(Debug) {
           LOG("num_entries_CU : "<< num_entries_CU);
@@ -567,8 +593,8 @@ void cpu_fill_training_mtx(const long long int ratings_rows_training, const long
           LOG("ratings_cols_training : "<< ratings_cols_training);
           LOG("full_training_ratings_mtx["<<ratings_cols_training<<" * "<< row<<" + "<<col<<"] = "<<val) ;
           LOG("full_training_ratings_mtx["<<ratings_cols_training *  row + col<<"] = "<<val) ;
-          LOG(val<<" = coo_format_ratingsMtx_rating_dev_training["<<i<<"]") ;
-          LOG(val<<" = "<<coo_format_ratingsMtx_rating_dev_training[i]) ;
+          LOG(val<<" = coo_format_ratingsMtx_rating_host_training["<<i<<"]") ;
+          LOG(val<<" = "<<coo_format_ratingsMtx_rating_host_training[i]) ;
         }
         full_training_ratings_mtx[ratings_cols_training * row + col] = val;
       }else{
@@ -603,6 +629,7 @@ void cpu_shuffle_mtx_rows_or_cols(cublasHandle_t dn_handle, const long long int 
     cudaFree(indicies_dev);
     free(indicies_host);
   }else{
+    // shuffle columns
     CUDA_CHECK(cudaMalloc((void**)&indicies_dev, N * sizeof(int)));
     indicies_host = (int *)malloc(N * sizeof(int));
     gpu_set_as_index(indicies_dev, N);
@@ -632,14 +659,14 @@ template void cpu_set_all<float>(float* x, const int N, float alpha);
 
 
 template <>
-void cpu_set_as_index<int>(  int* x, const long long int rows, const long long int cols) 
+void cpu_set_as_index<int>(int* x, const long long int rows, const long long int cols) 
 {
   bool print = true;
   struct timeval program_start, program_end;
   double program_time;
   gettimeofday(&program_start, NULL);
 
-  for(long long int i = (long long int)0; i < rows*cols; i++) {
+  for(long long int i = (long long int)0; i < rows * cols; i++) {
     int row = i % rows;
     int col = i / rows;
     x[i] = (int)row;
@@ -647,7 +674,7 @@ void cpu_set_as_index<int>(  int* x, const long long int rows, const long long i
   if(0) LOG("finished call to cpu_set_as_index") ;
   gettimeofday(&program_end, NULL);
   program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
-  if(print) LOG("cpu_set_as_index run time : "<<program_time<<"ms");
+  if(print) LOG("cpu_set_as_index run time : "<<readable_time(program_time));
 }
 
 
@@ -701,7 +728,7 @@ void cpu_get_cosine_similarity(const long long int ratings_rows, const int num_e
   if(0) LOG("finished call to gpu_orthogonal_decomp") ;
   gettimeofday(&program_end, NULL);
   program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
-  if(print) LOG("cpu_get_cosine_similarity run time : "<<program_time<<"ms");
+  if(print) LOG("cpu_get_cosine_similarity run time : "<<readable_time(program_time));
 }
 
 
@@ -716,14 +743,14 @@ void cpu_sort_index_by_max(const long long int rows, const long long int cols,  
   gettimeofday(&program_start, NULL);
 
   for(long long int i = (long long int)0; i < rows; i++){
-
+    //thrust::sort_by_key sorts indicies by x smallest to x largest
     thrust::sort_by_key(thrust::host, x + i * cols, x + (i + 1) * cols , indicies + i * cols);
   }
 
   if(0) LOG("finished call to cpu_sort_index_by_max") ;
   gettimeofday(&program_end, NULL);
   program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
-  if(print) LOG("cpu_sort_index_by_max run time : "<<program_time<<"ms");
+  if(print) LOG("cpu_sort_index_by_max run time : "<<readable_time(program_time));
 }
 
 
@@ -731,11 +758,50 @@ template void cpu_sort_index_by_max<int>(const long long int rows, const long lo
 template void cpu_sort_index_by_max<float>(const long long int rows, const long long int cols,  float* x, int* indicies);
 
 
+template<typename Dtype>
+void cpu_sort_index_by_max(const long long int dimension,  Dtype* x, int* indicies, int top_N)
+{
+  bool print = true;
+  struct timeval program_start, program_end;
+  if(print) LOG("called cpu_sort_index_by_max") ;
+  double program_time;
+  gettimeofday(&program_start, NULL);
+
+  Dtype* temp_x  = (Dtype *)malloc((dimension - 1) * sizeof(Dtype));
+  int* temp_indicies  = (int *)malloc((dimension - 1) * sizeof(int));
+
+  for(long long int i = (long long int)0; i < dimension; i++){
+    for(long long int j = (long long int)0; j < dimension; j++){
+      if(j < i){
+        temp_x[j] = x[from_whole_to_below_diag(i + dimension * j, dimension)];
+        temp_indicies[j] = j;
+      }
+      if(j > i){
+        temp_x[j - 1] = x[from_whole_to_below_diag(i + dimension * j, dimension)];
+        temp_indicies[j - 1] = j;
+      }
+    }
+    //thrust::sort_by_key sorts temp_indicies by temp_x smallest to temp_x largest
+    thrust::sort_by_key(thrust::host, temp_x, temp_x + dimension - 1 , temp_indicies);
+    host_copy(top_N, temp_indicies + dimension - top_N, indicies + i * top_N);
+  }
+
+  free(temp_x);
+  free(temp_indicies);
+
+  if(0) LOG("finished call to cpu_sort_index_by_max") ;
+  gettimeofday(&program_end, NULL);
+  program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
+  if(print) LOG("cpu_sort_index_by_max run time : "<<readable_time(program_time));
+}
+
+
+template void cpu_sort_index_by_max<int>(const long long int dimension,  int* x, int* indicies, int top_N);
+template void cpu_sort_index_by_max<float>(const long long int dimension,  float* x, int* indicies, int top_N);
 
 
 
-
-void cpu_count_appearances(const int top_N, const long long int rows, const long long int cols,
+void cpu_count_appearances(const int top_N, const long long int dimension,
   int* count, const int* indicies )
 {
   bool print = true;
@@ -743,23 +809,16 @@ void cpu_count_appearances(const int top_N, const long long int rows, const long
   double program_time;
   gettimeofday(&program_start, NULL);
 
-  for(long long int j = (long long int)0; j < cols; j++){
-    int c = 0;
-    long long int i = rows - (long long int)1;
-    while(c < top_N){
-      int temp = indicies[i + rows * j];
-      if(temp != j)
-      {
-        c += 1;
-        count[temp] += 1;
-      }
-      i -=(long long int)1;
+  for(long long int i = (long long int)0; i < top_N; i++){
+    for(long long int j = (long long int)0; j < dimension; j++){
+      int temp = indicies[i + top_N * j];
+      count[temp] += 1;
     }
   }
   if(0) LOG("finished call to gpu_orthogonal_decomp") ;
   gettimeofday(&program_end, NULL);
   program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
-  if(print) LOG("cpu_count_appearances run time : "<<program_time<<"ms");
+  if(print) LOG("cpu_count_appearances run time : "<<readable_time(program_time));
 }
 
 
@@ -771,56 +830,86 @@ void cpu_mark_CU_users(const int ratings_rows_CU, const int ratings_rows, const 
   double program_time;
   gettimeofday(&program_start, NULL);
 
-  for(int j = ratings_rows - 1; j > ratings_rows - ratings_rows_CU - 1; j--){
+  for(int j = ratings_rows - 1; j > ratings_rows - 1 - ratings_rows_CU; j--){
     y[x[j]] = 0;
   }
 
   if(0) LOG("finished call to gpu_orthogonal_decomp") ;
   gettimeofday(&program_end, NULL);
   program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
-  if(print) LOG("cpu_mark_CU_users run time : "<<program_time<<"ms");
+  if(print) LOG("cpu_mark_CU_users run time : "<<readable_time(program_time));
 
 }
 
 long long int from_below_diag_to_whole(long long int below_diag_index, int dimension){
-
+  bool debug = false;
   const long long int num_below_diag = (dimension * (dimension - (long long int)1)) / (long long int)2;
   if( below_diag_index < (long long int)0 || below_diag_index > num_below_diag - (long long int)(1)) return (long long int)(-1);
 
-  long long int whole_index = (long long int)0;
+  long long int num_so_far = (long long int)0;
   int col = 0;
-  long long int add = (long long int)(dimension - 1);
-  while(whole_index - (long long int)(1) < below_diag_index){
-    if(whole_index + add  - (long long int)(1) > below_diag_index) break;
-    whole_index += add;
-    add -= (long long int)(1);
-    col += 1;
+  long long int num_in_col = (long long int)(dimension - 1);
+  while(num_so_far < below_diag_index + (long long int)(1)){
+    if(debug){
+      LOG("num_so_far : "<<num_so_far);
+      LOG("num_in_col : "<<num_in_col);
+      LOG("col : "<<col);
+      LOG("col * dimension + (dimension - num_in_col) + below_diag_index - num_so_far = "<<col<<" * "<<dimension<<" + ("<<dimension<<" - "<<num_in_col<<") + "<<below_diag_index<<" - "<<num_so_far<<" = "<<(long long int)col * dimension + (dimension - num_in_col) + below_diag_index - num_so_far);
+    }
+    
+    if(num_so_far + num_in_col == below_diag_index + (long long int)(1)){
+      return (long long int)(col + 1) * dimension - (long long int)(1);
+    }
+    if(num_so_far + num_in_col > below_diag_index + (long long int)(1)){ 
+      break;
+    }else{
+      num_so_far += num_in_col;
+      num_in_col -= (long long int)(1);
+      col += 1;
+    }
   }
-  return (long long int)col * dimension + (dimension - add) + below_diag_index - whole_index;
+  return (long long int)col * dimension + (dimension - num_in_col) + below_diag_index - num_so_far;
 }
 
 long long int from_whole_to_below_diag(long long int whole_index, int dimension){
-  int row = (int)(whole_index % dimension);
-    int col = (int)(whole_index / dimension);
-    if(row == col) return (long long int)(-1);
-    if(row < 0 || row > dimension - 1) return (long long int)(-1);
-    if(col < 0 || col > dimension - 1) return (long long int)(-1);
+  bool debug = false;
+  if(debug){
+    LOG("whole_index : "<<whole_index);
+    LOG("dimension : "<<dimension);
+  }
+  int row = (int)(whole_index % (long long int)dimension);
+  int col = (int)(whole_index / (long long int)dimension);
+  if(row == col) return (long long int)(-1);
+  if(row < 0 || row > dimension - 1) return (long long int)(-1);
+  if(col < 0 || col > dimension - 1) return (long long int)(-1);
 
-    int temp = row;
-    row = std::max(row, col);
-    col = std::min(temp,col);
-    // now row is larger than col
+  int temp = row;
+  row = std::max(row, col);
+  col = std::min(temp,col);
+  // now row is larger than col
+  if(debug){
+    LOG("row : "<<row);
+    LOG("col : "<<col);
+  }
 
-  long long int below_diag_index = (long long int)0;
+  long long int num_below_diag = (long long int)0;
   int count = 0;
-  long long int add = (long long int)(dimension - 1);
-  while(count - 1 < col){
-    below_diag_index += add;
-    add -= (long long int)(1);
+  long long int num_in_col = (long long int)(dimension - 1);
+  while(count < col){
+    if(debug){
+      LOG("count : "<<count);
+      LOG("num_in_col : "<<num_in_col);
+      LOG("num_below_diag : "<<num_below_diag);
+      LOG("num_below_diag + row - (dimension - num_in_col) = "<<num_below_diag<<" + "<<row<<" - ("<<dimension<<" - "<<num_in_col<<") = "<<num_below_diag + row - (dimension - num_in_col));
+    }
+    num_below_diag += num_in_col;
+    num_in_col -= (long long int)(1);
     count += 1;
   }
-  return below_diag_index + row;
+  return num_below_diag + row - (dimension - num_in_col);
 }
+
+
 
 
 

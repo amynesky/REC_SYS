@@ -13,7 +13,7 @@ set -x
 # load modules    #SBATCH -p GPU-shared  #SBATCH -A ac560rp
 
 
-module load hdf5/1.8.16_gnu
+#module load hdf5/1.8.16_gnu
 module load gcc/5.3.0 boost/1.63.0_py2.7.11 leveldb/1.18 opencv
 module load cuda/8.0 protobuf/3.2.0
 module load cmake

@@ -64,7 +64,7 @@
     }
 
 #define LOG(output_statement) \
-    	std::cout<<__FILE__<<" line "<<__LINE__<<" : "<<output_statement<<std::endl;
+    	std::cout<<__FILE__<<" line "<<__LINE__<<" at "<<currentDateTime()<<" : "<<output_statement<<std::endl;
 
 
 #define checkErrors(ans) { Hassert((ans), __FILE__, __LINE__); }
@@ -77,6 +77,8 @@ inline void Hassert(const Dtype *ptr, const char *file, int line, bool abort=tru
       if (abort) {ABORT_IF_NEQ(0, 1, "Fatal: failed to allocate");};
    }
 }
+
+const std::string currentDateTime();
 //============================================================================================
 // manipulate memory
 //============================================================================================
@@ -112,7 +114,7 @@ void host_rng_uniform(const long long int n, const Dtype a, const Dtype b, Dtype
 template <typename Dtype>
 std::string ToString(const Dtype val);
 
-std::string readable_time(double ms);
+extern "C" std::string readable_time(double ms);
 
 template < typename Dtype>
 void printPartialMatrices(Dtype * A, Dtype * B, int rows, int cols , int ld);
@@ -132,7 +134,7 @@ void save_host_arrays_side_by_side_to_file(const int* A_host, const int* B_host,
                                            const float* C_host, int count, std::string title);
 
 template <typename Dtype>
-void save_host_mtx_to_file(const Dtype* A_host, const long long int lda, const long long int  sda, std::string title);
+void save_host_mtx_to_file(const Dtype* A_host, const int lda, const int  sda, std::string title);
 
 
 //============================================================================================
@@ -141,9 +143,9 @@ void save_host_mtx_to_file(const Dtype* A_host, const long long int lda, const l
 
 void cpu_fill_training_mtx(const long long int ratings_rows_training, const long long int ratings_cols_training,  
                            const long long int num_entries_CU, const bool row_major_ordering,
-                            const int* csr_format_ratingsMtx_userID_dev_training,
-                            const int* coo_format_ratingsMtx_itemID_dev_training,
-                            const float* coo_format_ratingsMtx_rating_dev_training,
+                            const int* csr_format_ratingsMtx_userID_host_training,
+                            const int* coo_format_ratingsMtx_itemID_host_training,
+                            const float* coo_format_ratingsMtx_rating_host_training,
                             float* full_training_ratings_mtx);
 
 
@@ -154,7 +156,7 @@ template <typename Dtype>
 void cpu_set_all(Dtype* x, const int N, Dtype alpha);
 
 template <typename Dtype>
-void cpu_set_as_index(  Dtype* x, const long long int rows, const long long int cols);
+void cpu_set_as_index(Dtype* x, const long long int rows, const long long int cols);
 
 void cpu_get_cosine_similarity(const long long int ratings_rows, const int num_entries,
                               const int* csr_format_ratingsMtx_userID_host,
@@ -163,10 +165,13 @@ void cpu_get_cosine_similarity(const long long int ratings_rows, const int num_e
                               float* cosine_similarity);
 
 template <typename Dtype>
-void cpu_sort_index_by_max(const long long int rows,const long long int cols,  Dtype* x, int* indicies);
+void cpu_sort_index_by_max(const long long int rows, const long long int cols,  Dtype* x, int* indicies);
+
+template<typename Dtype>
+void cpu_sort_index_by_max(const long long int dimension,  Dtype* x, int* indicies, int top_N);
 
 
-void cpu_count_appearances(const int top_N, const long long int rows, const long long int  cols,  int* count, const int* indicies );
+void cpu_count_appearances(const int top_N, const long long int dimension,  int* count, const int* indicies );
 
 void cpu_mark_CU_users(const int ratings_rows_CU, const int ratings_rows, const int* x, int* y );
 

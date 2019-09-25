@@ -1,16 +1,16 @@
 #!/bin/bash
 #SBATCH -N 1
-#SBATCH -p GPU
+#SBATCH -p GPU-shared
 #SBATCH --ntasks-per-node 7
-#SBATCH -t 48:00:00
 #SBATCH --gres=gpu:p100:2
+#SBATCH -t 48:00:00
 #echo commands to stdout
 
 #echo commands to stdout
 set -x
 
 
-# load modules    #SBATCH -p GPU-shared #SBATCH -A ac560rp
+# load modules    #SBATCH -p GPU-shared #SBATCH -A ac560rp 
 
 
 module load gcc/5.3.0 boost/1.63.0_py2.7.11 leveldb/1.18 opencv

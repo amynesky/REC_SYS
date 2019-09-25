@@ -1,4 +1,4 @@
-  #include <iostream>
+#include <iostream>
 #include <fstream>
 #include <sstream>
 #include <vector>
@@ -139,7 +139,7 @@ template bool gpu_isBad<float>(const float* A, long long int size) ;
 extern "C" {
 #endif /* __cplusplus */
 
-  int getDeviceVersion(void)
+int getDeviceVersion(void)
   {
     int device;
     struct cudaDeviceProp properties;
@@ -159,7 +159,7 @@ extern "C" {
     return properties.major * 100 + properties.minor * 10;
   }
 
-  size_t getDeviceMemory(void)
+size_t getDeviceMemory(void)
   {
     struct cudaDeviceProp properties;
     int device;
@@ -784,7 +784,7 @@ __global__ void gpu_get_rand_groups_kernel(curandState *state, const int n,  int
   //a[idx] = curand_uniform(&state[idx]);
   CUDA_KERNEL_LOOP(i, n){
     float rand_ = curand_uniform(&state[i]);
-    float sum = 0;
+    float sum = (float)0.0;
     for(int j = 0; j < num_groups; j++){
       sum += probability_of_success[j];
       if(rand_ < sum || j == num_groups-1){
@@ -1117,7 +1117,7 @@ void gpu_set_as_index_host<int>(  int* x_host, const long long int rows, const l
   if(1) LOG("finished call to gpu_set_as_index_host") ;
   gettimeofday(&program_end, NULL);
   program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
-  if(1) LOG("gpu_set_as_index_host run time : "<<program_time<<"ms");
+  if(1) LOG("gpu_set_as_index_host run time : "<<readable_time(program_time));
 }
 
 template<>
@@ -2476,7 +2476,7 @@ void gpu_supplement_training_mtx_with_content_based(const long long int ratings_
     gettimeofday(&program_end, NULL);
     program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
   //printf("program_time: %f\n", program_time);   
-  /*if(Debug)*/ LOG("content based run time : "<<program_time<<"ms");
+  /*if(Debug)*/ LOG("content based run time : "<<readable_time(program_time));
 }
 
 
@@ -2553,6 +2553,58 @@ void center_ratings(const float* user_means, const float* user_var,
 
 }
 
+
+
+
+__device__ long long int from_below_diag_to_whole_device(long long int below_diag_index, int dimension){
+
+  const long long int num_below_diag = (dimension * (dimension - (long long int)1)) / (long long int)2;
+  if( below_diag_index < (long long int)0 || below_diag_index > num_below_diag - (long long int)(1)) return (long long int)(-1);
+
+  long long int num_so_far = (long long int)0;
+  int col = 0;
+  long long int num_in_col = (long long int)(dimension - 1);
+  while(num_so_far < below_diag_index + (long long int)(1)){  
+    if(num_so_far + num_in_col == below_diag_index + (long long int)(1)){
+      return (long long int)(col + 1) * dimension - (long long int)(1);
+    }
+    if(num_so_far + num_in_col > below_diag_index + (long long int)(1)){ 
+      break;
+    }else{
+      num_so_far += num_in_col;
+      num_in_col -= (long long int)(1);
+      col += 1;
+    }
+  }
+  return (long long int)col * dimension + (dimension - num_in_col) + below_diag_index - num_so_far;
+}
+
+__device__ long long int from_whole_to_below_diag_device(long long int whole_index, int dimension){
+  bool debug = false;
+  int row = (int)(whole_index % (long long int)dimension);
+  int col = (int)(whole_index / (long long int)dimension);
+  if(row == col) return (long long int)(-1);
+  if(row < 0 || row > dimension - 1) return (long long int)(-1);
+  if(col < 0 || col > dimension - 1) return (long long int)(-1);
+
+  int temp = row;
+  row = max(row, col);
+  col = min(temp,col);
+  // now row is larger than col
+
+  long long int num_below_diag = (long long int)0;
+  int count = 0;
+  long long int num_in_col = (long long int)(dimension - 1);
+  while(count < col){
+    num_below_diag += num_in_col;
+    num_in_col -= (long long int)(1);
+    count += 1;
+  }
+  return num_below_diag + row - (dimension - num_in_col);
+}
+
+
+
 __global__ void get_cosine_similarity_kernel(const int ratings_rows,
   const int* csr_format_ratingsMtx_userID_dev,
   const int* coo_format_ratingsMtx_itemID_dev,
@@ -2572,9 +2624,9 @@ __global__ void get_cosine_similarity_kernel(const int ratings_rows,
       float denom_j = (float)0.0;
       for(int i = csr_format_ratingsMtx_userID_dev[user_i]; i < csr_format_ratingsMtx_userID_dev[user_i + 1]; i++){
         for(int j = csr_format_ratingsMtx_userID_dev[user_j]; j < csr_format_ratingsMtx_userID_dev[user_j + 1]; j++){
-          int user_i_col = coo_format_ratingsMtx_itemID_dev[i];
-          int user_j_col = coo_format_ratingsMtx_itemID_dev[j];
-          if( user_i_col == user_j_col){
+          int user_i_itemID = coo_format_ratingsMtx_itemID_dev[i];
+          int user_j_itemID = coo_format_ratingsMtx_itemID_dev[j];
+          if( user_i_itemID == user_j_itemID){
             count   += 1;
             num     += coo_format_ratingsMtx_rating_dev[i] * coo_format_ratingsMtx_rating_dev[j] ;
             denom_i += pow(coo_format_ratingsMtx_rating_dev[i], (float)2.0) ;
@@ -2647,11 +2699,13 @@ __global__ void get_cosine_similarity_host_kernel(const long long int start,
   const float* coo_format_ratingsMtx_rating_dev,
   float* cosine_similarity_dev, bool* isBad ) 
 {
-
+  // assume that cosine_similarity_dev is stored in column major ordering (a column stays together in memory).
   CUDA_KERNEL_LOOP(entry, num){
-    int user_i = (int)(((long long int)entry + start) % ratings_rows);
-    int user_j = (int)(((long long int)entry + start) / ratings_rows);
+    long long int whole_index = from_below_diag_to_whole_device((long long int)entry + start, ratings_rows);
+    int user_i = (int)(whole_index % ratings_rows);
+    int user_j = (int)(whole_index / ratings_rows);
     if( user_i == user_j){
+      isBad[0] = true;
       cosine_similarity_dev[entry] = (float)1.0;
     }else{
       int   count   = 0;
@@ -2659,11 +2713,11 @@ __global__ void get_cosine_similarity_host_kernel(const long long int start,
       float denom_i = (float)0.0;
       float denom_j = (float)0.0;
       for(int i = csr_format_ratingsMtx_userID_dev[user_i]; i < csr_format_ratingsMtx_userID_dev[user_i + 1]; i++){
-        int user_i_col = coo_format_ratingsMtx_itemID_dev[i];
-        int user_j_col = 0;
+        int user_i_itemID = coo_format_ratingsMtx_itemID_dev[i];
+        int user_j_itemID = 0;
         for(int j = csr_format_ratingsMtx_userID_dev[user_j]; j < csr_format_ratingsMtx_userID_dev[user_j + 1]; j++){
-          user_j_col = coo_format_ratingsMtx_itemID_dev[j];
-          if( user_i_col == user_j_col){
+          user_j_itemID = coo_format_ratingsMtx_itemID_dev[j];
+          if( user_i_itemID == user_j_itemID){
             count   += 1;
             num     += coo_format_ratingsMtx_rating_dev[i] * coo_format_ratingsMtx_rating_dev[j] ;
             denom_i += pow(coo_format_ratingsMtx_rating_dev[i], (float)2.0) ;
@@ -2675,7 +2729,7 @@ __global__ void get_cosine_similarity_host_kernel(const long long int start,
           //float temp = num / sqrt(denom_i * denom_j);
         float temp_i = (float)csr_format_ratingsMtx_userID_dev[user_i + 1] - (float)csr_format_ratingsMtx_userID_dev[user_i];
         float temp_j = (float)csr_format_ratingsMtx_userID_dev[user_j + 1] - (float)csr_format_ratingsMtx_userID_dev[user_j];
-        float temp = count / sqrtf(temp_i * temp_j);
+        float temp = ((float)count) / sqrtf(temp_i * temp_j);
         cosine_similarity_dev[entry] = temp;
         if (::isinf(temp) || ::isnan(temp)){
           isBad[0] = true;
@@ -2717,6 +2771,7 @@ void get_cosine_similarity_host_kernel_debug(const long long int start,
   checkCudaErrors(cudaMemcpy(cosine_similarity_host, cosine_similarity_dev,  num *  sizeof(float), cudaMemcpyDeviceToHost));
 
   for(int entry = 0; entry< num;entry++){
+    long long int whole_index = from_below_diag_to_whole((long long int)entry + start, ratings_rows);
     int user_i = (int)(((long long int)entry + start) % ratings_rows);
     int user_j = (int)(((long long int)entry + start) / ratings_rows);
     if(debug){
@@ -2731,17 +2786,20 @@ void get_cosine_similarity_host_kernel_debug(const long long int start,
       float denom_i = (float)0.0;
       float denom_j = (float)0.0;
       for(int i = csr_format_ratingsMtx_userID_host[user_i]; i < csr_format_ratingsMtx_userID_host[user_i + 1]; i++){
-        int user_i_col = coo_format_ratingsMtx_itemID_host[i];
-        int user_j_col = 0;
+        int user_i_itemID = coo_format_ratingsMtx_itemID_host[i];
+        int user_j_itemID = 0;
         for(int j = csr_format_ratingsMtx_userID_host[user_j]; j < csr_format_ratingsMtx_userID_host[user_j + 1]; j++){
+          user_j_itemID = coo_format_ratingsMtx_itemID_host[j];
           if(debug){
-            LOG("i : "<<i);
-            LOG("user_i_col : "<<user_i_col);
-            LOG("j : "<<j);
-            LOG("user_j_col : "<<user_j_col);
+            LOG("user_i : "<<user_i);
+            LOG("coo index i : "<<i);
+            LOG("user_i_itemID : "<<user_i_itemID);
+            LOG("user_j : "<<user_j);
+            LOG("coo index j : "<<j);
+            LOG("user_j_itemID : "<<user_j_itemID);
+            LOG("largest possible coo index : "<<csr_format_ratingsMtx_userID_host[ratings_rows] - 1);
           }
-          user_j_col = coo_format_ratingsMtx_itemID_host[j];
-          if( user_i_col == user_j_col){
+          if( user_i_itemID == user_j_itemID){
             count   += 1;
             num     += coo_format_ratingsMtx_rating_host[i] * coo_format_ratingsMtx_rating_host[j] ;
             denom_i += pow(coo_format_ratingsMtx_rating_host[i], (float)2.0) ;
@@ -2782,7 +2840,7 @@ void get_cosine_similarity_host_kernel_debug(const long long int start,
   float* cosine_similarity_host)
  {
 
-  bool Debug = true;
+  bool Debug = false;
   bool print = true;
   struct timeval program_start, program_end;
   double program_time;
@@ -2793,15 +2851,18 @@ void get_cosine_similarity_host_kernel_debug(const long long int start,
   CUDA_CHECK(cudaMalloc((void**)&isBad, sizeof(bool)));
   CUDA_CHECK(cudaMemcpy(isBad, &isBad_host, sizeof(bool), cudaMemcpyHostToDevice));
 
+  const long long int num_below_diag = (ratings_rows * (ratings_rows - (long long int)1)) / (long long int)2;
 
-  long long int num_gpu_blocks = GET_BLOCKS(ratings_rows * ratings_rows);
 
-  if(Debug) LOG("total loops : " <<ceil((ratings_rows * ratings_rows) / (CUDA_NUM_BLOCKS*CUDA_NUM_THREADS))) ;
+  //long long int num_gpu_blocks = GET_BLOCKS(ratings_rows * ratings_rows);
+  long long int num_gpu_blocks = GET_BLOCKS(num_below_diag);
+
+  if(Debug) LOG("total loops : " <<ceil((num_below_diag) / (CUDA_NUM_BLOCKS*CUDA_NUM_THREADS))) ;
 
 
   if (num_gpu_blocks > CUDA_NUM_BLOCKS){
     long long int num_loops = (long long int)0;
-    const long long int num_entries = (long long int)(CUDA_NUM_BLOCKS*CUDA_NUM_THREADS);
+    const long long int num_entries = (long long int)(CUDA_NUM_BLOCKS * CUDA_NUM_THREADS);
     long long int spot = (long long int)0;
 
     float * cosine_similarity_dev;
@@ -2810,32 +2871,35 @@ void get_cosine_similarity_host_kernel_debug(const long long int start,
 
     while (num_gpu_blocks > CUDA_NUM_BLOCKS){
       if(Debug) {
-        LOG("total entries : " <<ratings_rows * ratings_rows) ;
+        LOG("total entries : " <<num_below_diag) ;
         LOG("num entries that fit on GPU: " <<num_entries) ;
         LOG("num_loops : " <<num_loops) ;
+        save_host_array_to_file<float>(cosine_similarity_host + spot, (int)num_entries, "cosine_similarity_host");
       }
-      save_host_array_to_file(cosine_similarity_host + spot, (int)num_entries, "cosine_similarity_host");
       checkCudaErrors(cudaMemcpy(cosine_similarity_dev, cosine_similarity_host + spot,  num_entries *  sizeof(float), cudaMemcpyHostToDevice));
-      CUDA_CHECK(cudaDeviceSynchronize());
+      //CUDA_CHECK(cudaDeviceSynchronize());
       if(Debug) LOG("Here") ;
-      if(num_loops < 510){
+      //if(num_loops < 510){
         get_cosine_similarity_host_kernel<<<CUDA_NUM_BLOCKS, CUDA_NUM_THREADS>>>(spot, num_entries, ratings_rows, 
           csr_format_ratingsMtx_userID_dev,
           coo_format_ratingsMtx_itemID_dev,
           coo_format_ratingsMtx_rating_dev,
           cosine_similarity_dev, isBad);
-      }else{
-        get_cosine_similarity_host_kernel_debug(spot, num_entries, ratings_rows, 
-          csr_format_ratingsMtx_userID_dev,
-          coo_format_ratingsMtx_itemID_dev,
-          coo_format_ratingsMtx_rating_dev,
-          cosine_similarity_dev, isBad);
-      }
-      CUDA_CHECK(cudaDeviceSynchronize());
+      // }else{
+      //   get_cosine_similarity_host_kernel_debug(spot, num_entries, ratings_rows, 
+      //     csr_format_ratingsMtx_userID_dev,
+      //     coo_format_ratingsMtx_itemID_dev,
+      //     coo_format_ratingsMtx_rating_dev,
+      //     cosine_similarity_dev, isBad);
+      // }
+      //CUDA_CHECK(cudaDeviceSynchronize());
       if(Debug) LOG("Here") ;
       checkCudaErrors(cudaMemcpy(cosine_similarity_host + spot, cosine_similarity_dev,  num_entries *  sizeof(float), cudaMemcpyDeviceToHost));
-      CUDA_CHECK(cudaDeviceSynchronize());
-      if(Debug) LOG("Here") ;
+      //CUDA_CHECK(cudaDeviceSynchronize());
+      if(Debug) {
+        LOG("Here") ;
+        save_host_array_to_file<float>(cosine_similarity_host + spot, (int)num_entries, "cosine_similarity_host");
+      }
       num_gpu_blocks = num_gpu_blocks - (long long int)CUDA_NUM_BLOCKS;
       num_loops += (long long int)1;
       spot = num_loops * num_entries;
@@ -2843,6 +2907,9 @@ void get_cosine_similarity_host_kernel_debug(const long long int start,
         LOG("num_gpu_blocks : " <<num_gpu_blocks) ;
         LOG("num_loops : " <<num_loops) ;
         LOG("spot : " <<spot) ;
+        gettimeofday(&program_end, NULL);
+        program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
+        if(print) LOG("get_cosine_similarity_host run time so far : "<<readable_time(program_time));
       }
     };
     if(Debug) {
@@ -2852,26 +2919,26 @@ void get_cosine_similarity_host_kernel_debug(const long long int start,
     }
     // spot is the number of entries done so far
     // total - (done) = left to go 
-    checkCudaErrors(cudaMemcpy(cosine_similarity_dev, cosine_similarity_host + spot,  (ratings_rows * ratings_rows - spot) *  sizeof(float), cudaMemcpyHostToDevice));
-    get_cosine_similarity_host_kernel<<<num_gpu_blocks, CUDA_NUM_THREADS>>>(spot, ratings_rows * ratings_rows - spot, ratings_rows, 
+    checkCudaErrors(cudaMemcpy(cosine_similarity_dev, cosine_similarity_host + spot,  (num_below_diag - spot) *  sizeof(float), cudaMemcpyHostToDevice));
+    get_cosine_similarity_host_kernel<<<num_gpu_blocks, CUDA_NUM_THREADS>>>(spot, num_below_diag - spot, ratings_rows, 
       csr_format_ratingsMtx_userID_dev,
       coo_format_ratingsMtx_itemID_dev,
       coo_format_ratingsMtx_rating_dev,
       cosine_similarity_dev, isBad);
-    checkCudaErrors(cudaMemcpy(cosine_similarity_host + spot, cosine_similarity_dev,  (ratings_rows * ratings_rows - spot) *  sizeof(float), cudaMemcpyDeviceToHost));
+    checkCudaErrors(cudaMemcpy(cosine_similarity_host + spot, cosine_similarity_dev,  (num_below_diag - spot) *  sizeof(float), cudaMemcpyDeviceToHost));
     cudaFree(cosine_similarity_dev);
   }else{
     if(Debug) LOG("get_cosine_similarity_host num_gpu_blocks <= CUDA_NUM_BLOCKS") ;
     float * cosine_similarity_dev;
-    checkCudaErrors(cudaMalloc((void**)&cosine_similarity_dev, ratings_rows * ratings_rows * sizeof(float)));
+    checkCudaErrors(cudaMalloc((void**)&cosine_similarity_dev, num_below_diag * sizeof(float)));
 
-    checkCudaErrors(cudaMemcpy(cosine_similarity_dev, cosine_similarity_host,  ratings_rows * ratings_rows *  sizeof(float), cudaMemcpyHostToDevice));
-    get_cosine_similarity_host_kernel<<<num_gpu_blocks, CUDA_NUM_THREADS>>>(0, ratings_rows * ratings_rows, ratings_rows, 
+    checkCudaErrors(cudaMemcpy(cosine_similarity_dev, cosine_similarity_host,  num_below_diag *  sizeof(float), cudaMemcpyHostToDevice));
+    get_cosine_similarity_host_kernel<<<num_gpu_blocks, CUDA_NUM_THREADS>>>(0, num_below_diag, ratings_rows, 
       csr_format_ratingsMtx_userID_dev,
       coo_format_ratingsMtx_itemID_dev,
       coo_format_ratingsMtx_rating_dev,
       cosine_similarity_dev, isBad);
-    checkCudaErrors(cudaMemcpy(cosine_similarity_host , cosine_similarity_dev,  ratings_rows * ratings_rows *  sizeof(float), cudaMemcpyDeviceToHost));
+    checkCudaErrors(cudaMemcpy(cosine_similarity_host , cosine_similarity_dev,  num_below_diag *  sizeof(float), cudaMemcpyDeviceToHost));
     cudaFree(cosine_similarity_dev);
   };
 
@@ -2888,7 +2955,7 @@ void get_cosine_similarity_host_kernel_debug(const long long int start,
   if(print) LOG("finished call to get_cosine_similarity_host") ;
   gettimeofday(&program_end, NULL);
   program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
-  if(print) LOG("get_cosine_similarity_host run time : "<<program_time<<"ms");
+  if(print) LOG("get_cosine_similarity_host run time : "<<readable_time(program_time));
 }
 
 template<typename Dtype>
@@ -3446,7 +3513,7 @@ void gpu_orthogonal_decomp<float>(cublasHandle_t handle, cusolverDnHandle_t dn_s
   gettimeofday(&program_end, NULL);
   program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
   //printf("program_time: %f\n", program_time);   
-  /*if(Debug)*/ LOG("gpu_orthogonal_decomp run time : "<<program_time<<"ms");
+  /*if(Debug)*/ LOG("gpu_orthogonal_decomp run time : "<<readable_time(program_time));
 }                    
 
 
@@ -4327,7 +4394,7 @@ void gpu_R_error<float>(const cublasHandle_t dn_handle, const cusparseHandle_t s
   gettimeofday(&program_end, NULL);
   program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
   //printf("program_time: %f\n", program_time);   
-  if(1) LOG((title + " run time : ").c_str()<<program_time<<"ms");
+  if(1) LOG((title + " run time : ").c_str()<<readable_time(program_time));
 }
 
 
@@ -4580,7 +4647,7 @@ void gpu_R_error_training<float>(const cublasHandle_t dn_handle, const cusparseH
   gettimeofday(&program_end, NULL);
   program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
   //printf("program_time: %f\n", program_time);   
-  if(1) LOG("gpu_R_error_training run time : "<<program_time<<"ms");
+  if(1) LOG("gpu_R_error_training run time : "<<readable_time(program_time));
 }
 
 template <>
@@ -4879,7 +4946,7 @@ void gpu_R_error_testing<float>(const cublasHandle_t dn_handle, const cusparseHa
   gettimeofday(&program_end, NULL);
   program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
   //printf("program_time: %f\n", program_time);   
-  if(1) LOG("gpu_R_error_testing run time : "<<program_time<<"ms");
+  if(1) LOG("gpu_R_error_testing run time : "<<readable_time(program_time));
 }
 
 

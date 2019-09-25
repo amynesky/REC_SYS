@@ -492,8 +492,6 @@ void gpu_split_data(const int* csr_format_ratingsMtx_userID_dev,
                         float** coo_format_ratingsMtx_rating_dev_by_group,
                         const int* ratings_rows_by_group);
 
-
-
 void collect_user_means(float* user_means_training,float* user_var_training, const long long int ratings_rows_training,
                         const int* csr_format_ratingsMtx_userID_dev_training,
                         const float* coo_format_ratingsMtx_rating_dev_training,
@@ -527,6 +525,9 @@ void center_ratings(const float* user_means_testing, const float* user_var_testi
                     const float* coo_format_ratingsMtx_rating_dev_testing,
                     float* coo_format_ratingsMtx_row_centered_rating_dev_testing,
                     const float val_when_var_is_zero);
+
+void center_rows(const long long int rows, const long long int cols, 
+                 float* X, const float val_when_var_is_zero, float* user_means,  float* user_var);
 
 void gpu_copy(const int M, const int N,  const float* x, 
                     const float* row_indicies, float* y);

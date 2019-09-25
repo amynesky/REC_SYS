@@ -5,6 +5,13 @@
 #include <math.h>
 #include <sys/time.h>
 #include <thrust/sort.h>
+#ifdef WINDOWS
+#include <direct.h>
+#define GetCurrentDir _getcwd
+#else
+#include <unistd.h>
+#define GetCurrentDir getcwd
+#endif
 
  
 #if defined(WIN32) || defined(_WIN32) || defined(WIN64) || defined(_WIN64)
@@ -29,7 +36,7 @@
 
 const char *sSDKname = "Core Users Recommender Systems";
 
-const bool Debug = 0;
+const bool Debug = 1;
 
 bool Content_Based = 1;
 bool Conserve_GPU_Mem = 0;
@@ -56,28 +63,22 @@ bool Conserve_GPU_Mem = 0;
 //     if (d_S    ) cudaFree(d_S);
 //     checkCudaErrors(cudaMalloc((void**)&U_CU,       batch_size_CU       * batch_size_CU                       * sizeof(float)));
 //     checkCudaErrors(cudaMalloc((void**)&V,          ratings_cols        * ratings_cols                        * sizeof(float)));
-//     checkCudaErrors(cudaMalloc((void**)&U_training, batch_size_training * std::max(min_, batch_size_training) * sizeof(float)));
-//     checkCudaErrors(cudaMalloc((void**)&R_training, batch_size_training * ratings_cols                        * sizeof(float)));
-//     checkCudaErrors(cudaMalloc((void**)&U_testing,  batch_size_testing  * std::max(min_, batch_size_testing)  * sizeof(float)));
+//     checkCudaErrors(cudaMalloc((void**)&U_testing, batch_size_testing * std::max(min_CU_dimension, batch_size_testing) * sizeof(float)));
+//     checkCudaErrors(cudaMalloc((void**)&R_testing, batch_size_testing * ratings_cols                        * sizeof(float)));
+//     checkCudaErrors(cudaMalloc((void**)&U_testing,  batch_size_testing  * std::max(min_CU_dimension, batch_size_testing)  * sizeof(float)));
 //     checkCudaErrors(cudaMalloc((void**)&R_testing,  batch_size_testing  * ratings_cols                        * sizeof(float)));
 //     update_Mem(Training_bytes);
 
 
 
-
-
-// Get current date/time, format is YYYY-MM-DD.HH:mm:ss
-const std::string currentDateTime() {
-    time_t     now = time(0);
-    struct tm  tstruct;
-    char       buf[80];
-    tstruct = *localtime(&now);
-    // Visit http://en.cppreference.com/w/cpp/chrono/c/strftime
-    // for more information about date/time format
-    strftime(buf, sizeof(buf), "%Y-%m-%d.%X", &tstruct);
-
-    return buf;
+std::string GetCurrentWorkingDir( void ) {
+  char buff[FILENAME_MAX];
+  GetCurrentDir( buff, FILENAME_MAX );
+  std::string current_working_dir(buff);
+  return current_working_dir;
 }
+
+
 
 
 
@@ -93,6 +94,30 @@ int main(int argc, char *argv[])
     gettimeofday(&program_start, NULL);
 
     long long int allocatedMem = (long long int)0; 
+    /*
+        int dimension = 4;
+
+        int below_diag_indicies[6] = {0,1,2,3,4,5};
+        int whole_indicies[16] = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15};
+
+        LOG("below_diag_indicies 0 maps to -> whole_indicies "   <<from_below_diag_to_whole(below_diag_indicies[0], dimension) );
+        LOG("below_diag_indicies 1 maps to -> whole_indicies "   <<from_below_diag_to_whole(below_diag_indicies[1], dimension) );
+        LOG("below_diag_indicies 2 maps to -> whole_indicies "   <<from_below_diag_to_whole(below_diag_indicies[2], dimension) );
+
+        LOG("whole_indicies 0 maps to -> below_diag_indicies "   <<from_whole_to_below_diag(whole_indicies[0], dimension) );
+        LOG("whole_indicies 1 maps to -> below_diag_indicies "   <<from_whole_to_below_diag(whole_indicies[1], dimension) );
+        LOG("whole_indicies 2 maps to -> below_diag_indicies "   <<from_whole_to_below_diag(whole_indicies[2], dimension) );
+        LOG("whole_indicies 3 maps to -> below_diag_indicies "   <<from_whole_to_below_diag(whole_indicies[3], dimension) );
+        LOG("whole_indicies 4 maps to -> below_diag_indicies "   <<from_whole_to_below_diag(whole_indicies[4], dimension) );
+        LOG("whole_indicies 5 maps to -> below_diag_indicies "   <<from_whole_to_below_diag(whole_indicies[5], dimension) );
+        LOG("whole_indicies 6 maps to -> below_diag_indicies "   <<from_whole_to_below_diag(whole_indicies[6], dimension) );
+        LOG("whole_indicies 7 maps to -> below_diag_indicies "   <<from_whole_to_below_diag(whole_indicies[7], dimension) );
+        LOG("whole_indicies 8 maps to -> below_diag_indicies "   <<from_whole_to_below_diag(whole_indicies[8], dimension) );
+
+
+        LOG("Press Enter to continue.") ;
+        std::cin.ignore();
+    */
 
 
     cublasStatus_t cublas_status     = CUBLAS_STATUS_SUCCESS;
@@ -102,6 +127,8 @@ int main(int argc, char *argv[])
 
     printf("%s Starting...\n\n", sSDKname);
     std::cout << "Current Date and Time :" << currentDateTime() << std::endl<< std::endl;
+    std::string current_path = GetCurrentWorkingDir();
+    std::cout << "Current path is " << current_path << '\n';
     LOG("Debug = "<<Debug);
 
     /* initialize random seed: */
@@ -190,7 +217,13 @@ int main(int argc, char *argv[])
 
     long long int temp_num_entries;
 
-    int case_ = 1;
+    int case_ = 2;
+
+    std::string preamble = "";
+    if( current_path == "/bridges/REC_SYS/CoreUsers"){
+        preamble = "/Users/amynesky";
+    }
+
 
     switch (case_)
     {
@@ -198,16 +231,16 @@ int main(int argc, char *argv[])
 
             Dataset_Name = "MovieLens 20 million";
 
-            csv_Ratings_Path = "/pylon5/ac560rp/nesky/REC_SYS/datasets/ml-20m/ratings.csv";
-            csv_keyWords_path = "/pylon5/ac560rp/nesky/REC_SYS/datasets/ml-20m/movies.csv";
+            csv_Ratings_Path = preamble + "/pylon5/ac560rp/nesky/REC_SYS/datasets/ml-20m/ratings.csv";
+            csv_keyWords_path = preamble + "/pylon5/ac560rp/nesky/REC_SYS/datasets/ml-20m/movies.csv";
             //temp_num_entries = csv_Ratings.num_rows() - 1; // the first row is a title row
             Content_Based = 0;
             temp_num_entries = 20000264 - 1;   // MovieLens 20 million
             break;
         }case 2:{ // code to be executed if n = 2;
             Dataset_Name = "Rent The Runaway";
-            csv_Ratings_Path = "/pylon5/ac560rp/nesky/REC_SYS/datasets/renttherunway_final_data.json";
-            csv_keyWords_path = "/pylon5/ac560rp/nesky/REC_SYS/datasets/renttherunway_final_data.json";
+            csv_Ratings_Path = preamble + "/pylon5/ac560rp/nesky/REC_SYS/datasets/renttherunway_final_data.json";
+            csv_keyWords_path = preamble + "/pylon5/ac560rp/nesky/REC_SYS/datasets/renttherunway_final_data.json";
             Content_Based = 0;
             temp_num_entries = 192544;           // use for Rent The Runaway dataset
             break;
@@ -222,9 +255,10 @@ int main(int argc, char *argv[])
     CSVReader csv_Ratings(csv_Ratings_Path);
     CSVReader csv_keyWords(csv_keyWords);
 
-    //const long long int num_entries = temp_num_entries;
-    const int num_entries = 10000; //for debuging code
+    const long long int num_entries = temp_num_entries;
+    //const int num_entries = 100000; //for debuging code
 
+    LOG("The dataset has "<<num_entries<<" specified entries.");
     
     int*   coo_format_ratingsMtx_userID_host  = NULL;
     int*   coo_format_ratingsMtx_itemID_host  = NULL;
@@ -410,9 +444,9 @@ int main(int argc, char *argv[])
 
     if(Debug && 0){
         save_device_array_to_file<float>(user_means,  (int)ratings_rows,  "user_means");
-        // LOG("user_means_training : ");
+        // LOG("user_means_testing : ");
         // print_gpu_array_entries(user_means_CU, ratings_rows_CU);
-        // LOG("user_means_training : ");
+        // LOG("user_means_testing : ");
         // print_gpu_array_entries(user_means_CU, ratings_rows_CU);
         // LOG("user_means_CU : ");
         // print_gpu_array_entries(user_means_CU, ratings_rows_CU);
@@ -486,8 +520,8 @@ int main(int argc, char *argv[])
         // save_device_array_to_file<float>(coo_format_ratingsMtx_rating_dev,  num_entries,      "coo_format_ratingsMtx_rating_dev_post_centering");
         
 
-        // LOG("csr_format_ratingsMtx_userID_dev_training : ");
-        // print_gpu_mtx_entries<int>(csr_format_ratingsMtx_userID_dev_training, ratings_rows_training + 1, 1 );
+        // LOG("csr_format_ratingsMtx_userID_dev_testing : ");
+        // print_gpu_mtx_entries<int>(csr_format_ratingsMtx_userID_dev_testing, ratings_rows_testing + 1, 1 );
         // LOG("csr_format_ratingsMtx_userID_dev_CU : ");
         // print_gpu_mtx_entries<int>(csr_format_ratingsMtx_userID_dev_CU, ratings_rows_CU + 1, 1 );
         // LOG("Press Enter to continue.") ;
@@ -520,6 +554,7 @@ int main(int argc, char *argv[])
 
 
     int top_N = std::min((int)ratings_rows / 10, 50);
+    LOG("Compute the top-"<<top_N<<" most similar neighbors of each user based on the cosine similarities.");
     const float probability_CU       = (float)1.0/(float)100.0;
     const float probability_testing  = ((float)1.0 - probability_CU);
     LOG("percentage of users for testing: " <<probability_testing);
@@ -530,37 +565,18 @@ int main(int argc, char *argv[])
     LOG("num testing users : "   <<ratings_rows_testing);
     LOG("num CU users : "        <<ratings_rows_CU);
 
+    if(ratings_rows_CU == 0 || ratings_rows_testing == 0) {
+        LOG("One group has no users in it.")
+        return 0;
+    }
+
     const long long int num_below_diag = (ratings_rows * (ratings_rows - (long long int)1)) / (long long int)2;
 
     float* cosine_similarity  = (float *)malloc(num_below_diag * sizeof(float));
-    int*   col_index          = (int *)malloc(num_below_diag * sizeof(int));
+    int*   col_index          = (int *)malloc(top_N * ratings_rows * sizeof(int));
     checkErrors(cosine_similarity);
     checkErrors(col_index);
 
-
-
-    int dimension = 3;
-
-    int below_diag_indicies[3] = {0,1,2};
-    int whole_indicies[9] = {0,1,2,3,4,5,6,7,8};
-
-    LOG("below_diag_indicies 0 maps to -> whole_indicies "   <<from_below_diag_to_whole(below_diag_indicies[0], dimension) );
-    LOG("below_diag_indicies 1 maps to -> whole_indicies "   <<from_below_diag_to_whole(below_diag_indicies[1], dimension) );
-    LOG("below_diag_indicies 2 maps to -> whole_indicies "   <<from_below_diag_to_whole(below_diag_indicies[2], dimension) );
-
-    LOG("whole_indicies 0 maps to -> below_diag_indicies "   <<from_whole_to_below_diag(whole_indicies[0], dimension) );
-    LOG("whole_indicies 1 maps to -> below_diag_indicies "   <<from_whole_to_below_diag(whole_indicies[1], dimension) );
-    LOG("whole_indicies 2 maps to -> below_diag_indicies "   <<from_whole_to_below_diag(whole_indicies[2], dimension) );
-    LOG("whole_indicies 3 maps to -> below_diag_indicies "   <<from_whole_to_below_diag(whole_indicies[3], dimension) );
-    LOG("whole_indicies 4 maps to -> below_diag_indicies "   <<from_whole_to_below_diag(whole_indicies[4], dimension) );
-    LOG("whole_indicies 5 maps to -> below_diag_indicies "   <<from_whole_to_below_diag(whole_indicies[5], dimension) );
-    LOG("whole_indicies 6 maps to -> below_diag_indicies "   <<from_whole_to_below_diag(whole_indicies[6], dimension) );
-    LOG("whole_indicies 7 maps to -> below_diag_indicies "   <<from_whole_to_below_diag(whole_indicies[7], dimension) );
-    LOG("whole_indicies 8 maps to -> below_diag_indicies "   <<from_whole_to_below_diag(whole_indicies[8], dimension) );
-
-
-    LOG("Press Enter to continue.") ;
-    std::cin.ignore();
 
 
     // cpu_get_cosine_similarity(ratings_rows, num_entries,
@@ -576,23 +592,19 @@ int main(int argc, char *argv[])
                               cosine_similarity);
 
     //cpu_set_as_index(col_index, ratings_rows, ratings_rows);
-    gpu_set_as_index_host(col_index, ratings_rows, ratings_rows);
+    //gpu_set_as_index_host(col_index, ratings_rows, ratings_rows);
 
 
-
-    if(Debug){
-        save_host_mtx_to_file<int>(col_index, ratings_rows, ratings_rows, "col_index");
-        save_host_mtx_to_file<float>(cosine_similarity, ratings_rows, ratings_rows, "cosine_similarity");
-    }
 
     /*
         we want to know column indicies of the max N elements in each row
         excluding the row index itself
     */
-    cpu_sort_index_by_max(ratings_rows, ratings_rows,  cosine_similarity, col_index);
+    //cpu_sort_index_by_max(ratings_rows, ratings_rows,  cosine_similarity, col_index);
+    cpu_sort_index_by_max<float>(ratings_rows,  cosine_similarity, col_index, top_N);
     free(cosine_similarity);
     if(Debug){
-        save_host_mtx_to_file<int>(col_index, ratings_rows, ratings_rows, "col_index_sorted");
+        save_host_mtx_to_file<int>(col_index, static_cast<int>(top_N), static_cast<int>(ratings_rows), "col_index_sorted");
     }
 
     /*
@@ -602,10 +614,10 @@ int main(int argc, char *argv[])
     checkErrors(count);
     cpu_set_all<int>(count, ratings_rows, 0);
 
-    cpu_count_appearances(top_N, ratings_rows, ratings_rows, count, col_index);
+    cpu_count_appearances(top_N, ratings_rows, count, col_index);
     free(col_index);
     if(Debug ){
-        save_host_array_to_file<int>(count, ratings_rows, "count");
+        save_host_array_to_file<int>(count, (int)ratings_rows, "count");
     }
 
     /*
@@ -613,7 +625,7 @@ int main(int argc, char *argv[])
     */
     int* top_users= (int *)malloc(ratings_rows * sizeof(int));
     checkErrors(top_users);
-    cpu_set_as_index<int>(  top_users, ratings_rows, 1);
+    cpu_set_as_index<int>(top_users, ratings_rows, 1);
 
 
     cpu_sort_index_by_max(1, ratings_rows,  count, top_users);
@@ -630,22 +642,25 @@ int main(int argc, char *argv[])
     free(top_users);
     if(Debug ){
         save_host_array_to_file<int>(count, ratings_rows, "top_user_bools");
-        LOG("Press Enter to continue.") ;
-        std::cin.ignore();
+        //LOG("Press Enter to continue.") ;
+        //std::cin.ignore();
     }
 
     free(coo_format_ratingsMtx_userID_host);
     free(coo_format_ratingsMtx_itemID_host);
     free(coo_format_ratingsMtx_rating_host);
 
+
+
+
     
     const int num_groups = 2;
     int *group_indicies;
     checkCudaErrors(cudaMalloc((void**)&group_indicies, ratings_rows * sizeof(int)));
     update_Mem( ratings_rows * sizeof(int) );
-    free(count);
-
+    
     checkCudaErrors(cudaMemcpy(group_indicies,  count,  ratings_rows * sizeof(int), cudaMemcpyHostToDevice));
+    free(count);
 
     int* group_sizes = NULL;
     group_sizes = (int *)malloc(num_groups * sizeof(int)); 
@@ -670,10 +685,10 @@ int main(int argc, char *argv[])
         // LOG("coo_format_ratingsMtx_userID_dev : ");
         // print_gpu_array_entries<int>(coo_format_ratingsMtx_userID_dev, 100, 1 , num_entries);
         LOG("group_indicies :");
-        print_gpu_mtx_entries<int>(group_indicies, ratings_rows, 1 );
+        print_gpu_mtx_entries<int>(group_indicies, (int)ratings_rows, 1 );
         //save_device_array_to_file<int>(group_indicies, ratings_rows, "testing_bools");
-        LOG("Press Enter to continue.") ;
-        std::cin.ignore();
+        //LOG("Press Enter to continue.") ;
+        //std::cin.ignore();
     }
 
     cudaFree(coo_format_ratingsMtx_userID_dev);
@@ -698,10 +713,10 @@ int main(int argc, char *argv[])
     update_Mem(  (ratings_rows_testing + 1)  * sizeof(int) + num_entries_testing  * sizeof(int) + num_entries_testing  * sizeof(float)
                + (ratings_rows_CU + 1)       * sizeof(int) + num_entries_CU       * sizeof(int) + num_entries_CU       * sizeof(float)  );
     
-    int*   csr_format_ratingsMtx_userID_dev_by_group_host  [num_groups] = { csr_format_ratingsMtx_userID_dev_testing,  csr_format_ratingsMtx_userID_dev_CU  };
-    int*   coo_format_ratingsMtx_itemID_dev_by_group_host  [num_groups] = { coo_format_ratingsMtx_itemID_dev_testing,  coo_format_ratingsMtx_itemID_dev_CU  };
-    float* coo_format_ratingsMtx_rating_dev_by_group_host  [num_groups] = { coo_format_ratingsMtx_rating_dev_testing,  coo_format_ratingsMtx_rating_dev_CU  };
-    int    ratings_rows_by_group_host                      [num_groups] = { ratings_rows_testing                    ,                      ratings_rows_CU  };
+    int*   csr_format_ratingsMtx_userID_dev_by_group_host  [num_groups] = { csr_format_ratingsMtx_userID_dev_CU,  csr_format_ratingsMtx_userID_dev_testing  };
+    int*   coo_format_ratingsMtx_itemID_dev_by_group_host  [num_groups] = { coo_format_ratingsMtx_itemID_dev_CU,  coo_format_ratingsMtx_itemID_dev_testing  };
+    float* coo_format_ratingsMtx_rating_dev_by_group_host  [num_groups] = { coo_format_ratingsMtx_rating_dev_CU,  coo_format_ratingsMtx_rating_dev_testing  };
+    int    ratings_rows_by_group_host                      [num_groups] = { ratings_rows_CU                    ,  ratings_rows_testing                      };
     int**   csr_format_ratingsMtx_userID_dev_by_group;
     int**   coo_format_ratingsMtx_itemID_dev_by_group;
     float** coo_format_ratingsMtx_rating_dev_by_group;
@@ -726,15 +741,15 @@ int main(int argc, char *argv[])
                    coo_format_ratingsMtx_itemID_dev_by_group,
                    coo_format_ratingsMtx_rating_dev_by_group,
                    ratings_rows_by_group); 
-    if(Debug & 0){
+    if(Debug && 0){
         save_device_array_to_file<int>  (csr_format_ratingsMtx_userID_dev_CU,        (int)ratings_rows_CU + 1,       "csr_format_ratingsMtx_userID_dev_CU");
         save_device_array_to_file<int>  (coo_format_ratingsMtx_itemID_dev_CU,        (int)num_entries_CU,            "coo_format_ratingsMtx_itemID_dev_CU");
         save_device_array_to_file<float>(coo_format_ratingsMtx_rating_dev_CU,        (int)num_entries_CU,            "coo_format_ratingsMtx_rating_dev_CU");
         save_device_array_to_file<int>  (csr_format_ratingsMtx_userID_dev_testing,   (int)ratings_rows_testing + 1,  "csr_format_ratingsMtx_userID_dev_testing");
         save_device_array_to_file<int>  (coo_format_ratingsMtx_itemID_dev_testing,   (int)num_entries_testing,       "coo_format_ratingsMtx_itemID_dev_testing");
         save_device_array_to_file<float>(coo_format_ratingsMtx_rating_dev_testing,   (int)num_entries_testing,       "coo_format_ratingsMtx_rating_dev_testing");
-        // LOG("csr_format_ratingsMtx_userID_dev_training : ");
-        // print_gpu_mtx_entries<int>(csr_format_ratingsMtx_userID_dev_training, ratings_rows_training + 1, 1 );
+        // LOG("csr_format_ratingsMtx_userID_dev_testing : ");
+        // print_gpu_mtx_entries<int>(csr_format_ratingsMtx_userID_dev_testing, ratings_rows_testing + 1, 1 );
         // LOG("csr_format_ratingsMtx_userID_dev_CU : ");
         // print_gpu_mtx_entries<int>(csr_format_ratingsMtx_userID_dev_CU, ratings_rows_CU + 1, 1 );
         // LOG("Press Enter to continue.") ;
@@ -873,14 +888,13 @@ int main(int argc, char *argv[])
         save_device_array_to_file<int>(  csr_format_ratingsMtx_userID_dev_testing,  (int)ratings_rows_testing + 1, "csr_format_ratingsMtx_userID_dev_testing" );
         save_device_array_to_file<int>(  coo_format_ratingsMtx_itemID_dev_testing,  (int)num_entries_testing,      "coo_format_ratingsMtx_itemID_dev_testing");
         save_device_array_to_file<float>(coo_format_ratingsMtx_rating_dev_testing,  (int)num_entries_testing,      "coo_format_ratingsMtx_rating_dev_testing" );
-        // LOG("csr_format_ratingsMtx_userID_dev_training : ");
-        // print_gpu_mtx_entries<int>(csr_format_ratingsMtx_userID_dev_training, ratings_rows_training + 1, 1 );
+        // LOG("csr_format_ratingsMtx_userID_dev_testing : ");
+        // print_gpu_mtx_entries<int>(csr_format_ratingsMtx_userID_dev_testing, ratings_rows_testing + 1, 1 );
         // LOG("csr_format_ratingsMtx_userID_dev_CU : ");
         // print_gpu_mtx_entries<int>(csr_format_ratingsMtx_userID_dev_CU, ratings_rows_CU + 1, 1 );
         // LOG("Press Enter to continue.") ;
         // std::cin.ignore();
     }
-
 
 
 
@@ -892,24 +906,24 @@ int main(int argc, char *argv[])
     // Conserve Memory
     //============================================================================================
 
-    // int *   csr_format_ratingsMtx_userID_host_training  = NULL;
-    // int *   coo_format_ratingsMtx_itemID_host_training = NULL;
-    // float * coo_format_ratingsMtx_rating_host_training  = NULL;
+    // int *   csr_format_ratingsMtx_userID_host_testing  = NULL;
+    // int *   coo_format_ratingsMtx_itemID_host_testing = NULL;
+    // float * coo_format_ratingsMtx_rating_host_testing  = NULL;
 
-    // csr_format_ratingsMtx_userID_host_training  = (int *)  malloc(ratings_rows_training *  sizeof(int)); 
-    // coo_format_ratingsMtx_itemID_host_training = (int *)  malloc(num_entries_training  *  sizeof(int)); 
-    // coo_format_ratingsMtx_rating_host_training  = (float *)malloc(num_entries_training  *  sizeof(float));
-    // checkErrors(csr_format_ratingsMtx_userID_host_training);
-    // checkErrors(coo_format_ratingsMtx_itemID_host_training);
-    // checkErrors(coo_format_ratingsMtx_rating_host_training); 
+    // csr_format_ratingsMtx_userID_host_testing  = (int *)  malloc(ratings_rows_testing *  sizeof(int)); 
+    // coo_format_ratingsMtx_itemID_host_testing = (int *)  malloc(num_entries_testing  *  sizeof(int)); 
+    // coo_format_ratingsMtx_rating_host_testing  = (float *)malloc(num_entries_testing  *  sizeof(float));
+    // checkErrors(csr_format_ratingsMtx_userID_host_testing);
+    // checkErrors(coo_format_ratingsMtx_itemID_host_testing);
+    // checkErrors(coo_format_ratingsMtx_rating_host_testing); 
 
-    // checkCudaErrors(cudaMemcpy(csr_format_ratingsMtx_userID_host_training,  csr_format_ratingsMtx_userID_dev_training,  ratings_rows_training *  sizeof(int),   cudaMemcpyDeviceToHost));
-    // checkCudaErrors(cudaMemcpy(coo_format_ratingsMtx_itemID_host_training, coo_format_ratingsMtx_itemID_dev_training, num_entries_training  *  sizeof(int),   cudaMemcpyDeviceToHost));
-    // checkCudaErrors(cudaMemcpy(coo_format_ratingsMtx_rating_host_training,  coo_format_ratingsMtx_rating_dev_training,  num_entries_training  *  sizeof(float), cudaMemcpyDeviceToHost));
+    // checkCudaErrors(cudaMemcpy(csr_format_ratingsMtx_userID_host_testing,  csr_format_ratingsMtx_userID_dev_testing,  ratings_rows_testing *  sizeof(int),   cudaMemcpyDeviceToHost));
+    // checkCudaErrors(cudaMemcpy(coo_format_ratingsMtx_itemID_host_testing, coo_format_ratingsMtx_itemID_dev_testing, num_entries_testing  *  sizeof(int),   cudaMemcpyDeviceToHost));
+    // checkCudaErrors(cudaMemcpy(coo_format_ratingsMtx_rating_host_testing,  coo_format_ratingsMtx_rating_dev_testing,  num_entries_testing  *  sizeof(float), cudaMemcpyDeviceToHost));
 
-    // cudaFree(csr_format_ratingsMtx_userID_dev_training);
-    // cudaFree(coo_format_ratingsMtx_itemID_dev_training);
-    // cudaFree(coo_format_ratingsMtx_rating_dev_training);
+    // cudaFree(csr_format_ratingsMtx_userID_dev_testing);
+    // cudaFree(coo_format_ratingsMtx_itemID_dev_testing);
+    // cudaFree(coo_format_ratingsMtx_rating_dev_testing);
     
     // int *   csr_format_ratingsMtx_userID_host_testing  = NULL;
     // int *   coo_format_ratingsMtx_itemID_host_testing = NULL;
@@ -990,10 +1004,10 @@ int main(int argc, char *argv[])
         // cudaMemcpy(full_ratingsMtx_dev_CU, A, sizeof(float)*batch_size_CU*ratings_cols, cudaMemcpyHostToDevice);
     }
 
-    long long int min_ = std::min(ratings_rows_CU, ratings_cols);
+    long long int min_CU_dimension = std::min(ratings_rows_CU, ratings_cols);
     bool temp = Conserve_GPU_Mem;
-    const long long int Training_bytes = (batch_size_testing  * std::max(min_, batch_size_testing) + 
-                                          ratings_cols        * min_ +
+    const long long int Training_bytes = (batch_size_testing  * std::max(min_CU_dimension, batch_size_testing) + 
+                                          ratings_cols        * min_CU_dimension +
                                           ratings_cols        * batch_size_testing)* (long long int)sizeof(float) ;
     if(allocatedMem + Training_bytes > (long long int)((double)devMem * (double)0.75)) 
     {
@@ -1011,21 +1025,23 @@ int main(int argc, char *argv[])
         update_Mem((float)(-1.0) * CU_mtx_size_bytes );
     };
     if(Conserve_GPU_Mem){
+        // full_ratingsMtx_dev_CU hasn't been allocated yet
         checkCudaErrors(cudaMalloc((void**)&full_ratingsMtx_dev_CU, ratings_rows_CU * ratings_cols * sizeof(float)));
+        checkCudaErrors(cudaMemcpy(full_ratingsMtx_dev_CU, full_ratingsMtx_host_CU, ratings_rows_CU * ratings_cols * sizeof(float), cudaMemcpyHostToDevice));
         update_Mem(ratings_rows_CU * ratings_cols* sizeof(float) );
     }
     
     
     // LOG(ratings_cols * ratings_cols * sizeof(float)) ;
     checkCudaErrors(cudaMalloc((void**)&U_CU,       ratings_rows_CU     * ratings_rows_CU            * sizeof(float)));
-    checkCudaErrors(cudaMalloc((void**)&V,          ratings_cols        * min_                       * sizeof(float)));
+    checkCudaErrors(cudaMalloc((void**)&V,          ratings_cols        * min_CU_dimension           * sizeof(float)));
     // cudaDeviceSynchronize();
     // LOG("Press Enter to continue.") ;
     // std::cin.ignore();  
 
 
-    checkCudaErrors(cudaMalloc((void**)&U_testing,  batch_size_testing  * std::max(min_, batch_size_testing)  * sizeof(float)));
-    checkCudaErrors(cudaMalloc((void**)&R_testing,  batch_size_testing  * ratings_cols                        * sizeof(float)));
+    checkCudaErrors(cudaMalloc((void**)&U_testing,  batch_size_testing  * std::max(min_CU_dimension, batch_size_testing)  * sizeof(float)));
+    checkCudaErrors(cudaMalloc((void**)&R_testing,  batch_size_testing  * ratings_cols                                    * sizeof(float)));
     update_Mem(Training_bytes);
 
 
@@ -1074,8 +1090,8 @@ int main(int argc, char *argv[])
         };
 
         //============================================================================================
-        // Compute  R_training * V = U_training
-        // Compute  Error = R_training -  U_training * V^T  <-- sparse
+        // Compute  R_testing * V = U_testing
+        // Compute  Error = R_testing -  U_testing * V^T  <-- sparse
         //============================================================================================ 
 
         long long int first_row_in_batch_testing  = (batch_size_testing * (long long int)batch) /* % ratings_rows_testing*/;
@@ -1107,7 +1123,7 @@ int main(int argc, char *argv[])
                 LOG("first_coo_ind in this TESTING batch : "<<first_coo_ind_testing<< " ( / "<<num_entries_testing<<" )");
                 LOG("nnz in this TESTING batch : "<<nnz_testing);
                 LOG("( nest first_coo_ind in TESTING batch : "<<first_coo_ind_testing+ nnz_testing<<" )");
-                // save_device_mtx_to_file<float>(R, batch_size_training, ratings_cols, "error", false);
+                // save_device_mtx_to_file<float>(R, batch_size_testing, ratings_cols, "error", false);
                 // LOG("Press Enter to continue.") ;
                 // std::cin.ignore();
             }
@@ -1171,7 +1187,7 @@ int main(int argc, char *argv[])
     // Destroy
     //============================================================================================
     LOG("Cleaning Up...");
-    //free(user_means_training_host);
+    //free(user_means_testing_host);
     free(testing_error);
     if (full_ratingsMtx_host_CU  ) { free(full_ratingsMtx_host_CU); }
 
@@ -1192,7 +1208,7 @@ int main(int argc, char *argv[])
     cudaFree(coo_format_ratingsMtx_rating_dev_testing);
     
 
-    update_Mem((ratings_rows_CU * ratings_cols + /*ratings_rows_training * ratings_cols +*/ num_entries_testing )* sizeof(float));
+    update_Mem((ratings_rows_CU * ratings_cols + /*ratings_rows_testing * ratings_cols +*/ num_entries_testing )* sizeof(float));
     update_Mem(( (ratings_rows_testing + 1)  * static_cast<long long int>(sizeof(int)) + num_entries_testing  * static_cast<long long int>(sizeof(int)) + num_entries_testing  * static_cast<long long int>(sizeof(float))
                + (ratings_rows_CU + 1)       * static_cast<long long int>(sizeof(int)) + num_entries_CU       * static_cast<long long int>(sizeof(int)) + num_entries_CU       * static_cast<long long int>(sizeof(float))) * (-1) );
     

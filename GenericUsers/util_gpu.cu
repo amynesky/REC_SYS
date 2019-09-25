@@ -1166,7 +1166,7 @@ __global__ void gpu_get_rand_groups_kernel(curandState *state, const int n,  int
     //a[idx] = curand_uniform(&state[idx]);
     CUDA_KERNEL_LOOP(i, n){
         float rand_ = curand_uniform(&state[i]);
-        float sum = 0;
+        float sum = (float)0.0;
         for(int j = 0; j < num_groups; j++){
             sum += probability_of_success[j];
             if(rand_ < sum || j == num_groups-1){
@@ -2995,7 +2995,70 @@ void center_ratings(const float* user_means_testing, const float* user_var_testi
 
 }
 
+__global__ void center_rows_kernel(const long long int rows, const long long int cols, 
+                 float* X, const float val_when_var_is_zero, float* user_means,  float* user_var, bool* isBad) 
+{
 
+  CUDA_KERNEL_LOOP(row, rows){
+    float mean = (float)0.0;
+    float std_dev = (float)0.0;
+    for(int i = 0; i < cols; i++){
+      mean += X[row + rows * i];
+      std_dev += pow(X[row + rows * i], (float)2.0);
+    }
+    mean /= (float)cols;
+    std_dev /= (float)cols;
+    std_dev = std_dev - pow(mean, (float)2.0);
+    user_var[row] = std_dev;
+    std_dev = sqrt(std_dev);
+    user_means[row] = mean;
+
+    if(std_dev == (float)0.0 ){
+      for(int i = 0; i < cols; i++){
+        X[row + rows * i] = val_when_var_is_zero;
+      } 
+    }else{
+      for(int i = 0; i < cols; i++){
+        X[row + rows * i] = (X[row + rows * i] - mean) / std_dev;
+        if (::isinf(X[row + rows * i]) || ::isnan(X[row + rows * i])){
+          isBad[0] = true;
+        };
+      } 
+    }       
+  }
+}
+
+void center_rows(const long long int rows, const long long int cols, 
+                 float* X, const float val_when_var_is_zero, float* user_means,  float* user_var)
+{
+  bool Debug = false;
+
+  bool isBad_host = false;
+  bool* isBad;
+  CUDA_CHECK(cudaMalloc((void**)&isBad, sizeof(bool)));
+  CUDA_CHECK(cudaMemcpy(isBad, &isBad_host, sizeof(bool), cudaMemcpyHostToDevice));
+
+  // float min_ = gpu_min<float>(num_entries_testing, coo_format_ratingsMtx_rating_dev_testing);
+  // float max_ = gpu_abs_max<float>(num_entries_testing, coo_format_ratingsMtx_rating_dev_testing);
+
+  // max_ - 
+
+  const int num_gpu_blocks= GET_BLOCKS(rows);
+
+  if (num_gpu_blocks > CUDA_NUM_BLOCKS){
+      ABORT_IF_NEQ(0, 1, "Max Blocks Exceeded");
+  };
+
+  center_rows_kernel<<<num_gpu_blocks, CUDA_NUM_THREADS>>>(rows, cols,  X, val_when_var_is_zero, user_means, user_var, isBad);
+
+
+  CUDA_CHECK(cudaMemcpy(&isBad_host, isBad, sizeof(bool), cudaMemcpyDeviceToHost));
+  cudaFree(isBad);
+  if(isBad_host){
+    ABORT_IF_NEQ(0, 1, "isBad");
+  };
+
+}
 
 
 

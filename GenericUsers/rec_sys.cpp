@@ -873,8 +873,8 @@ int main(int argc, char *argv[])
     cudaFree(user_var_testing);                          update_Mem(ratings_rows_testing * sizeof(float) * (-1));
 
     //the stored means are useless now
-    cudaFree(user_means_GU);                             update_Mem(ratings_rows_GU * sizeof(float) * (-1));
-    cudaFree(user_var_GU);                               update_Mem(ratings_rows_GU * sizeof(float) * (-1));
+    // cudaFree(user_means_GU);                             update_Mem(ratings_rows_GU * sizeof(float) * (-1));
+    // cudaFree(user_var_GU);                               update_Mem(ratings_rows_GU * sizeof(float) * (-1));
     cudaFree(user_means_training);                       update_Mem(ratings_rows_training * sizeof(float) * (-1));
     cudaFree(user_var_training);                         update_Mem(ratings_rows_training * sizeof(float) * (-1));
 
@@ -936,20 +936,22 @@ int main(int argc, char *argv[])
     float training_rate;      
     float regularization_constant;         
 
-    const float testing_fraction        = 0.25; //percent of known entries used for testing
-    bool        compress                = false;
-    bool        regularize_U            = false;
-    bool        regularize_R            = false;
+    const float testing_fraction            = 0.25; //percent of known entries used for testing
+    bool        compress                    = false;
+    bool        regularize_U                = false;
+    bool        regularize_R                = false;
+    bool        regularize_R_distribution   = false;
 
     switch (case_)
     {
         case 1:{ // code to be executed if n = 1;
 
             //Dataset_Name = "MovieLens 20 million";
-            training_rate           = 0.01;      //use for movielens
-            regularization_constant = 5;         //use for movielens
-            regularize_U            = true;
-            regularize_R            = true;
+            training_rate               = 0.01;      //use for movielens
+            regularization_constant     = 5;         //use for movielens
+            regularize_U                = true;
+            regularize_R                = true;
+            regularize_R_distribution   = true;
             break;
         }case 2:{ // code to be executed if n = 2;
             //Dataset_Name = "Rent The Runaway";
@@ -1465,6 +1467,11 @@ int main(int argc, char *argv[])
                             (regularize_R == true) ? beta : (float)0.0,
                             full_ratingsMtx_dev_GU_current_batch);
 
+            if (regularize_R_distribution == true ){
+                center_rows(batch_size_GU, ratings_cols, full_ratingsMtx_dev_GU_current_batch, 
+                    val_when_var_is_zero, user_means_GU,  user_var_GU);
+            }
+
             if(1){
                 float* copy;
                 checkCudaErrors(cudaMalloc((void**)&copy, batch_size_GU * ratings_cols * sizeof(float)));
@@ -1548,7 +1555,8 @@ int main(int argc, char *argv[])
     update_Mem((batch_size_GU * std::min(batch_size_GU, ratings_cols) +batch_size_training * batch_size_training + ratings_cols * std::min(batch_size_GU, ratings_cols))* static_cast<long long int>(sizeof(float))* (-1));
     
     
-    
+    cudaFree(user_means_GU);                             update_Mem(ratings_rows_GU * sizeof(float) * (-1));
+    cudaFree(user_var_GU);                               update_Mem(ratings_rows_GU * sizeof(float) * (-1));
 
     cudaFree(csr_format_ratingsMtx_userID_dev_training);
     cudaFree(coo_format_ratingsMtx_itemID_dev_training);
