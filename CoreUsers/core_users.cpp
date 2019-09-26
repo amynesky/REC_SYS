@@ -201,7 +201,7 @@ int main(int argc, char *argv[])
 
     long long int temp_num_entries;
 
-    int case_ = 2;
+    int case_ = 1;
 
     std::string preamble = "";
     // if( current_path == "/bridges/REC_SYS/CoreUsers"){
@@ -240,6 +240,7 @@ int main(int argc, char *argv[])
 
 
     CSVReader csv_Ratings(csv_Ratings_Path);
+    if(Debug) LOG("Here!");
     CSVReader csv_keyWords(csv_keyWords);
 
     const long long int num_entries = temp_num_entries;

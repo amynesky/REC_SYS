@@ -29,7 +29,7 @@
 
 /* Using updated (v2) interfaces to cublas and cusparse */
 #include <cuda_runtime.h>
-#include "helper_cuda.h"
+#include "/home/nesky/REC_SYS/helper_files/helper_cuda.h"
 #include <cublas_v2.h>
 #include <cusparse.h>
 #include "cusolverSp.h"
@@ -951,7 +951,7 @@ int main(int argc, char *argv[])
     // U is batch_size_GU by num_latent_factors
     // V is ratings_cols by num_latent_factors
     //============================================================================================
-
+    LOG(std::endl);
     bool        print_training_error    = true;
 
 

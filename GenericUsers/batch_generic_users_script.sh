@@ -19,7 +19,7 @@ module load cuda/8.0 protobuf/3.2.0
 module load cmake
 
 # run GPU program
-./train_rec_sys.sh
+./train_generic_users.sh
 
 #The option `--gres-gpu` indicates the number of GPUs you want. 
 #The option `--ntasks-per-node` indicates the number of cores you want. 

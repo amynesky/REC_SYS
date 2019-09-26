@@ -3264,7 +3264,71 @@ void gpu_shuffle_mtx_rows_or_cols(cublasHandle_t dn_handle, const long long int 
     cudaFree(indicies);
   }
 
-}   
+} 
+
+__global__ void gpu_normalize_mtx_rows_or_cols_kernel(const long long int M, const long long int N,  
+                                  bool row_major_ordering, float* x, bool normalize_rows)
+{
+  if(normalize_rows){
+    CUDA_KERNEL_LOOP(i, M ) {
+      float norm = (float)0.0;
+      if(row_major_ordering){
+        for(int j = 0; j < N; j++){
+          norm += pow(x[i * N + j], (float, 2.0))
+        }
+        norm = sqrt(norm);
+        for(int j = 0; j < N; j++){
+          x[i * N + j] = x[i * N + j] / norm;
+        }
+      }else{
+        for(int j = 0; j < N; j++){
+          norm += pow(x[i + M * j], (float, 2.0))
+        }
+        norm = sqrt(norm);
+        for(int j = 0; j < N; j++){
+          x[i + M * j] = x[i + M * j] / norm;
+        }
+      };
+    }
+  }else{
+    CUDA_KERNEL_LOOP(j, N ) {
+      float norm = (float)0.0;
+      if(row_major_ordering){
+        for(int i = 0; i < M; i++){
+          norm += pow(x[i * N + j], (float, 2.0))
+        }
+        norm = sqrt(norm);
+        for(int i = 0; i < M; i++){
+          x[i * N + j] = x[i * N + j] / norm;
+        }
+      }else{
+        for(int i = 0; i < M; i++){
+          norm += pow(x[i + M * j], (float, 2.0))
+        }
+        norm = sqrt(norm);
+        for(int i = 0; i < M; i++){
+          x[i + M * j] = x[i + M * j] / norm;
+        }
+      };
+    }
+  }
+}
+
+void gpu_normalize_mtx_rows_or_cols(const long long int M, const long long int N,  
+                                  bool row_major_ordering, float* x, bool normalize_rows)
+{
+  long long int num_gpu_blocks;
+  if(normalize_rows){
+    num_gpu_blocks= GET_BLOCKS(M);
+  }else{
+    num_gpu_blocks= GET_BLOCKS(N);
+  };
+  
+  if (num_gpu_blocks > CUDA_NUM_BLOCKS){
+    ABORT_IF_NEQ(0, 1, "Max Blocks Exceeded");
+  }; 
+  gpu_normalize_mtx_rows_or_cols_kernel<<<num_gpu_blocks, CUDA_NUM_THREADS>>>(M, N, row_major_ordering, x, normalize_rows);
+} 
 
 template<typename Dtype>
 __global__ void gpu_div_US_in_SVD_kernel(const long long int m, Dtype* U, const Dtype* S, 

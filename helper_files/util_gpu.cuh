@@ -576,6 +576,10 @@ void gpu_permute(Dtype* A, const int* P, int rows, int cols, bool permute_rows);
 
 void gpu_shuffle_mtx_rows_or_cols(cublasHandle_t dn_handle, const long long int M, const long long int N,  
                                   bool row_major_ordering, float* x, bool shuffle_rows);
+
+void gpu_normalize_mtx_rows_or_cols(cublasHandle_t dn_handle, const long long int M, const long long int N,  
+                                  bool row_major_ordering, float* x, bool normalize_rows);
+
 template <typename Dtype>
 void gpu_div_US_in_SVD(const long long int m, const long long int num_latent_factors,
                         Dtype* U, const Dtype* S, const bool right_divide_by_S);

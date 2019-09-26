@@ -3,7 +3,7 @@
 OBSERVATIONS=/pylon5/ac560rp/nesky/REC_SYS
 
 START=$(date +%s)
-./rec_sys 2>&1 | tee $OBSERVATIONS/rec_sys_log.txt
+./generic_users 2>&1 | tee $OBSERVATIONS/generic_users_log.txt
 
 END=$(date +%s)
 DIFF=$(( $END - $START ))
