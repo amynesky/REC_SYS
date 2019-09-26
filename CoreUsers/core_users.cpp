@@ -13,7 +13,7 @@
 
 /* Using updated (v2) interfaces to cublas and cusparse */
 #include <cuda_runtime.h>
-#include "helper_cuda.h"
+#include "/home/nesky/REC_SYS/helper_files/helper_cuda.h"
 #include <cublas_v2.h>
 #include <cusparse.h>
 #include "cusolverSp.h"
@@ -22,9 +22,9 @@
 #include "cusolverDn.h"
 
 // Utilities and system includes
-#include "CSVReader.h"
-#include "util.h"
-#include "util_gpu.cuh"
+#include "/home/nesky/REC_SYS/helper_files/CSVReader.h"
+#include "/home/nesky/REC_SYS/helper_files/util.h"
+#include "/home/nesky/REC_SYS/helper_files/util_gpu.cuh"
 #include "core_users.h"
 
 const char *sSDKname = "Core Users Recommender Systems";

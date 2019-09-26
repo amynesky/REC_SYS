@@ -35,6 +35,7 @@
 
 # Location of the CUDA Toolkit
 CUDA_PATH?=/opt/packages/cuda/8.0
+HOME_PATH?=/home/nesky/REC_SYS
 
 ##############################
 # start deprecated interface #
@@ -235,30 +236,30 @@ LIBRARIES += -lcublas -lcusparse -lcublas_device -lcudadevrt -lcusolver -lcurand
 # Target rules
 all: build
 
-build: rec_sys
+build: generic_users
 
-util_gpu.o: util_gpu.cu
+util_gpu.o: $(HOME_PATH)/helper_files/util_gpu.cu
 	$(EXEC) $(NVCC) $(INCLUDES) $(ALL_CCFLAGS) $(GENCODE_FLAGS) -o $@ -c $<
 
-util.o: util.cpp
+util.o: $(HOME_PATH)/helper_files/util.cpp
 	$(NVCC) $(INCLUDES) $(ALL_CCFLAGS) $(GENCODE_FLAGS) -o $@ -c $<
 
-CSVReader.o: CSVReader.cpp
+CSVReader.o: $(HOME_PATH)/helper_files/CSVReader.cpp
 	$(NVCC) $(INCLUDES) $(ALL_CCFLAGS) $(GENCODE_FLAGS) -o $@ -c $<
 
-rec_sys.o:rec_sys.cpp
+generic_users.o:generic_users.cpp
 	$(NVCC) $(INCLUDES) $(ALL_CCFLAGS) $(GENCODE_FLAGS) -o $@ -c $<
 
-rec_sys: rec_sys.o CSVReader.o util.o util_gpu.o
+generic_users: generic_users.o CSVReader.o util.o util_gpu.o
 	$(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -o $@ $+ $(LIBRARIES)
 	mkdir -p ../../bin/$(TARGET_ARCH)/$(TARGET_OS)/$(BUILD_TYPE)
 	cp $@ ../../bin/$(TARGET_ARCH)/$(TARGET_OS)/$(BUILD_TYPE)
 
 run: build
-	./rec_sys
+	./generic_users
 
 clean:
-	rm -f rec_sys rec_sys.o
-	rm -rf ../../bin/$(TARGET_ARCH)/$(TARGET_OS)/$(BUILD_TYPE)/rec_sys
+	rm -f generic_users generic_users.o
+	rm -rf ../../bin/$(TARGET_ARCH)/$(TARGET_OS)/$(BUILD_TYPE)/generic_users
 
 clobber: clean

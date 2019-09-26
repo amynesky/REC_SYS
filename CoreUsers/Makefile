@@ -35,6 +35,7 @@
 
 # Location of the CUDA Toolkit
 CUDA_PATH?=/opt/packages/cuda/8.0
+HOME_PATH?=/home/nesky/REC_SYS
 
 ##############################
 # start deprecated interface #
@@ -237,13 +238,13 @@ all: build
 
 build: core_users
 
-util_gpu.o: util_gpu.cu
+util_gpu.o: $(HOME_PATH)/helper_files/util_gpu.cu
 	$(EXEC) $(NVCC) $(INCLUDES) $(ALL_CCFLAGS) $(GENCODE_FLAGS) -o $@ -c $<
 
-util.o: util.cpp
+util.o: $(HOME_PATH)/helper_files/util.cpp
 	$(NVCC) $(INCLUDES) $(ALL_CCFLAGS) $(GENCODE_FLAGS) -o $@ -c $<
 
-CSVReader.o: CSVReader.cpp
+CSVReader.o: $(HOME_PATH)/helper_files/CSVReader.cpp
 	$(NVCC) $(INCLUDES) $(ALL_CCFLAGS) $(GENCODE_FLAGS) -o $@ -c $<
 
 core_users.o:core_users.cpp
