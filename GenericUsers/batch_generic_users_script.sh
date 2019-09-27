@@ -4,6 +4,7 @@
 #SBATCH --ntasks-per-node 7
 #SBATCH -t 48:00:00
 #SBATCH --gres=gpu:p100:2
+#SBATCH --mail-type=ALL
 #echo commands to stdout
 
 #echo commands to stdout

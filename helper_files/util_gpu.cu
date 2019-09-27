@@ -3066,7 +3066,7 @@ void get_cosine_similarity_host_kernel_debug(const long long int start,
         LOG("num_loops : " <<num_loops) ;
         save_host_array_to_file<float>(cosine_similarity_host + spot, (int)num_entries, "cosine_similarity_host");
       }
-      checkCudaErrors(cudaMemcpy(cosine_similarity_dev, cosine_similarity_host + spot,  num_entries *  sizeof(float), cudaMemcpyHostToDevice));
+      //checkCudaErrors(cudaMemcpy(cosine_similarity_dev, cosine_similarity_host + spot,  num_entries *  sizeof(float), cudaMemcpyHostToDevice));
       //CUDA_CHECK(cudaDeviceSynchronize());
       if(Debug) LOG("Here") ;
       //if(num_loops < 510){
@@ -3109,7 +3109,7 @@ void get_cosine_similarity_host_kernel_debug(const long long int start,
     }
     // spot is the number of entries done so far
     // total - (done) = left to go 
-    checkCudaErrors(cudaMemcpy(cosine_similarity_dev, cosine_similarity_host + spot,  (num_below_diag - spot) *  sizeof(float), cudaMemcpyHostToDevice));
+    // checkCudaErrors(cudaMemcpy(cosine_similarity_dev, cosine_similarity_host + spot,  (num_below_diag - spot) *  sizeof(float), cudaMemcpyHostToDevice));
     get_cosine_similarity_host_kernel<<<num_gpu_blocks, CUDA_NUM_THREADS>>>(spot, num_below_diag - spot, ratings_rows, 
       csr_format_ratingsMtx_userID_dev,
       coo_format_ratingsMtx_itemID_dev,
@@ -3122,7 +3122,7 @@ void get_cosine_similarity_host_kernel_debug(const long long int start,
     float * cosine_similarity_dev;
     checkCudaErrors(cudaMalloc((void**)&cosine_similarity_dev, num_below_diag * sizeof(float)));
 
-    checkCudaErrors(cudaMemcpy(cosine_similarity_dev, cosine_similarity_host,  num_below_diag *  sizeof(float), cudaMemcpyHostToDevice));
+    // checkCudaErrors(cudaMemcpy(cosine_similarity_dev, cosine_similarity_host,  num_below_diag *  sizeof(float), cudaMemcpyHostToDevice));
     get_cosine_similarity_host_kernel<<<num_gpu_blocks, CUDA_NUM_THREADS>>>(0, num_below_diag, ratings_rows, 
       csr_format_ratingsMtx_userID_dev,
       coo_format_ratingsMtx_itemID_dev,
@@ -3274,7 +3274,7 @@ __global__ void gpu_normalize_mtx_rows_or_cols_kernel(const long long int M, con
       float norm = (float)0.0;
       if(row_major_ordering){
         for(int j = 0; j < N; j++){
-          norm += pow(x[i * N + j], (float, 2.0))
+          norm += pow(x[i * N + j], (float)2.0);
         }
         norm = sqrt(norm);
         for(int j = 0; j < N; j++){
@@ -3282,7 +3282,7 @@ __global__ void gpu_normalize_mtx_rows_or_cols_kernel(const long long int M, con
         }
       }else{
         for(int j = 0; j < N; j++){
-          norm += pow(x[i + M * j], (float, 2.0))
+          norm += pow(x[i + M * j], (float)2.0);
         }
         norm = sqrt(norm);
         for(int j = 0; j < N; j++){
@@ -3295,7 +3295,7 @@ __global__ void gpu_normalize_mtx_rows_or_cols_kernel(const long long int M, con
       float norm = (float)0.0;
       if(row_major_ordering){
         for(int i = 0; i < M; i++){
-          norm += pow(x[i * N + j], (float, 2.0))
+          norm += pow(x[i * N + j], (float)2.0);
         }
         norm = sqrt(norm);
         for(int i = 0; i < M; i++){
@@ -3303,7 +3303,7 @@ __global__ void gpu_normalize_mtx_rows_or_cols_kernel(const long long int M, con
         }
       }else{
         for(int i = 0; i < M; i++){
-          norm += pow(x[i + M * j], (float, 2.0))
+          norm += pow(x[i + M * j], (float)2.0);
         }
         norm = sqrt(norm);
         for(int i = 0; i < M; i++){
@@ -3554,7 +3554,7 @@ void gpu_orthogonal_decomp<float>(cublasHandle_t handle, cusolverDnHandle_t dn_s
               ..but S only has min(m,n) non zero entries so if m < n
 
     solution     A      =       U*S      *       V^T
-              m by n          m by m           n by n
+              m by n          m by n           n by n
 
   */
 

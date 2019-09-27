@@ -952,6 +952,7 @@ int main(int argc, char *argv[])
     // V is ratings_cols by num_latent_factors
     //============================================================================================
     LOG(std::endl);
+
     bool        print_training_error    = true;
 
 
@@ -1065,6 +1066,7 @@ int main(int argc, char *argv[])
         update_Mem(batch_size_GU * ratings_cols* sizeof(float) );
     }
     
+    bool swapped = false;  
     
     // LOG(ratings_cols * ratings_cols * sizeof(float)) ;
     checkCudaErrors(cudaMalloc((void**)&U_GU,       batch_size_GU       * min_                       * sizeof(float)));
@@ -1079,6 +1081,27 @@ int main(int argc, char *argv[])
     checkCudaErrors(cudaMalloc((void**)&U_testing,  batch_size_testing  * std::max(min_, batch_size_testing)  * sizeof(float)));
     checkCudaErrors(cudaMalloc((void**)&R_testing,  batch_size_testing  * ratings_cols                        * sizeof(float)));
     update_Mem(Training_bytes);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
     //============================================================================================
@@ -1146,7 +1169,11 @@ int main(int argc, char *argv[])
 
             if(row_major_ordering){
                 //rember that ratings_GU is stored in row major ordering
-                swap_ordering<float>(batch_size_GU, ratings_cols, full_ratingsMtx_dev_GU_current_batch, row_major_ordering);
+                if (num_batches_GU != ratings_rows_GU || !swapped){
+                    LOG("swap matrix indexing from row major to column major");
+                    swap_ordering<float>(batch_size_GU, ratings_cols, full_ratingsMtx_dev_GU_current_batch, row_major_ordering);
+                    swapped = true;
+                }
             }
             if(Debug && 0){
                 save_device_mtx_to_file(full_ratingsMtx_dev_GU_current_batch, batch_size_GU, ratings_cols, "full_ratingsMtx_dev_GU_current_batch", false);
@@ -1419,6 +1446,11 @@ int main(int argc, char *argv[])
                                     csr_format_ratingsMtx_userID_dev_training_batch, 
                                     coo_format_ratingsMtx_itemID_dev_training + first_coo_ind_training,
                                     U_training, batch_size_training, &beta, V, ratings_cols);
+            if(1){
+                gpu_normalize_mtx_rows_or_cols(ratings_cols, (compress == false) ? batch_size_GU : num_latent_factors,  
+                                      false, V, true);
+            }
+
             /*
                 N is number of rows of matrix op(B) and C.
                 M number of columns of matrix op(A) and C.
@@ -1513,8 +1545,9 @@ int main(int argc, char *argv[])
                 cudaFree(copy);
             }
             
-            if(row_major_ordering){
-                //rember that ratings_GU is stored in row major ordering
+            if(row_major_ordering && num_batches_GU != ratings_rows_GU){
+                //remember that ratings_GU is stored in row major ordering
+                LOG("swap matrix indexing from column major to row major");
                 swap_ordering<float>(batch_size_GU, ratings_cols, full_ratingsMtx_dev_GU_current_batch, !row_major_ordering);
             }
             if(Conserve_GPU_Mem){
@@ -1537,13 +1570,14 @@ int main(int argc, char *argv[])
 
 
         if(batch_size_GU != ratings_rows_GU){
+            LOG("shuffle GU matrix rows");
             if(Conserve_GPU_Mem){
                 cpu_shuffle_mtx_rows_or_cols(dn_handle, ratings_rows_GU, ratings_cols, 
-                                             row_major_ordering, full_ratingsMtx_host_GU, 1);
+                                             false, full_ratingsMtx_host_GU, 1);
             }else{
                 //shuffle GA rows
                 gpu_shuffle_mtx_rows_or_cols(dn_handle, ratings_rows_GU, ratings_cols,  
-                                            row_major_ordering, full_ratingsMtx_dev_GU, 1);
+                                            false, full_ratingsMtx_dev_GU, 1);
 
 
                 //shuffle training rows??

@@ -771,15 +771,25 @@ void cpu_sort_index_by_max(const long long int dimension,  Dtype* x, int* indici
   int* temp_indicies  = (int *)malloc((dimension - 1) * sizeof(int));
 
   for(long long int i = (long long int)0; i < dimension; i++){
-    for(long long int j = (long long int)0; j < dimension; j++){
-      if(j < i){
-        temp_x[j] = x[from_whole_to_below_diag(i + dimension * j, dimension)];
-        temp_indicies[j] = j;
-      }
-      if(j > i){
-        temp_x[j - 1] = x[from_whole_to_below_diag(i + dimension * j, dimension)];
-        temp_indicies[j - 1] = j;
-      }
+    long long int num_below_diag = (long long int)0;
+    long long int left_off = (long long int)0;
+    long long int num_in_col = (long long int)(dimension - 1);
+
+    for(long long int j = (long long int)0; j < i; j++){
+      left_off = num_below_diag + i - (dimension - num_in_col);
+
+      temp_x[j] = x[left_off];
+      temp_indicies[j] = j;
+
+      num_below_diag += num_in_col;
+      num_in_col -= (long long int)(1);
+    }
+    left_off = num_below_diag + (i + (long long int)(1)) - (dimension - num_in_col);
+
+    for(long long int j = i + 1; j < dimension; j++){
+      temp_x[j - 1] = x[left_off];
+      temp_indicies[j - 1] = j;
+      left_off += (long long int)(1);
     }
     //thrust::sort_by_key sorts temp_indicies by temp_x smallest to temp_x largest
     thrust::sort_by_key(thrust::host, temp_x, temp_x + dimension - 1 , temp_indicies);

@@ -577,7 +577,7 @@ void gpu_permute(Dtype* A, const int* P, int rows, int cols, bool permute_rows);
 void gpu_shuffle_mtx_rows_or_cols(cublasHandle_t dn_handle, const long long int M, const long long int N,  
                                   bool row_major_ordering, float* x, bool shuffle_rows);
 
-void gpu_normalize_mtx_rows_or_cols(cublasHandle_t dn_handle, const long long int M, const long long int N,  
+void gpu_normalize_mtx_rows_or_cols(const long long int M, const long long int N,  
                                   bool row_major_ordering, float* x, bool normalize_rows);
 
 template <typename Dtype>

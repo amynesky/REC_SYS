@@ -1,9 +1,10 @@
 #!/bin/bash
 #SBATCH -N 1
-#SBATCH -p GPU-shared
+#SBATCH -p GPU
 #SBATCH --ntasks-per-node 7
 #SBATCH --gres=gpu:p100:2
 #SBATCH -t 48:00:00
+#SBATCH --mail-type=ALL
 #echo commands to stdout
 
 #echo commands to stdout
