@@ -762,14 +762,19 @@ template<typename Dtype>
 void cpu_sort_index_by_max(const long long int dimension,  Dtype* x, int* indicies, int top_N)
 {
   bool print = true;
+  bool debug = true;
+  double avg_time = 0.0;
   struct timeval program_start, program_end;
   if(print) LOG("called cpu_sort_index_by_max") ;
-  double program_time;
-  gettimeofday(&program_start, NULL);
+
 
   Dtype* temp_x  = (Dtype *)malloc((dimension - 1) * sizeof(Dtype));
   int* temp_indicies  = (int *)malloc((dimension - 1) * sizeof(int));
+  checkErrors(temp_x);
+  checkErrors(temp_indicies);
 
+  double program_time;
+  gettimeofday(&program_start, NULL);
   for(long long int i = (long long int)0; i < dimension; i++){
     long long int num_below_diag = (long long int)0;
     long long int left_off = (long long int)0;
@@ -794,6 +799,12 @@ void cpu_sort_index_by_max(const long long int dimension,  Dtype* x, int* indici
     //thrust::sort_by_key sorts temp_indicies by temp_x smallest to temp_x largest
     thrust::sort_by_key(thrust::host, temp_x, temp_x + dimension - 1 , temp_indicies);
     host_copy(top_N, temp_indicies + dimension - top_N, indicies + i * top_N);
+    if(debug){
+      gettimeofday(&program_end, NULL);
+      program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
+      avg_time = program_time / (double)i;
+      LOG("average time of outer loop after finishing loop "<<i<<" : "<<readable_time(avg_time));
+    }
   }
 
   free(temp_x);

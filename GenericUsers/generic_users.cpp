@@ -200,15 +200,15 @@ int main(int argc, char *argv[])
 
             Dataset_Name = "MovieLens 20 million";
 
-            csv_Ratings_Path = "/pylon5/ac560rp/nesky/REC_SYS/datasets/ml-20m/ratings.csv";
-            csv_keyWords_path = "/pylon5/ac560rp/nesky/REC_SYS/datasets/ml-20m/movies.csv";
+            csv_Ratings_Path = "/pylon5/ac560rp/nesky/REC_SYS/datasets/ml-20m/ratings_copy.csv";
+            csv_keyWords_path = "/pylon5/ac560rp/nesky/REC_SYS/datasets/ml-20m/movies_copy.csv";
             //temp_num_entries = csv_Ratings.num_rows() - 1; // the first row is a title row
             temp_num_entries = 20000264 - 1;   // MovieLens 20 million
             break;
         }case 2:{ // code to be executed if n = 2;
             Dataset_Name = "Rent The Runaway";
-            csv_Ratings_Path = "/pylon5/ac560rp/nesky/REC_SYS/datasets/renttherunway_final_data.json";
-            csv_keyWords_path = "/pylon5/ac560rp/nesky/REC_SYS/datasets/renttherunway_final_data.json";
+            csv_Ratings_Path = "/pylon5/ac560rp/nesky/REC_SYS/datasets/renttherunway_final_data_copy.json";
+            //csv_keyWords_path = "/pylon5/ac560rp/nesky/REC_SYS/datasets/renttherunway_final_data.json";
             Content_Based = 0;
             temp_num_entries = 192544;           // use for Rent The Runaway dataset
             break;
@@ -224,7 +224,7 @@ int main(int argc, char *argv[])
 
 
     CSVReader csv_Ratings(csv_Ratings_Path);
-    CSVReader csv_keyWords(csv_keyWords);
+    
 
     const long long int num_entries = temp_num_entries;
     //const int num_entries = 80000; //for debuging code
@@ -308,6 +308,26 @@ int main(int argc, char *argv[])
     const long long int ratings_cols = (long long int)(gpu_abs_max<int>(num_entries, coo_format_ratingsMtx_itemID_dev) + 1); 
 
     LOG(std::endl<<"The sparse data matrix has "<<ratings_rows<<" users and "<<ratings_cols<<" items with "<<num_entries<<" specified entries.");
+    
+    int*   csr_format_ratingsMtx_userID_dev;
+    checkCudaErrors(cudaMalloc((void**)&csr_format_ratingsMtx_userID_dev, (ratings_rows + 1) * sizeof(int)));
+    update_Mem( (ratings_rows + 1) * sizeof(int) );
+
+    cusparse_status = cusparseXcoo2csr(sp_handle, coo_format_ratingsMtx_userID_dev, num_entries, 
+                                       ratings_rows, csr_format_ratingsMtx_userID_dev, CUSPARSE_INDEX_BASE_ZERO); 
+    if (cusparse_status != CUSPARSE_STATUS_SUCCESS) { 
+        fprintf(stdout, "Conversion from COO to CSR format failed\n");
+        return 1; 
+    } 
+
+    
+    if(Debug){
+        // save_device_array_to_file<int>(csr_format_ratingsMtx_userID_dev, ratings_rows + 1, "csr_format_ratingsMtx_userID_dev");
+        // LOG("csr_format_ratingsMtx_userID_dev : ");
+        // print_gpu_array_entries<int>(csr_format_ratingsMtx_userID_dev, ratings_rows + 1, 1 , ratings_rows + 1);
+        // LOG("Press Enter to continue.") ;
+        // std::cin.ignore();
+    }
 
     long long int num_entries_keyWord_mtx_temp = (long long int)0;
     long long int num_keyWords_temp            = (long long int)0;
@@ -317,6 +337,7 @@ int main(int argc, char *argv[])
     int*   coo_format_keyWordMtx_itemID_dev   = NULL;
     int*   coo_format_keyWordMtx_keyWord_dev  = NULL;
     if(Content_Based){
+        CSVReader csv_keyWords(csv_keyWords);
         //num_entries_keyWord_mtx_temp = csv_keyWords.num_entries();
         switch (case_)
         {
@@ -364,25 +385,7 @@ int main(int argc, char *argv[])
     const long long int num_keyWords            = num_keyWords_temp;
 
 
-    int*   csr_format_ratingsMtx_userID_dev;
-    checkCudaErrors(cudaMalloc((void**)&csr_format_ratingsMtx_userID_dev, (ratings_rows + 1) * sizeof(int)));
-    update_Mem( (ratings_rows + 1) * sizeof(int) );
 
-    cusparse_status = cusparseXcoo2csr(sp_handle, coo_format_ratingsMtx_userID_dev, num_entries, 
-                                       ratings_rows, csr_format_ratingsMtx_userID_dev, CUSPARSE_INDEX_BASE_ZERO); 
-    if (cusparse_status != CUSPARSE_STATUS_SUCCESS) { 
-        fprintf(stdout, "Conversion from COO to CSR format failed\n");
-        return 1; 
-    } 
-
-    
-    if(Debug){
-        // save_device_array_to_file<int>(csr_format_ratingsMtx_userID_dev, ratings_rows + 1, "csr_format_ratingsMtx_userID_dev");
-        // LOG("csr_format_ratingsMtx_userID_dev : ");
-        // print_gpu_array_entries<int>(csr_format_ratingsMtx_userID_dev, ratings_rows + 1, 1 , ratings_rows + 1);
-        // LOG("Press Enter to continue.") ;
-        // std::cin.ignore();
-    }
 
     int*   csr_format_keyWordMtx_itemID_dev;
     if(Content_Based){

@@ -224,7 +224,7 @@ int main(int argc, char *argv[])
         }case 2:{ // code to be executed if n = 2;
             Dataset_Name = "Rent The Runaway";
             csv_Ratings_Path = (preamble + "/pylon5/ac560rp/nesky/REC_SYS/datasets/renttherunway_final_data.json").c_str();
-            csv_keyWords_path = (preamble + "/pylon5/ac560rp/nesky/REC_SYS/datasets/renttherunway_final_data.json").c_str();
+            //csv_keyWords_path = (preamble + "/pylon5/ac560rp/nesky/REC_SYS/datasets/renttherunway_final_data.json").c_str();
             Content_Based = 0;
             temp_num_entries = 192544;           // use for Rent The Runaway dataset
             break;
@@ -240,8 +240,7 @@ int main(int argc, char *argv[])
 
 
     CSVReader csv_Ratings(csv_Ratings_Path);
-    if(Debug) LOG("Here!");
-    CSVReader csv_keyWords(csv_keyWords);
+    
 
     const long long int num_entries = temp_num_entries;
     //const int num_entries = 100000; //for debuging code
@@ -292,39 +291,7 @@ int main(int argc, char *argv[])
     }
  
 
-    long long int num_entries_keyWord_mtx_temp = (long long int)0;
-    long long int num_keyWords_temp            = (long long int)0;
 
-    int*   coo_format_keyWordMtx_itemID_host  = NULL;
-    int*   coo_format_keyWordMtx_keyWord_host = NULL;
-    int*   coo_format_keyWordMtx_itemID_dev   = NULL;
-    int*   coo_format_keyWordMtx_keyWord_dev  = NULL;
-    if(Content_Based){
-        num_entries_keyWord_mtx_temp = csv_keyWords.num_entries();
-        //num_entries_keyWord_mtx = 48087;
-        LOG("num_entries_keyWord_mtx : "<<num_entries_keyWord_mtx_temp);
-
-        coo_format_keyWordMtx_itemID_host  = (int *)malloc(num_entries_keyWord_mtx_temp *  sizeof(int)); 
-        coo_format_keyWordMtx_keyWord_host = (int *)malloc(num_entries_keyWord_mtx_temp *  sizeof(int)); 
-        checkErrors(coo_format_keyWordMtx_itemID_host);
-        checkErrors(coo_format_keyWordMtx_keyWord_host);
-
-        num_keyWords_temp  = csv_keyWords.makeContentBasedcooKeyWordMtx(coo_format_keyWordMtx_itemID_host,
-                                                                        coo_format_keyWordMtx_keyWord_host,
-                                                                        num_entries_keyWord_mtx_temp);
-        LOG("num_keyWords : "<<num_keyWords_temp);
-
-        checkCudaErrors(cudaMalloc((void**)&coo_format_keyWordMtx_itemID_dev,   num_entries_keyWord_mtx_temp * sizeof(int)));
-        checkCudaErrors(cudaMalloc((void**)&coo_format_keyWordMtx_keyWord_dev,  num_entries_keyWord_mtx_temp * sizeof(int)));
-        update_Mem(2 * num_entries_keyWord_mtx_temp * sizeof(int) );
-
-        checkCudaErrors(cudaMemcpy(coo_format_keyWordMtx_itemID_dev,   coo_format_keyWordMtx_itemID_host,   num_entries_keyWord_mtx_temp * sizeof(int), cudaMemcpyHostToDevice));
-        checkCudaErrors(cudaMemcpy(coo_format_keyWordMtx_keyWord_dev,  coo_format_keyWordMtx_keyWord_host,  num_entries_keyWord_mtx_temp * sizeof(int), cudaMemcpyHostToDevice));
-        free(coo_format_keyWordMtx_itemID_host);
-        free(coo_format_keyWordMtx_keyWord_host);
-    }
-    const long long int num_entries_keyWord_mtx = num_entries_keyWord_mtx_temp;
-    const long long int num_keyWords            = num_keyWords_temp;
 
     int*   coo_format_ratingsMtx_userID_dev;
     int*   coo_format_ratingsMtx_itemID_dev;
@@ -374,6 +341,61 @@ int main(int argc, char *argv[])
         // LOG("Press Enter to continue.") ;
         // std::cin.ignore();
     }
+
+
+
+
+    long long int num_entries_keyWord_mtx_temp = (long long int)0;
+    long long int num_keyWords_temp            = (long long int)0;
+
+    int*   coo_format_keyWordMtx_itemID_host  = NULL;
+    int*   coo_format_keyWordMtx_keyWord_host = NULL;
+    int*   coo_format_keyWordMtx_itemID_dev   = NULL;
+    int*   coo_format_keyWordMtx_keyWord_dev  = NULL;
+    if(Content_Based){
+        CSVReader csv_keyWords(csv_keyWords);
+        //num_entries_keyWord_mtx_temp = csv_keyWords.num_entries();
+        switch (case_)
+        {
+            case 1:{ // code to be executed if n = 1;
+                //Dataset_Name = "MovieLens 20 million";
+                num_entries_keyWord_mtx_temp = ratings_cols;
+                break;
+            }case 2:{ // code to be executed if n = 2;
+                //Dataset_Name = "Rent The Runaway";
+                //num_entries_keyWord_mtx_temp = 48087;
+                break;
+            }default: 
+                ABORT_IF_EQ(0, 1, "no valid dataset selected");
+        }
+        //num_entries_keyWord_mtx = 48087;
+        LOG("num_entries_keyWord_mtx : "<<num_entries_keyWord_mtx_temp);
+
+        if(num_entries_keyWord_mtx_temp <= 0 ){
+            return 0;
+        }
+
+        coo_format_keyWordMtx_itemID_host  = (int *)malloc(num_entries_keyWord_mtx_temp *  sizeof(int)); 
+        coo_format_keyWordMtx_keyWord_host = (int *)malloc(num_entries_keyWord_mtx_temp *  sizeof(int)); 
+        checkErrors(coo_format_keyWordMtx_itemID_host);
+        checkErrors(coo_format_keyWordMtx_keyWord_host);
+
+        num_keyWords_temp  = csv_keyWords.makeContentBasedcooKeyWordMtx(coo_format_keyWordMtx_itemID_host,
+                                                                        coo_format_keyWordMtx_keyWord_host,
+                                                                        num_entries_keyWord_mtx_temp);
+        LOG("num_keyWords : "<<num_keyWords_temp);
+
+        checkCudaErrors(cudaMalloc((void**)&coo_format_keyWordMtx_itemID_dev,   num_entries_keyWord_mtx_temp * sizeof(int)));
+        checkCudaErrors(cudaMalloc((void**)&coo_format_keyWordMtx_keyWord_dev,  num_entries_keyWord_mtx_temp * sizeof(int)));
+        update_Mem(2 * num_entries_keyWord_mtx_temp * sizeof(int) );
+
+        checkCudaErrors(cudaMemcpy(coo_format_keyWordMtx_itemID_dev,   coo_format_keyWordMtx_itemID_host,   num_entries_keyWord_mtx_temp * sizeof(int), cudaMemcpyHostToDevice));
+        checkCudaErrors(cudaMemcpy(coo_format_keyWordMtx_keyWord_dev,  coo_format_keyWordMtx_keyWord_host,  num_entries_keyWord_mtx_temp * sizeof(int), cudaMemcpyHostToDevice));
+        free(coo_format_keyWordMtx_itemID_host);
+        free(coo_format_keyWordMtx_keyWord_host);
+    }
+    const long long int num_entries_keyWord_mtx = num_entries_keyWord_mtx_temp;
+    const long long int num_keyWords            = num_keyWords_temp;
 
     int*   csr_format_keyWordMtx_itemID_dev;
     if(Content_Based){

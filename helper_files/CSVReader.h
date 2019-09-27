@@ -16,14 +16,11 @@
  */
 class CSVReader
 {
-	std::string fileName;
-	std::string delimeter;
- 
 	public:
 	CSVReader(std::string filename, std::string delm = ",") :
 			fileName(filename), delimeter(delm)
 	{ }
- 
+
 	// return the number of rows in a CSV File
 	int num_rows();
 
@@ -56,7 +53,9 @@ class CSVReader
 	long long int  makeContentBasedcooKeyWordMtx(int* coo_format_keyWordMtx_itemID_host,
 											   int* coo_format_keyWordMtx_keyWord_host,
 											   const long long int num_entries);
-
+	private:
+		std::string fileName;
+		std::string delimeter;
 
 };
  
