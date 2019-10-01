@@ -669,10 +669,23 @@ void cpu_set_as_index<int>(int* x, const long long int rows, const long long int
   double program_time;
   gettimeofday(&program_start, NULL);
 
-  for(long long int i = (long long int)0; i < rows * cols; i++) {
-    int row = i % rows;
-    int col = i / rows;
-    x[i] = (int)row;
+  #ifdef _OPENMP
+    int nProcessors = omp_get_max_threads();
+    omp_set_num_threads(std::min((long long int)nProcessors, rows * cols));
+    int nthreads = omp_get_num_threads();
+  #endif
+
+  #pragma omp parallel shared(nthreads)
+  {
+    #ifdef _OPENMP
+      int th_id = omp_get_thread_num();
+    #endif
+    for(long long int i = (long long int)th_id; i < rows * cols; i += (long long int)nthreads){
+    //for(long long int i = (long long int)0; i < rows * cols; i++) {
+      int row = (int)(i % rows);
+      //int col = (int)(i / rows);
+      x[i] = row;
+    }
   }
   if(0) LOG("finished call to cpu_set_as_index") ;
   gettimeofday(&program_end, NULL);
@@ -745,9 +758,22 @@ void cpu_sort_index_by_max(const long long int rows, const long long int cols,  
   double program_time;
   gettimeofday(&program_start, NULL);
 
-  for(long long int i = (long long int)0; i < rows; i++){
-    //thrust::sort_by_key sorts indicies by x smallest to x largest
-    thrust::sort_by_key(thrust::host, x + i * cols, x + (i + 1) * cols , indicies + i * cols);
+  #ifdef _OPENMP
+    int nProcessors = omp_get_max_threads();
+    omp_set_num_threads(std::min((long long int)nProcessors, rows));
+    int nthreads = omp_get_num_threads();
+  #endif
+
+  #pragma omp parallel shared(nthreads)
+  {
+    #ifdef _OPENMP
+      int th_id = omp_get_thread_num();
+    #endif
+    for(long long int i = (long long int)th_id; i < rows; i += (long long int)nthreads){
+    //for(long long int i = (long long int)0; i < rows; i++){
+      //thrust::sort_by_key sorts indicies by x smallest to x largest
+      thrust::sort_by_key(thrust::host, x + i * cols, x + (i + 1) * cols , indicies + i * cols);
+    }
   }
 
   if(0) LOG("finished call to cpu_sort_index_by_max") ;
@@ -776,20 +802,22 @@ void cpu_sort_index_by_max(const long long int dimension,  Dtype* x, int* indici
   checkErrors(temp_x);
   checkErrors(temp_indicies);
 
-  int nProcessors = omp_get_max_threads();
-  if(debug){
-    LOG("maximum number of OpenMP Threads: "<<nProcessors);
-    LOG("number of OpenMP Threads requested: "<<std::min((long long int)nProcessors, dimension));
-  }
-  omp_set_num_threads(std::min((long long int)nProcessors, dimension));
+  #ifdef _OPENMP
+    int nProcessors = omp_get_max_threads();
+    if(debug){
+      LOG("maximum number of OpenMP Threads: "<<nProcessors);
+      LOG("number of OpenMP Threads requested: "<<std::min((long long int)nProcessors, dimension));
+    }
+    omp_set_num_threads(std::min((long long int)nProcessors, dimension));
+    int nthreads = omp_get_num_threads();
+  #endif
 
   double program_time;
   gettimeofday(&program_start, NULL);
-  #pragma omp parallel
+  #pragma omp parallel shared(nthreads)
   {
     #ifdef _OPENMP
       int th_id = omp_get_thread_num();
-      int nthreads = omp_get_num_threads();
     #endif
     for(long long int i = (long long int)th_id; i < dimension; i += (long long int)nthreads){
     //for(long long int i = (long long int)0; i < dimension; i++){
@@ -842,12 +870,43 @@ void cpu_count_appearances(const int top_N, const long long int dimension,
   double program_time;
   gettimeofday(&program_start, NULL);
 
-  for(long long int i = (long long int)0; i < top_N; i++){
-    for(long long int j = (long long int)0; j < dimension; j++){
-      int temp = indicies[i + top_N * j];
-      count[temp] += 1;
+  #ifdef _OPENMP
+    int nProcessors = omp_get_max_threads();
+    omp_set_num_threads(std::min((long long int)nProcessors, dimension));
+    omp_lock_t *locks = (omp_lock_t *)malloc(dimension * sizeof(omp_lock_t));
+    checkErrors(locks);
+    int nthreads = omp_get_num_threads();
+  #endif
+
+  #pragma omp parallel shared(nthreads)
+  {
+    #ifdef _OPENMP
+      int th_id = omp_get_thread_num();
+    #endif
+    for(long long int j = (long long int)th_id; j < dimension; j += (long long int)nthreads){
+      omp_init_lock(locks + j);
+      omp_unset_lock(locks + j);
     }
   }
+  #pragma omp parallel shared(nthreads)
+  {
+    #ifdef _OPENMP
+      int th_id = omp_get_thread_num();
+    #endif
+    for(long long int j = (long long int)th_id; j < dimension; j += (long long int)nthreads){
+      for(long long int i = (long long int)0; i < top_N; i++){
+        int temp = indicies[i + top_N * j];
+        omp_set_lock(locks + temp);
+        count[temp] += 1;
+        omp_unset_lock(locks + temp);
+      }
+    }
+  }
+
+  #ifdef _OPENMP
+    free(locks);
+  #endif
+
   if(0) LOG("finished call to gpu_orthogonal_decomp") ;
   gettimeofday(&program_end, NULL);
   program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
@@ -863,8 +922,21 @@ void cpu_mark_CU_users(const int ratings_rows_CU, const int ratings_rows, const 
   double program_time;
   gettimeofday(&program_start, NULL);
 
-  for(int j = ratings_rows - 1; j > ratings_rows - 1 - ratings_rows_CU; j--){
-    y[x[j]] = 0;
+  #ifdef _OPENMP
+    int nProcessors = omp_get_max_threads();
+    omp_set_num_threads(std::min(nProcessors, ratings_rows_CU));
+    int nthreads = omp_get_num_threads();
+  #endif
+
+  #pragma omp parallel shared(nthreads)
+  {
+    #ifdef _OPENMP
+      int th_id = omp_get_thread_num();
+    #endif
+    for(long long int j = (long long int)th_id; j < ratings_rows_CU; j += (long long int)nthreads){
+    //for(int j = ratings_rows - 1; j > ratings_rows - 1 - ratings_rows_CU; j--){
+      y[x[ratings_rows - 1 - j]] = 0;
+    }
   }
 
   if(0) LOG("finished call to gpu_orthogonal_decomp") ;

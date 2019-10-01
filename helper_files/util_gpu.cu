@@ -2948,14 +2948,17 @@ __global__ void get_cosine_similarity_host_kernel(const long long int start,
       for(int i = csr_format_ratingsMtx_userID_dev[user_i]; i < csr_format_ratingsMtx_userID_dev[user_i + 1]; i++){
         int user_i_itemID = coo_format_ratingsMtx_itemID_dev[i];
         int user_j_itemID = 0;
-        for(int j = csr_format_ratingsMtx_userID_dev[user_j]; j < csr_format_ratingsMtx_userID_dev[user_j + 1]; j++){
+        int start_j = csr_format_ratingsMtx_userID_dev[user_j];
+        for(int j = start_j; j < csr_format_ratingsMtx_userID_dev[user_j + 1]; j++){
           user_j_itemID = coo_format_ratingsMtx_itemID_dev[j];
           if( user_i_itemID == user_j_itemID){
             count   += 1;
             num     += coo_format_ratingsMtx_rating_dev[i] * coo_format_ratingsMtx_rating_dev[j] ;
             denom_i += pow(coo_format_ratingsMtx_rating_dev[i], (float)2.0) ;
             denom_j += pow(coo_format_ratingsMtx_rating_dev[j], (float)2.0) ; 
+            start_j = j;
           }else if(user_i_itemID < user_j_itemID){
+            start_j = j;
             break;
           }
         }
