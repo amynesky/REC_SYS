@@ -194,11 +194,13 @@ endif
 ALL_CCFLAGS :=
 ALL_CCFLAGS += $(NVCCFLAGS)
 ALL_CCFLAGS += $(EXTRA_NVCCFLAGS)
+ALL_CCFLAGS += -Xcompiler -fopenmp
 ALL_CCFLAGS += $(addprefix -Xcompiler ,$(CCFLAGS))
 ALL_CCFLAGS += $(addprefix -Xcompiler ,$(EXTRA_CCFLAGS))
 
 ALL_LDFLAGS :=
 ALL_LDFLAGS += $(ALL_CCFLAGS)
+ALL_LDFLAGS += -lgomp
 ALL_LDFLAGS += $(addprefix -Xlinker ,$(LDFLAGS))
 ALL_LDFLAGS += $(addprefix -Xlinker ,$(EXTRA_LDFLAGS))
 

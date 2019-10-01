@@ -17,6 +17,9 @@
 #include <sys/time.h>
 #include <thrust/sort.h>
 #include <bitset>
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 
 #if defined(WIN32) || defined(_WIN32) || defined(WIN64) || defined(_WIN64)
@@ -773,37 +776,51 @@ void cpu_sort_index_by_max(const long long int dimension,  Dtype* x, int* indici
   checkErrors(temp_x);
   checkErrors(temp_indicies);
 
+  int nProcessors = omp_get_max_threads();
+  if(debug){
+    LOG("number of OpenMP Threads: "<<std::max((long long int)nProcessors, dimension));
+  }
+  omp_set_num_threads(std::max((long long int)nProcessors, dimension));
+
   double program_time;
   gettimeofday(&program_start, NULL);
-  for(long long int i = (long long int)0; i < dimension; i++){
-    long long int num_below_diag = (long long int)0;
-    long long int left_off = (long long int)0;
-    long long int num_in_col = (long long int)(dimension - 1);
+  #pragma omp parallel
+  {
+    #ifdef _OPENMP
+      int th_id = omp_get_thread_num();
+      int nthreads = omp_get_num_threads();
+    #endif
+    for(long long int i = (long long int)th_id; i < dimension; i += (long long int)nthreads){
+    //for(long long int i = (long long int)0; i < dimension; i++){
+      long long int num_below_diag = (long long int)0;
+      long long int left_off = (long long int)0;
+      long long int num_in_col = (long long int)(dimension - 1);
 
-    for(long long int j = (long long int)0; j < i; j++){
-      left_off = num_below_diag + i - (dimension - num_in_col);
+      for(long long int j = (long long int)0; j < i; j++){
+        left_off = num_below_diag + i - (dimension - num_in_col);
 
-      temp_x[j] = x[left_off];
-      temp_indicies[j] = j;
+        temp_x[j] = x[left_off];
+        temp_indicies[j] = j;
 
-      num_below_diag += num_in_col;
-      num_in_col -= (long long int)(1);
-    }
-    left_off = num_below_diag + (i + (long long int)(1)) - (dimension - num_in_col);
+        num_below_diag += num_in_col;
+        num_in_col -= (long long int)(1);
+      }
+      left_off = num_below_diag + (i + (long long int)(1)) - (dimension - num_in_col);
 
-    for(long long int j = i + 1; j < dimension; j++){
-      temp_x[j - 1] = x[left_off];
-      temp_indicies[j - 1] = j;
-      left_off += (long long int)(1);
-    }
-    //thrust::sort_by_key sorts temp_indicies by temp_x smallest to temp_x largest
-    thrust::sort_by_key(thrust::host, temp_x, temp_x + dimension - 1 , temp_indicies);
-    host_copy(top_N, temp_indicies + dimension - top_N, indicies + i * top_N);
-    if(debug){
-      gettimeofday(&program_end, NULL);
-      program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
-      avg_time = program_time / (double)i;
-      LOG("average time of outer loop after finishing loop "<<i<<" : "<<readable_time(avg_time));
+      for(long long int j = i + 1; j < dimension; j++){
+        temp_x[j - 1] = x[left_off];
+        temp_indicies[j - 1] = j;
+        left_off += (long long int)(1);
+      }
+      //thrust::sort_by_key sorts temp_indicies by temp_x smallest to temp_x largest
+      thrust::sort_by_key(thrust::host, temp_x, temp_x + dimension - 1 , temp_indicies);
+      host_copy(top_N, temp_indicies + dimension - top_N, indicies + i * top_N);
+      if(debug){
+        gettimeofday(&program_end, NULL);
+        program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
+        avg_time = program_time / (double)i;
+        LOG("average time of outer loop after finishing loop "<<i<<" : "<<readable_time(avg_time));
+      }
     }
   }
 

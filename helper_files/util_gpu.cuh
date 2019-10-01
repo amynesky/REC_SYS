@@ -528,7 +528,9 @@ void collect_user_means(float* user_means_training,float* user_var_training, con
                         const float* coo_format_ratingsMtx_rating_dev_GA);
 
 
-void gpu_fill_training_mtx(const int ratings_rows_training, const int ratings_cols_training, const bool row_major_ordering,
+void gpu_fill_training_mtx(const long long int ratings_rows_training, 
+                        const long long int ratings_cols_training, 
+                        const bool row_major_ordering,
                         const int* csr_format_ratingsMtx_userID_dev_training,
                         const int* coo_format_ratingsMtx_itemID_dev_training,
                         const float* coo_format_ratingsMtx_rating_dev_training,

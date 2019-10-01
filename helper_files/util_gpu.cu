@@ -16,6 +16,9 @@
 #include <math.h>
 #include <sys/time.h>
 #include <thrust/sort.h>
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 
 #if defined(WIN32) || defined(_WIN32) || defined(WIN64) || defined(_WIN64)
@@ -1006,9 +1009,22 @@ void gpu_set_all(  Dtype* x, const long long int n, const Dtype alpha)
 {
   long long int num_gpu_blocks = GET_BLOCKS(n);
   if (num_gpu_blocks > CUDA_NUM_BLOCKS){
-    ABORT_IF_NEQ(0, 1, "Max Blocks Exceeded");
-  }; 
-  gpu_set_all_kernel<Dtype><<<num_gpu_blocks, CUDA_NUM_THREADS>>>( x, n, alpha);
+    long long int num_loops = (long long int)0;
+    long long int num_entries = (long long int)(CUDA_NUM_BLOCKS*CUDA_NUM_THREADS);
+    long long int spot = (long long int)0;
+    while (num_gpu_blocks > CUDA_NUM_BLOCKS){
+      gpu_set_all_kernel<Dtype><<<CUDA_NUM_BLOCKS, CUDA_NUM_THREADS>>>( x + spot, num_entries, alpha);
+
+      num_gpu_blocks = num_gpu_blocks - (long long int)CUDA_NUM_BLOCKS;
+      num_loops += (long long int)1;
+      spot = num_loops * num_entries;
+    };
+    // spot is the number of entries done so far
+    // total - (done) = left to go 
+    gpu_set_all_kernel<Dtype><<<num_gpu_blocks, CUDA_NUM_THREADS>>>( x + spot, n - spot, alpha);
+  }else{
+    gpu_set_all_kernel<Dtype><<<num_gpu_blocks, CUDA_NUM_THREADS>>>( x, n, alpha);
+  }
 
 }
 
@@ -2402,32 +2418,36 @@ void collect_user_means(float* user_means_training,float* user_var_training, con
 
 
 
-  __global__ void fill_training_mtx_kernel(const int ratings_rows_training, const int ratings_cols_training, const bool row_major_ordering, 
+  __global__ void fill_training_mtx_kernel(const long long int ratings_rows_training, 
+    const long long int ratings_cols_training, const bool row_major_ordering, 
     const int* csr_format_ratingsMtx_userID_dev_training,
     const int* coo_format_ratingsMtx_itemID_dev_training,
     const float* coo_format_ratingsMtx_rating_dev_training,
-    float* full_training_ratings_mtx,
+    float* full_training_ratings_mtx, long long int start, int num,
     bool* isBad)
   {
 
-    CUDA_KERNEL_LOOP(row, ratings_rows_training){
-      for(int i = csr_format_ratingsMtx_userID_dev_training[row]; i < csr_format_ratingsMtx_userID_dev_training[row + 1]; i++){
-        int col = coo_format_ratingsMtx_itemID_dev_training[i];
+    CUDA_KERNEL_LOOP(j, num){
+      long long int row = (long long int)j + start;
+      for(long long int i = csr_format_ratingsMtx_userID_dev_training[row]; i < csr_format_ratingsMtx_userID_dev_training[row + (long long int)1]; i++){
+        long long int col = coo_format_ratingsMtx_itemID_dev_training[i];
         float val = coo_format_ratingsMtx_rating_dev_training[i]; 
         if (::isinf(val) || ::isnan(val)){
           isBad[0] = true;
         };
         if(row_major_ordering){
-          full_training_ratings_mtx[(long long int)ratings_cols_training * (long long int)row + (long long int)col] = val;
+          full_training_ratings_mtx[ratings_cols_training * row + col] = val;
         }else{
-          full_training_ratings_mtx[(long long int)row + (long long int)ratings_rows_training * (long long int)col] = val;
+          full_training_ratings_mtx[row + ratings_rows_training * col] = val;
         };
       }
     }
   }
 
 
-  void gpu_fill_training_mtx(const int ratings_rows_training, const int ratings_cols_training, const bool row_major_ordering,
+  void gpu_fill_training_mtx(const long long int ratings_rows_training, 
+    const long long int ratings_cols_training, 
+    const bool row_major_ordering,
     const int* csr_format_ratingsMtx_userID_dev_training,
     const int* coo_format_ratingsMtx_itemID_dev_training,
     const float* coo_format_ratingsMtx_rating_dev_training,
@@ -2438,18 +2458,39 @@ void collect_user_means(float* user_means_training,float* user_var_training, con
     CUDA_CHECK(cudaMalloc((void**)&isBad, sizeof(bool)));
     CUDA_CHECK(cudaMemcpy(isBad, &isBad_host, sizeof(bool), cudaMemcpyHostToDevice));
 
-    const long long int num_gpu_blocks= GET_BLOCKS(ratings_rows_training);
+    long long int num_gpu_blocks= GET_BLOCKS(ratings_rows_training);
 
     if (num_gpu_blocks > CUDA_NUM_BLOCKS){
-      ABORT_IF_NEQ(0, 1, "Max Blocks Exceeded");
+      long long int num_loops   = 0;
+      long long int num_entries = CUDA_NUM_BLOCKS * CUDA_NUM_THREADS;
+      long long int spot        = 0;
+      while (num_gpu_blocks > CUDA_NUM_BLOCKS){
+      fill_training_mtx_kernel<<<CUDA_NUM_BLOCKS, CUDA_NUM_THREADS>>>(ratings_rows_training,ratings_cols_training, row_major_ordering, 
+        csr_format_ratingsMtx_userID_dev_training,
+        coo_format_ratingsMtx_itemID_dev_training,
+        coo_format_ratingsMtx_rating_dev_training,
+        full_training_ratings_mtx, spot, num_entries,
+        isBad);
+        num_gpu_blocks = num_gpu_blocks - CUDA_NUM_BLOCKS;
+        num_loops     += (long long int)1;
+        spot           = num_loops * num_entries;
+      };
+      fill_training_mtx_kernel<<<num_gpu_blocks, CUDA_NUM_THREADS>>>(ratings_rows_training,ratings_cols_training, row_major_ordering, 
+        csr_format_ratingsMtx_userID_dev_training,
+        coo_format_ratingsMtx_itemID_dev_training,
+        coo_format_ratingsMtx_rating_dev_training,
+        full_training_ratings_mtx, spot, ratings_rows_training - spot,
+        isBad);
+    }else{
+      fill_training_mtx_kernel<<<num_gpu_blocks, CUDA_NUM_THREADS>>>(ratings_rows_training,ratings_cols_training, row_major_ordering, 
+        csr_format_ratingsMtx_userID_dev_training,
+        coo_format_ratingsMtx_itemID_dev_training,
+        coo_format_ratingsMtx_rating_dev_training,
+        full_training_ratings_mtx, (long long int)0, ratings_rows_training,
+        isBad);
     };
 
-    fill_training_mtx_kernel<<<num_gpu_blocks, CUDA_NUM_THREADS>>>(ratings_rows_training,ratings_cols_training, row_major_ordering, 
-      csr_format_ratingsMtx_userID_dev_training,
-      coo_format_ratingsMtx_itemID_dev_training,
-      coo_format_ratingsMtx_rating_dev_training,
-      full_training_ratings_mtx,
-      isBad);
+
 
     CUDA_CHECK(cudaMemcpy(&isBad_host, isBad, sizeof(bool), cudaMemcpyDeviceToHost));
     cudaFree(isBad);
@@ -2821,6 +2862,8 @@ __global__ void get_cosine_similarity_kernel(const int ratings_rows,
             num     += coo_format_ratingsMtx_rating_dev[i] * coo_format_ratingsMtx_rating_dev[j] ;
             denom_i += pow(coo_format_ratingsMtx_rating_dev[i], (float)2.0) ;
             denom_j += pow(coo_format_ratingsMtx_rating_dev[j], (float)2.0) ; 
+          }else if(user_i_itemID < user_j_itemID){
+            break;
           }
         }
       }
@@ -2912,6 +2955,8 @@ __global__ void get_cosine_similarity_host_kernel(const long long int start,
             num     += coo_format_ratingsMtx_rating_dev[i] * coo_format_ratingsMtx_rating_dev[j] ;
             denom_i += pow(coo_format_ratingsMtx_rating_dev[i], (float)2.0) ;
             denom_j += pow(coo_format_ratingsMtx_rating_dev[j], (float)2.0) ; 
+          }else if(user_i_itemID < user_j_itemID){
+            break;
           }
         }
       }
@@ -4253,7 +4298,7 @@ template <>
 
     float* full_A;
     CUDA_CHECK(cudaMalloc((void**)&full_A, (long long int)m * (long long int)k * sizeof(float)));
-    gpu_fill_training_mtx(m, k, false, csrRowPtrA_temp, csrColIndA, csrValA, full_A);
+    gpu_fill_training_mtx((long long int)m, (long long int)k, false, csrRowPtrA_temp, csrColIndA, csrValA, full_A);
 
     cublasOperation_t cuTransA =
     (TransA == false) ? CUBLAS_OP_N : CUBLAS_OP_T;

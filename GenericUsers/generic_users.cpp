@@ -364,6 +364,7 @@ int main(int argc, char *argv[])
         checkErrors(coo_format_keyWordMtx_itemID_host);
         checkErrors(coo_format_keyWordMtx_keyWord_host);
 
+        LOG("Attempting to collect Content Based Information.");
         num_keyWords_temp  = csv_keyWords.makeContentBasedcooKeyWordMtx(coo_format_keyWordMtx_itemID_host,
                                                                         coo_format_keyWordMtx_keyWord_host,
                                                                         num_entries_keyWord_mtx_temp);
