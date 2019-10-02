@@ -41,7 +41,7 @@ int CSVReader::num_rows()
  	std::cout<<"finished call to CSVReader::num_rows()"<<std::endl;
  	gettimeofday(&program_end, NULL);
     program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
-    printf("getData runtime: %f\n", program_time); 
+    printf("getData runtime: %f\n", readable_time(program_time)); 
 	
 	return mycount;
 	
@@ -72,7 +72,7 @@ int CSVReader::num_cols()
  	std::cout<<"finished call to CSVReader::num_cols()"<<std::endl;
  	gettimeofday(&program_end, NULL);
     program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
-    printf("getData runtime: %f\n", program_time); 
+    printf("getData runtime: %f\n", readable_time(program_time)); 
 	
 	return cols;
 	
@@ -131,8 +131,8 @@ long long int CSVReader::num_entries()
   
 	gettimeofday(&program_end, NULL);
     program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
-    //printf("getData runtime: %f\n", program_time); 
-  	LOG("finished call to CSVReader::num_entries() in "<<program_time<< "ms");
+    //printf("getData runtime: %f\n", readable_time(program_time)); 
+  	LOG("finished call to CSVReader::num_entries() in "<<readable_time(program_time));
   	LOG("num_entries : "<<num_entries);
   	//std::cout<<std::endl;
 
@@ -177,7 +177,7 @@ std::vector<std::vector<std::string> > CSVReader::getData()
  	std::cout<<"finished call to CSVReader::getData()"<<std::endl;
  	gettimeofday(&program_end, NULL);
     program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
-    printf("getData runtime: %f\n", program_time); 
+    printf("getData runtime: %f\n", readable_time(program_time)); 
 	
 	return dataList;
 }
@@ -245,8 +245,8 @@ void CSVReader::getData(float* data, const int rows, const int cols)
  	
  	gettimeofday(&program_end, NULL);
     program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
-    //printf("getData runtime: %f\n", program_time); 
-	std::cout<<"finished call to CSVReader::getData() in "<<program_time<< "ms"<<std::endl<<std::endl;
+    //printf("getData runtime: %f\n", readable_time(program_time)); 
+	std::cout<<"finished call to CSVReader::getData() in "<<readable_time(program_time)<<std::endl<<std::endl;
 	//std::cout<<std::endl;
 }
 
@@ -310,8 +310,8 @@ void CSVReader::getData(int* coo_format_ratingsMtx_userID_host,
  	
  	gettimeofday(&program_end, NULL);
     program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
-    //printf("getData runtime: %f\n", program_time); 
-	LOG("finished call to CSVReader::getData() in "<<program_time<< "ms");
+    //printf("getData runtime: %f\n", readable_time(program_time)); 
+	LOG("finished call to CSVReader::getData() in "<<readable_time(program_time));
 	//std::cout<<std::endl;
 }
 
@@ -444,8 +444,8 @@ void CSVReader::getDataJSON(int* coo_format_ratingsMtx_userID_host,
  	
  	gettimeofday(&program_end, NULL);
     program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
-    //printf("getData runtime: %f\n", program_time); 
-	LOG("finished call to CSVReader::getDataJSON() in "<<program_time<< "ms"<<std::endl);
+    //printf("getData runtime: %f\n", readable_time(program_time)); 
+	LOG("finished call to CSVReader::getDataJSON() in "<<readable_time(program_time)<<std::endl);
 	//std::cout<<std::endl;
 }
 
@@ -529,8 +529,8 @@ long long int CSVReader::makeContentBasedcooKeyWordMtx(int* coo_format_keyWordMt
  	
  	gettimeofday(&program_end, NULL);
     program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
-    //printf("getData runtime: %f\n", program_time); 
-	LOG("finished call to CSVReader::makeContentBasedcrsKeyWordMtx() in "<<program_time<< "ms");
+    //printf("getData runtime: %f\n", readable_time(program_time)); 
+	LOG("finished call to CSVReader::makeContentBasedcrsKeyWordMtx() in "<<readable_time(program_time));
 	//std::cout<<std::endl;
 
 	return total_keyWords;

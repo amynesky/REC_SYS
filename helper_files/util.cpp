@@ -696,7 +696,7 @@ void cpu_set_as_index<int>(int* x, const long long int rows, const long long int
 
 
 
-void cpu_get_cosine_similarity(const long long int ratings_rows, const int num_entries,
+void cpu_get_cosine_similarity(const long long int ratings_rows,
   const int* csr_format_ratingsMtx_userID_host,
   const int* coo_format_ratingsMtx_itemID_host,
   const float* coo_format_ratingsMtx_rating_host,
@@ -706,41 +706,66 @@ void cpu_get_cosine_similarity(const long long int ratings_rows, const int num_e
   struct timeval program_start, program_end;
   double program_time;
   gettimeofday(&program_start, NULL);
+  if(print) LOG("called cpu_get_cosine_similarity") ;
 
-  for( long long int entry = (long long int)0; entry < ratings_rows * ratings_rows; entry++){
-    int user_i = entry % ratings_rows;
-    int user_j = entry / ratings_rows;
-    if( user_i == user_j){
-      cosine_similarity[entry] = (float)1.0;
-    }else{
-      int   count   = 0;
-      float num     = (float)0.0;
-      float denom_i = (float)0.0;
-      float denom_j = (float)0.0;
-      for(int i = csr_format_ratingsMtx_userID_host[user_i]; i < csr_format_ratingsMtx_userID_host[user_i + 1]; i++){
-        for(int j = csr_format_ratingsMtx_userID_host[user_j]; j < csr_format_ratingsMtx_userID_host[user_j + 1]; j++){
-          int user_i_col = coo_format_ratingsMtx_itemID_host[i];
-          int user_j_col = coo_format_ratingsMtx_itemID_host[j];
-          if( user_i_col == user_j_col){
-            count   += 1;
-            num     += coo_format_ratingsMtx_rating_host[i] * coo_format_ratingsMtx_rating_host[j] ;
-            denom_i += pow(coo_format_ratingsMtx_rating_host[i], (float)2.0) ;
-            denom_j += pow(coo_format_ratingsMtx_rating_host[j], (float)2.0) ; 
+  #ifdef _OPENMP
+    int nProcessors = omp_get_max_threads();
+    omp_set_num_threads((int)std::min((long long int)nProcessors, ratings_rows * ratings_rows));
+    int nthreads = omp_get_num_threads();
+  #endif
+
+  #pragma omp parallel shared(nthreads)
+  {
+    #ifdef _OPENMP
+      int th_id = omp_get_thread_num();
+    #endif
+    for(long long int entry = (long long int)th_id; entry < ratings_rows * ratings_rows; entry += (long long int)nthreads){
+    //for( long long int entry = (long long int)0; entry < ratings_rows * ratings_rows; entry++){
+      long long int whole_index = from_below_diag_to_whole_faster(entry, ratings_rows);
+      int user_i = (int)(whole_index % ratings_rows);
+      int user_j = (int)(whole_index / ratings_rows);
+      if( user_i == user_j){
+        LOG("Thread "<<th_id<<" is bad : " <<user_i) ;
+        cosine_similarity[entry] = (float)1.0;
+      }else{
+        int   count   = 0;
+        float num     = (float)0.0;
+        float denom_i = (float)0.0;
+        float denom_j = (float)0.0;
+        for(int i = csr_format_ratingsMtx_userID_host[user_i]; i < csr_format_ratingsMtx_userID_host[user_i + 1]; i++){
+          int user_i_itemID = coo_format_ratingsMtx_itemID_host[i];
+          int user_j_itemID = 0;
+          int start_j = csr_format_ratingsMtx_userID_host[user_j];
+          for(int j = start_j; j < csr_format_ratingsMtx_userID_host[user_j + 1]; j++){
+            user_j_itemID = coo_format_ratingsMtx_itemID_host[j];
+            if( user_i_itemID == user_j_itemID){
+              count   += 1;
+              num     += coo_format_ratingsMtx_rating_host[i] * coo_format_ratingsMtx_rating_host[j] ;
+              denom_i += pow(coo_format_ratingsMtx_rating_host[i], (float)2.0) ;
+              denom_j += pow(coo_format_ratingsMtx_rating_host[j], (float)2.0) ; 
+              start_j = j + 1;
+            }else if(user_i_itemID < user_j_itemID){
+              start_j = j;
+              break;
+            }
           }
         }
-      }
-      if(count > 0){
-      //float temp = num / std::sqrt(denom_i * denom_j);
-        float temp = count / std::sqrt((csr_format_ratingsMtx_userID_host[user_i + 1] - csr_format_ratingsMtx_userID_host[user_i]) * (csr_format_ratingsMtx_userID_host[user_j + 1] - csr_format_ratingsMtx_userID_host[user_j]));
-        cosine_similarity[entry] = temp;
-        if (::isinf(temp) || ::isnan(temp)){
-          ABORT_IF_NEQ(0, 1, "isBad");
-        };
-      }else{
-        cosine_similarity[entry] = (float)0.0;
+        if(count > 0){
+            //float temp = num / sqrt(denom_i * denom_j);
+          float temp_i = (float)csr_format_ratingsMtx_userID_host[user_i + 1] - (float)csr_format_ratingsMtx_userID_host[user_i];
+          float temp_j = (float)csr_format_ratingsMtx_userID_host[user_j + 1] - (float)csr_format_ratingsMtx_userID_host[user_j];
+          float temp = ((float)count) / sqrtf(temp_i * temp_j);
+          cosine_similarity[entry] = temp;
+          if (::isinf(temp) || ::isnan(temp)){
+            LOG("Thread "<<th_id<<" is bad : " <<temp) ;
+          };
+        }else{
+         cosine_similarity[entry] = (float)0.0;
+        }
       }
     }
   }
+
   if(0) LOG("finished call to gpu_orthogonal_decomp") ;
   gettimeofday(&program_end, NULL);
   program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
@@ -786,6 +811,65 @@ void cpu_sort_index_by_max(const long long int rows, const long long int cols,  
 template void cpu_sort_index_by_max<int>(const long long int rows, const long long int cols,  int* x, int* indicies);
 template void cpu_sort_index_by_max<float>(const long long int rows, const long long int cols,  float* x, int* indicies);
 
+/* This function takes last element as pivot, places
+   the pivot element at its correct position in sorted
+    array, and places all smaller (smaller than pivot)
+   to left of pivot and all greater elements to right
+   of pivot */
+template<typename Dtype>
+int partition (Dtype* x, int low_index, int high_index, int* indicies)
+{
+    // pivot (Element to be placed at right position)
+    Dtype pivot = x[high_index];  
+    Dtype temp = 0.0;
+    int temp_ = 0;
+    int i = (low_index - 1);  // Index of smaller element
+
+    for (int j = low_index; j < high_index; j++)
+    {
+        // If current element is smaller than the pivot
+        if (x[j] < pivot)
+        {
+            i++;    // increment index of smaller element
+            temp = x[i];
+            x[i] = x[j];
+            x[j] = temp;
+            temp_ = indicies[i];
+            indicies[i] = indicies[j];
+            indicies[j] = temp_;
+        }
+    }
+    temp = x[i + 1];
+    x[i + 1] = x[high_index];
+    x[high_index] = temp;
+    temp_ = indicies[i + 1];
+    indicies[i + 1] = indicies[high_index];
+    indicies[high_index] = temp_;
+    return (i + 1);
+}
+
+template int partition<int>(int* x, int low_index, int high_index, int* indicies);
+template int partition<float>(float* x, int low_index, int high_index, int* indicies);
+
+
+/* low  --> Starting index,  high  --> Ending index */
+template<typename Dtype>
+void quickSort_by_key(Dtype* x, int low_index, int high_index, int* indicies)
+{
+    if (x[low_index] < x[high_index])
+    {
+        /* pi is partitioning index, arr[pi] is now
+           at right place */
+        int pi = partition<Dtype>(x, low_index, high_index, indicies);
+
+        quickSort_by_key<Dtype>(x, low_index, pi - 1, indicies);  // Before pi
+        quickSort_by_key<Dtype>(x, pi + 1, high_index, indicies); // After pi
+    }
+}
+
+template void quickSort_by_key<int>(int* x, int low_index, int high_index, int* indicies);
+template void quickSort_by_key<float>(float* x, int low_index, int high_index, int* indicies);
+
 
 template<typename Dtype>
 void cpu_sort_index_by_max(const long long int dimension,  Dtype* x, int* indicies, int top_N)
@@ -824,7 +908,6 @@ void cpu_sort_index_by_max(const long long int dimension,  Dtype* x, int* indici
       long long int num_below_diag = (long long int)0;
       long long int left_off = (long long int)0;
       long long int num_in_col = (long long int)(dimension - 1);
-
       for(long long int j = (long long int)0; j < i; j++){
         left_off = num_below_diag + i - (dimension - num_in_col);
 
@@ -835,18 +918,20 @@ void cpu_sort_index_by_max(const long long int dimension,  Dtype* x, int* indici
         num_in_col -= (long long int)(1);
       }
       left_off = num_below_diag + (i + (long long int)(1)) - (dimension - num_in_col);
-
       for(long long int j = i + 1; j < dimension; j++){
         temp_x[j - 1] = x[left_off];
         temp_indicies[j - 1] = j;
         left_off += (long long int)(1);
       }
+      //LOG("Hello from thread "<<th_id) ;
       //thrust::sort_by_key sorts temp_indicies by temp_x smallest to temp_x largest
-      thrust::sort_by_key(thrust::host, temp_x, temp_x + dimension - 1 , temp_indicies);
+      //thrust::sort_by_key(thrust::host, temp_x, temp_x + dimension - 1 , temp_indicies);
+      quickSort_by_key<Dtype>(temp_x, 0, dimension - 1, temp_indicies);
       host_copy(top_N, temp_indicies + dimension - top_N, indicies + i * top_N);
     }
+    //LOG("Hello from thread "<<th_id) ;
   }
-
+  LOG("Hello") ;
   free(temp_x);
   free(temp_indicies);
 
@@ -974,6 +1059,66 @@ long long int from_below_diag_to_whole(long long int below_diag_index, int dimen
     }
   }
   return (long long int)col * dimension + (dimension - num_in_col) + below_diag_index - num_so_far;
+}
+
+
+
+long long int from_below_diag_to_whole_faster(long long int below_diag_index, int dimension){
+  bool debug = false;
+  const long long int num_below_diag = (dimension * (dimension - (long long int)1)) / (long long int)2;
+  if( below_diag_index < (long long int)0 || below_diag_index > num_below_diag - (long long int)(1)) return (long long int)(-1);
+
+  if (below_diag_index < num_below_diag / 2){
+    long long int num_so_far = (long long int)0; // number to the left
+    int col = 0;
+    long long int num_in_col = (long long int)(dimension - 1);
+    while(num_so_far < below_diag_index + (long long int)(1)){
+      if(debug){
+        LOG("num_so_far : "<<num_so_far);
+        LOG("num_in_col : "<<num_in_col);
+        LOG("col : "<<col);
+        LOG("col * dimension + (dimension - num_in_col) + below_diag_index - num_so_far = "<<col<<" * "<<dimension<<" + ("<<dimension<<" - "<<num_in_col<<") + "<<below_diag_index<<" - "<<num_so_far<<" = "<<(long long int)col * dimension + (dimension - num_in_col) + below_diag_index - num_so_far);
+      }
+      
+      if(num_so_far + num_in_col == below_diag_index + (long long int)(1)){
+        return (long long int)(col + 1) * dimension - (long long int)(1);
+      }
+      if(num_so_far + num_in_col > below_diag_index + (long long int)(1)){ 
+        break;
+      }else{
+        num_so_far += num_in_col;
+        num_in_col -= (long long int)(1);
+        col += 1;
+      }
+    }
+    return (long long int)col * dimension + (dimension - num_in_col) + below_diag_index - num_so_far;
+  }else{
+    long long int num_so_far = num_below_diag; // number to the left
+    int col = dimension - 2;
+    long long int num_in_col = (long long int)1;
+    while(num_so_far >= below_diag_index + (long long int)(1)){
+      if(false){
+        LOG("num_so_far : "<<num_so_far - num_in_col);
+        LOG("num_in_col : "<<num_in_col);
+        LOG("col : "<<col);
+        LOG("col * dimension + (dimension - num_in_col) + below_diag_index - num_so_far = "<<col<<" * "<<dimension<<" + ("<<dimension<<" - "<<num_in_col<<") + "<<below_diag_index<<" - "<<num_so_far- num_in_col<<" = "<<(long long int)col * dimension + (dimension - num_in_col) + below_diag_index - (num_so_far-num_in_col));
+      }
+      
+      if(num_so_far - num_in_col == below_diag_index + (long long int)(1)){
+        return (long long int)(col) * dimension - (long long int)(1);
+      }
+      if(num_so_far - num_in_col < below_diag_index + (long long int)(1)){ 
+        num_so_far -= num_in_col;
+        break;
+      }else{
+        num_so_far -= num_in_col;
+        num_in_col += (long long int)(1);
+        col -= 1;
+      }
+    }
+    LOG("col * dimension + (dimension - num_in_col) + below_diag_index - num_so_far = "<<col<<" * "<<dimension<<" + ("<<dimension<<" - "<<num_in_col<<") + "<<below_diag_index<<" - "<<num_so_far<<" = "<<(long long int)col * dimension + (dimension - num_in_col) + below_diag_index - num_so_far);
+    return (long long int)col * dimension + (dimension - num_in_col) + below_diag_index - num_so_far;    
+  }
 }
 
 long long int from_whole_to_below_diag(long long int whole_index, int dimension){

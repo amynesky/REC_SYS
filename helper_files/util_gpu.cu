@@ -390,8 +390,9 @@ template void print_gpu_array_entries<float>(const float* array, int count);
 template<typename Dtype>
 void save_device_array_to_file(const Dtype* A_dev, int count, std::string title)
 {
-
-  Dtype A_host[count];
+  Dtype* A_host  = NULL;
+  A_host = (Dtype *)malloc(count *  sizeof(Dtype)); 
+  checkErrors(A_host);
   CUDA_CHECK(cudaMemcpy(A_host, A_dev, count*sizeof(Dtype), cudaMemcpyDeviceToHost));
 
   std::stringstream filename;
@@ -404,6 +405,7 @@ void save_device_array_to_file(const Dtype* A_dev, int count, std::string title)
       entries<<", ";
     };   
   };
+  free(A_host);
 }
 
 template void save_device_array_to_file<int>(const int* A_dev, int count, std::string title);
@@ -2538,7 +2540,8 @@ __global__ void gpu_supplement_training_mtx_with_content_based_kernel(const long
         int other_movie = coo_format_ratingsMtx_itemID_dev_training[j];
         for(int k = csr_format_keyWordMtx_itemID_dev[other_movie]; k < csr_format_keyWordMtx_itemID_dev[other_movie + 1]; k++){
           int other_keyWord = coo_format_keyWordMtx_keyWord_dev[k];
-          for(int l = csr_format_keyWordMtx_itemID_dev[movie]; l < csr_format_keyWordMtx_itemID_dev[movie + 1]; l++){
+          int start_l = csr_format_keyWordMtx_itemID_dev[movie];
+          for(int l = start_l; l < csr_format_keyWordMtx_itemID_dev[movie + 1]; l++){
             int keyword = coo_format_keyWordMtx_keyWord_dev[l];
             if(keyword == other_keyWord){
               count += 1;
@@ -2548,7 +2551,9 @@ __global__ void gpu_supplement_training_mtx_with_content_based_kernel(const long
               }else{
                 rating += full_training_ratings_mtx[(long long int)user + (long long int)other_movie * ratings_rows_training];
               }
+              start_l = l+1;
             } else if (keyword > other_keyWord){
+              start_l = l;
               break;
             }
           }
@@ -2810,6 +2815,49 @@ __device__ long long int from_below_diag_to_whole_device(long long int below_dia
   return (long long int)col * dimension + (dimension - num_in_col) + below_diag_index - num_so_far;
 }
 
+__device__ long long int from_below_diag_to_whole_device_faster(long long int below_diag_index, int dimension){
+
+  const long long int num_below_diag = (dimension * (dimension - (long long int)1)) / (long long int)2;
+  if( below_diag_index < (long long int)0 || below_diag_index > num_below_diag - (long long int)(1)) return (long long int)(-1);
+
+  if (below_diag_index < num_below_diag / 2){
+    long long int num_so_far = (long long int)0; // number to the left
+    int col = 0;
+    long long int num_in_col = (long long int)(dimension - 1);
+    while(num_so_far < below_diag_index + (long long int)(1)){
+      if(num_so_far + num_in_col == below_diag_index + (long long int)(1)){
+        return (long long int)(col + 1) * dimension - (long long int)(1);
+      }
+      if(num_so_far + num_in_col > below_diag_index + (long long int)(1)){ 
+        break;
+      }else{
+        num_so_far += num_in_col;
+        num_in_col -= (long long int)(1);
+        col += 1;
+      }
+    }
+    return (long long int)col * dimension + (dimension - num_in_col) + below_diag_index - num_so_far;
+  }else{
+    long long int num_so_far = num_below_diag; // number to the left
+    int col = dimension - 2;
+    long long int num_in_col = (long long int)1;
+    while(num_so_far >= below_diag_index + (long long int)(1)){
+      if(num_so_far - num_in_col == below_diag_index + (long long int)(1)){
+        return (long long int)(col) * dimension - (long long int)(1);
+      }
+      if(num_so_far - num_in_col < below_diag_index + (long long int)(1)){ 
+        num_so_far -= num_in_col;
+        break;
+      }else{
+        num_so_far -= num_in_col;
+        num_in_col += (long long int)(1);
+        col -= 1;
+      }
+    }
+    return (long long int)col * dimension + (dimension - num_in_col) + below_diag_index - num_so_far;    
+  }
+}
+
 __device__ long long int from_whole_to_below_diag_device(long long int whole_index, int dimension){
   bool debug = false;
   int row = (int)(whole_index % (long long int)dimension);
@@ -2934,7 +2982,7 @@ __global__ void get_cosine_similarity_host_kernel(const long long int start,
 {
   // assume that cosine_similarity_dev is stored in column major ordering (a column stays together in memory).
   CUDA_KERNEL_LOOP(entry, num){
-    long long int whole_index = from_below_diag_to_whole_device((long long int)entry + start, ratings_rows);
+    long long int whole_index = from_below_diag_to_whole_device_faster((long long int)entry + start, ratings_rows);
     int user_i = (int)(whole_index % ratings_rows);
     int user_j = (int)(whole_index / ratings_rows);
     if( user_i == user_j){
@@ -2956,7 +3004,7 @@ __global__ void get_cosine_similarity_host_kernel(const long long int start,
             num     += coo_format_ratingsMtx_rating_dev[i] * coo_format_ratingsMtx_rating_dev[j] ;
             denom_i += pow(coo_format_ratingsMtx_rating_dev[i], (float)2.0) ;
             denom_j += pow(coo_format_ratingsMtx_rating_dev[j], (float)2.0) ; 
-            start_j = j;
+            start_j = j + 1;
           }else if(user_i_itemID < user_j_itemID){
             start_j = j;
             break;

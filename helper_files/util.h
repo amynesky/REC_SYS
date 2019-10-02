@@ -158,7 +158,7 @@ void cpu_set_all(Dtype* x, const int N, Dtype alpha);
 template <typename Dtype>
 void cpu_set_as_index(Dtype* x, const long long int rows, const long long int cols);
 
-void cpu_get_cosine_similarity(const long long int ratings_rows, const int num_entries,
+void cpu_get_cosine_similarity(const long long int ratings_rows, 
                               const int* csr_format_ratingsMtx_userID_host,
                               const int* coo_format_ratingsMtx_itemID_host,
                               const float* coo_format_ratingsMtx_rating_host,
@@ -178,6 +178,8 @@ void cpu_mark_CU_users(const int ratings_rows_CU, const int ratings_rows, const 
 
 
 long long int from_below_diag_to_whole(long long int below_diag_index, int dimension);
+
+long long int from_below_diag_to_whole_faster(long long int below_diag_index, int dimension);
 
 long long int from_whole_to_below_diag(long long int whole_index, int dimension);
 

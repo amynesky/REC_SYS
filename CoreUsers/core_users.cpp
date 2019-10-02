@@ -89,6 +89,13 @@ int main(int argc, char *argv[])
         LOG("below_diag_indicies 0 maps to -> whole_indicies "   <<from_below_diag_to_whole(below_diag_indicies[0], dimension) );
         LOG("below_diag_indicies 1 maps to -> whole_indicies "   <<from_below_diag_to_whole(below_diag_indicies[1], dimension) );
         LOG("below_diag_indicies 2 maps to -> whole_indicies "   <<from_below_diag_to_whole(below_diag_indicies[2], dimension) );
+        LOG("below_diag_indicies 2 maps to -> whole_indicies "   <<from_below_diag_to_whole_faster(below_diag_indicies[2], dimension) );
+        LOG("below_diag_indicies 3 maps to -> whole_indicies "   <<from_below_diag_to_whole(below_diag_indicies[3], dimension) );
+        LOG("below_diag_indicies 3 maps to -> whole_indicies "   <<from_below_diag_to_whole_faster(below_diag_indicies[3], dimension) );
+        LOG("below_diag_indicies 4 maps to -> whole_indicies "   <<from_below_diag_to_whole(below_diag_indicies[4], dimension) );
+        LOG("below_diag_indicies 4 maps to -> whole_indicies "   <<from_below_diag_to_whole_faster(below_diag_indicies[4], dimension) );
+        LOG("below_diag_indicies 5 maps to -> whole_indicies "   <<from_below_diag_to_whole(below_diag_indicies[5], dimension) );
+        LOG("below_diag_indicies 5 maps to -> whole_indicies "   <<from_below_diag_to_whole_faster(below_diag_indicies[5], dimension) );
 
         LOG("whole_indicies 0 maps to -> below_diag_indicies "   <<from_whole_to_below_diag(whole_indicies[0], dimension) );
         LOG("whole_indicies 1 maps to -> below_diag_indicies "   <<from_whole_to_below_diag(whole_indicies[1], dimension) );
@@ -589,17 +596,20 @@ int main(int argc, char *argv[])
 
 
 
-    // cpu_get_cosine_similarity(ratings_rows, num_entries,
-    //                           coo_format_ratingsMtx_userID_host,
-    //                           coo_format_ratingsMtx_itemID_host,
-    //                           coo_format_ratingsMtx_rating_host,
-    //                           cosine_similarity);
+    cpu_get_cosine_similarity(ratings_rows, 
+                              coo_format_ratingsMtx_userID_host,
+                              coo_format_ratingsMtx_itemID_host,
+                              coo_format_ratingsMtx_rating_host,
+                              cosine_similarity);
 
+    /*
     get_cosine_similarity_host(ratings_rows, 
                               csr_format_ratingsMtx_userID_dev,
                               coo_format_ratingsMtx_itemID_dev,
                               coo_format_ratingsMtx_rating_dev,
                               cosine_similarity);
+                              */
+                              
 
     //cpu_set_as_index(col_index, ratings_rows, ratings_rows);
     //gpu_set_as_index_host(col_index, ratings_rows, ratings_rows);
