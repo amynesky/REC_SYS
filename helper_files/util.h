@@ -122,6 +122,8 @@ void printPartialMatrices(Dtype * A, Dtype * B, int rows, int cols , int ld);
 template < typename Dtype>
 void printPartialMtx(Dtype * A, int rows, int cols , int ld);
 
+template<typename Dtype>
+void print_host_array(const Dtype* host_pointer, int count, std::string title);
 
 template <typename Dtype>
 void save_host_array_to_file(const Dtype* A_host, int count, std::string title);
@@ -177,11 +179,11 @@ void cpu_mark_CU_users(const int ratings_rows_CU, const int ratings_rows, const 
 
 
 
-long long int from_below_diag_to_whole(long long int below_diag_index, int dimension);
+long long int from_below_diag_to_whole(long long int below_diag_index, long long int dimension);
 
-long long int from_below_diag_to_whole_faster(long long int below_diag_index, int dimension);
+long long int from_below_diag_to_whole_faster(long long int below_diag_index, long long int dimension);
 
-long long int from_whole_to_below_diag(long long int whole_index, int dimension);
+long long int from_whole_to_below_diag(long long int whole_index, long long int dimension);
 
 
 

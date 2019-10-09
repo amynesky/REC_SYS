@@ -113,6 +113,35 @@ int main(int argc, char *argv[])
     */
 
 
+    /*
+        //long long int below_index = (long long int)37;
+        long long int ratings_rows_ = (long long int)10;
+        for(long long int below_index = 0; below_index < 45; below_index++){
+
+
+
+            LOG("below_index : "<<below_index);
+
+            long long int whole_index = from_below_diag_to_whole_faster(below_index, ratings_rows_);
+            int user_i = (int)(whole_index % ratings_rows_);
+            int user_j = (int)(whole_index / ratings_rows_);
+            LOG("whole_index : "<<whole_index);
+            LOG("max whole index =  : "<<ratings_rows_ * ratings_rows_ - (long long int)1);
+            LOG("row : "<<user_i);
+            LOG("col : "<<user_j);
+
+            long long int whole_index_slow = from_below_diag_to_whole(below_index, ratings_rows_);
+            int user_i_slow = (int)(whole_index_slow % ratings_rows_);
+            int user_j_slow = (int)(whole_index_slow / ratings_rows_);
+            LOG("slow whole_index : "<<whole_index_slow);
+            LOG("slow row : "<<user_i_slow);
+            LOG("slow col : "<<user_j_slow<<std::endl);
+        }
+        return 0;
+        //}  
+    */
+
+
     cublasStatus_t cublas_status     = CUBLAS_STATUS_SUCCESS;
     cusolverStatus_t cusolver_status = CUSOLVER_STATUS_SUCCESS;
     cusparseStatus_t cusparse_status = CUSPARSE_STATUS_SUCCESS;
@@ -250,7 +279,7 @@ int main(int argc, char *argv[])
     
 
     const long long int num_entries = temp_num_entries;
-    //const int num_entries = 100000; //for debuging code
+    //const long long int num_entries = temp_num_entries/10; //for debuging code
 
     LOG("The dataset has "<<num_entries<<" specified entries.");
     
@@ -595,20 +624,21 @@ int main(int argc, char *argv[])
     checkErrors(col_index);
 
 
-
+    /*
     cpu_get_cosine_similarity(ratings_rows, 
                               coo_format_ratingsMtx_userID_host,
                               coo_format_ratingsMtx_itemID_host,
                               coo_format_ratingsMtx_rating_host,
                               cosine_similarity);
+                              */
 
-    /*
+    
     get_cosine_similarity_host(ratings_rows, 
                               csr_format_ratingsMtx_userID_dev,
                               coo_format_ratingsMtx_itemID_dev,
                               coo_format_ratingsMtx_rating_dev,
                               cosine_similarity);
-                              */
+                              
                               
 
     //cpu_set_as_index(col_index, ratings_rows, ratings_rows);
@@ -622,11 +652,12 @@ int main(int argc, char *argv[])
     */
     //cpu_sort_index_by_max(ratings_rows, ratings_rows,  cosine_similarity, col_index);
     cpu_sort_index_by_max<float>(ratings_rows,  cosine_similarity, col_index, top_N);
-    free(cosine_similarity);
-    if(Debug){
-        save_host_mtx_to_file<int>(col_index, static_cast<int>(top_N), static_cast<int>(ratings_rows), "col_index_sorted");
-    }
 
+    if(Debug && 0){
+        save_host_array_to_file<float>(cosine_similarity, static_cast<int>(5*ratings_rows), "cosine_similarity_chunk");
+        save_host_mtx_to_file<int>(col_index, static_cast<int>(top_N), ratings_rows, "col_index_sorted");
+    }
+    free(cosine_similarity);
     /*
         for each user index, count how many times that user appears in the top_N + 1 most similar users.
     */
@@ -636,7 +667,7 @@ int main(int argc, char *argv[])
 
     cpu_count_appearances(top_N, ratings_rows, count, col_index);
     free(col_index);
-    if(Debug ){
+    if(Debug && 0){
         save_host_array_to_file<int>(count, (int)ratings_rows, "count");
     }
 
@@ -649,7 +680,7 @@ int main(int argc, char *argv[])
 
 
     cpu_sort_index_by_max(1, ratings_rows,  count, top_users);
-    if(Debug){
+    if(Debug && 0){
         save_host_array_to_file<int>(top_users, ratings_rows, "top_users");
 
     }
@@ -660,7 +691,7 @@ int main(int argc, char *argv[])
     cpu_set_all<int>(count, ratings_rows, 1);
     cpu_mark_CU_users(ratings_rows_CU, ratings_rows, top_users, count );
     free(top_users);
-    if(Debug ){
+    if(Debug && 0){
         save_host_array_to_file<int>(count, ratings_rows, "top_user_bools");
         //LOG("Press Enter to continue.") ;
         //std::cin.ignore();
@@ -1182,9 +1213,9 @@ int main(int argc, char *argv[])
             LOG("testing error : "<< testing_error_temp / nnz_ ); 
             testing_error[num_tests] = testing_error_temp / nnz_ ;
             //testing_error[num_tests] = testing_error_temp / (float)(nnz_ * 2.0);
-            save_device_array_to_file<float>(testing_error, (int)num_tests, "testing_error");
+            save_host_array_to_file<float>(testing_error, (int)num_tests, "testing_error");
             num_tests += 1;
-            total_testing_nnz = (long long int)0;
+            //total_testing_nnz = (long long int)0;
 
             
         }

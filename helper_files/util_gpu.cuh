@@ -568,6 +568,12 @@ void get_cosine_similarity_host(const long long int ratings_rows,
     const float* coo_format_ratingsMtx_rating_dev,
     float* cosine_similarity_host);
 
+void get_cosine_similarity_host_experiment(const long long int ratings_rows, 
+    const int* csr_format_ratingsMtx_userID_dev,
+    const int* coo_format_ratingsMtx_itemID_dev,
+    const float* coo_format_ratingsMtx_rating_dev,
+    float* cosine_similarity_host);
+
 void gpu_copy(const int M, const int N,  const float* x, 
                     const float* row_indicies, float* y);
 
