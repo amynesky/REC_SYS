@@ -5,6 +5,7 @@
 #include <fstream>
 #include <sstream>
 #include <vector>
+#include <map>
 #include <iterator>
 #include <string>
 #include <algorithm>
@@ -63,6 +64,23 @@
     	if (abort) exit(EXIT_FAILURE);\
     }
 
+#define ABORT_IF_LE(a, b, output_statement) \
+  if(a <= b){ \
+      std::cout<<__FILE__<<" line "<<__LINE__<<" : "<<output_statement<<std::endl;\
+      if (abort) exit(EXIT_FAILURE);\
+    }
+#define ABORT_IF_GT(a, b, output_statement) \
+  if(a > b){ \
+      std::cout<<__FILE__<<" line "<<__LINE__<<" : "<<output_statement<<std::endl;\
+      if (abort) exit(EXIT_FAILURE);\
+    }
+
+#define ABORT_IF_GE(a, b, output_statement) \
+  if(a >= b){ \
+      std::cout<<__FILE__<<" line "<<__LINE__<<" : "<<output_statement<<std::endl;\
+      if (abort) exit(EXIT_FAILURE);\
+    }
+
 #define LOG(output_statement) \
     	std::cout<<__FILE__<<" line "<<__LINE__<<" at "<<currentDateTime()<<" : "<<output_statement<<std::endl;
 
@@ -77,6 +95,8 @@ inline void Hassert(const Dtype *ptr, const char *file, int line, bool abort=tru
       if (abort) {ABORT_IF_NEQ(0, 1, "Fatal: failed to allocate");};
    }
 }
+
+bool too_big(long long int li);
 
 const std::string currentDateTime();
 //============================================================================================
@@ -129,6 +149,9 @@ template <typename Dtype>
 void save_host_array_to_file(const Dtype* A_host, int count, std::string title);
 
 template <typename Dtype>
+void get_host_array_from_saved_txt(const Dtype* A_host, int count, std::string title);
+
+template <typename Dtype>
 void append_host_array_to_file(const Dtype* A_host, int count, std::string title);
 
 
@@ -137,6 +160,8 @@ void save_host_arrays_side_by_side_to_file(const int* A_host, const int* B_host,
 
 template <typename Dtype>
 void save_host_mtx_to_file(const Dtype* A_host, const int lda, const int  sda, std::string title);
+
+void save_map(std::map<int, int>* items_dictionary, std::string title);
 
 
 //============================================================================================
@@ -150,9 +175,13 @@ void cpu_fill_training_mtx(const long long int ratings_rows_training, const long
                             const float* coo_format_ratingsMtx_rating_host_training,
                             float* full_training_ratings_mtx);
 
+template < typename Dtype>
+void cpu_shuffle_array(const long long int n,  Dtype* x);
 
 void cpu_shuffle_mtx_rows_or_cols(cublasHandle_t dn_handle, const long long int M, const long long int N, 
   bool row_major_ordering, float* x, bool shuffle_rows);
+
+void cpu_shuffle_map_second(const long long int M, std::map<int, int>* items_dictionary );
 
 template <typename Dtype>
 void cpu_set_all(Dtype* x, const int N, Dtype alpha);

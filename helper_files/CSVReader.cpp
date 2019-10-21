@@ -2,6 +2,7 @@
 #include <map>
 #include <fstream>
 #include <vector>
+#include <map>
 #include <iterator>
 #include <string>
 #include <algorithm>
@@ -192,7 +193,8 @@ std::vector<std::vector<std::string> > CSVReader::getData()
 * Parses through csv file line by line and returns the data
 * in array.
 */
-void CSVReader::getData(float* data, const int rows, const int cols)
+template < typename Dtype>
+void CSVReader::getData(Dtype* data, const int rows, const int cols)
 {
 	struct timeval program_start, program_end;
     double program_time;
@@ -202,7 +204,7 @@ void CSVReader::getData(float* data, const int rows, const int cols)
 	try{
 		std::ifstream file(fileName.c_str());
 
-		bool first = 1;
+		//bool first = 1;
 
 		std::string line = "";
 		// Iterate through each line and split the content using delimeter
@@ -213,13 +215,19 @@ void CSVReader::getData(float* data, const int rows, const int cols)
 			std::vector<std::string> vec;
 			boost::algorithm::split(vec, line, boost::is_any_of(delimeter));
 
-			if(first){
-				first = 0;
-				// userID, itemID, rating, timestamp
-			}else{
-				for(int col = 0; col <cols; col++)
+			// if(first){
+			// 	first = 0;
+			// 	// userID, itemID, rating, timestamp
+			// }else{
+				for(int col = 0; col < cols; col++)
 		        {
-		            data[row + col * rows] = ::atof(vec[col].c_str());
+		        	if (typeid(data[0]) == typeid(int)){
+		        		data[row + col * rows] = ::atoi(vec[col].c_str());
+		        	}
+		        	if (typeid(data[0]) == typeid(float)){
+		        		data[row + col * rows] = ::atof(vec[col].c_str());
+		        	}
+		            
 		            // std::cout<<data[row + col * rows]<< " , ";
 
 		            //std::cout << "column ["<<col<<"] :" <<vec[col]<<std::endl;
@@ -230,7 +238,7 @@ void CSVReader::getData(float* data, const int rows, const int cols)
 		        row++;
 		    	// std::cout << "Press Enter to continue." ;
 	 	 		// std::cin.ignore();
-			};
+			//};
 
 			
 		}
@@ -250,6 +258,9 @@ void CSVReader::getData(float* data, const int rows, const int cols)
 	//std::cout<<std::endl;
 }
 
+template void CSVReader::getData(int* data, const int rows, const int cols);
+template void CSVReader::getData(float* data, const int rows, const int cols);
+
 
 /*
 * Parses through csv file line by line and returns the data
@@ -258,8 +269,10 @@ void CSVReader::getData(float* data, const int rows, const int cols)
 void CSVReader::getData(int* coo_format_ratingsMtx_userID_host,
 					    int* coo_format_ratingsMtx_itemID_host,
 					    float* coo_format_ratingsMtx_rating_host,
-					    int num_entries)
+					    int num_entries, bool all_items, 
+					    std::map<int, int>* items_dictionary)
 {
+	bool Debug = false;
 	struct timeval program_start, program_end;
     double program_time;
     gettimeofday(&program_start, NULL);
@@ -273,6 +286,57 @@ void CSVReader::getData(int* coo_format_ratingsMtx_userID_host,
 		std::string line = "";
 		// Iterate through each line and split the content using delimeter
 		int row = 0;
+		int total_items = 0;
+		if(!all_items){
+			while (getline(file, line) && row < num_entries){
+				//std::cout<<line<<std::endl;
+				std::vector<std::string> vec;
+				boost::algorithm::split(vec, line, boost::is_any_of(delimeter));
+
+				if(first){
+					first = 0;
+					// userID, itemID, rating, timestamp
+				}else{
+		            int col = (int)(::atof(vec[1].c_str())) - 1;
+		            
+		        	std::map<int, int >::iterator it = items_dictionary->find(col);
+
+					if( it == items_dictionary->end() ){
+						//add the new user
+						std::pair<int ,int > temp = std::pair<int ,int >(col, total_items);
+						items_dictionary->insert (temp);
+						total_items++;
+
+					}else{
+						if(0){
+				            LOG("col : "<<col) ;
+				            LOG("total_items : "<<total_items) ;
+				            LOG("it->first : "<<it->first) ;
+				            LOG("it->second : "<<it->second) ;
+					        LOG("Press Enter to continue.") ;
+					        std::cin.ignore();
+				        }
+					}	
+
+			        row++;
+				};				
+			}
+			if(0){
+				LOG("total_items : "<<total_items) ;
+				save_map(items_dictionary, "items_dictionary_before_shuffle");
+			}
+			cpu_shuffle_map_second((long long int)total_items,  items_dictionary );
+			if(0){
+				save_map(items_dictionary, "items_dictionary_after_shuffle");
+			}
+		}	
+
+		file.clear();
+		file.seekg(0, std::ios::beg);
+
+
+		first = 1;
+		row = 0;
 		while (getline(file, line) && row < num_entries)
 		{
 			//std::cout<<line<<std::endl;
@@ -284,8 +348,28 @@ void CSVReader::getData(int* coo_format_ratingsMtx_userID_host,
 				// userID, itemID, rating, timestamp
 			}else{
 	            coo_format_ratingsMtx_userID_host[row] = (int)(::atof(vec[0].c_str())) - 1; /*make the user index start at zero*/
-	            coo_format_ratingsMtx_itemID_host[row] = (int)(::atof(vec[1].c_str())) - 1;/*make the movie index start at zero*/
-	            coo_format_ratingsMtx_rating_host[row] = ::atof(vec[2].c_str());
+	            //coo_format_ratingsMtx_itemID_host[row] = (int)(::atof(vec[1].c_str())) - 1;/*make the movie index start at zero*/
+	            int col = (int)(::atof(vec[1].c_str())) - 1;
+	            if(all_items){
+		            coo_format_ratingsMtx_itemID_host[row] = col;
+		        }else{
+		        	std::map<int, int >::iterator it = items_dictionary->find(col);
+		        	coo_format_ratingsMtx_itemID_host[row] = it->second;
+		        	if( it == items_dictionary->end() ){
+		        		ABORT_IF_EQ(0, 1, "column not in item dictionary");
+		        	}
+					// if( it == items_dictionary->end() ){
+					// 	//add the new user
+					// 	std::pair<int ,int > temp = std::pair<int ,int >(col, total_items);
+					// 	items_dictionary->insert (temp);
+					// 	coo_format_ratingsMtx_itemID_host[row] = total_items;
+					// 	total_items++;
+
+					// }else{
+					// 	coo_format_ratingsMtx_itemID_host[row] = it->second;
+					// }		
+		        }
+		        coo_format_ratingsMtx_rating_host[row] = ::atof(vec[2].c_str());
 	            // std::cout<<data[row + col * rows]<< " , ";
 
 	            //std::cout << "column ["<<col<<"] :" <<vec[col]<<std::endl;
@@ -298,15 +382,43 @@ void CSVReader::getData(int* coo_format_ratingsMtx_userID_host,
 			};
 
 			
-		}
-
-		  
+		}	  
 
 		// Close the File
 		file.close();
+		if(0){
+			save_host_arrays_side_by_side_to_file(coo_format_ratingsMtx_userID_host, coo_format_ratingsMtx_itemID_host, 
+	                                           coo_format_ratingsMtx_rating_host, num_entries, "coo_before");
+		}
+		if(!all_items){
+			int first_index = 0;
+			int last_index = first_index + 1;
+			while(last_index < num_entries){
+				while(coo_format_ratingsMtx_userID_host[first_index] == coo_format_ratingsMtx_userID_host[last_index]){
+					if(last_index < num_entries - 1){
+						last_index++;
+					}else{
+						break;
+					}
+				}	
+				if(last_index < num_entries - 1){
+					last_index--;
+				}
+
+				thrust::sort_by_key(thrust::host, coo_format_ratingsMtx_itemID_host + first_index, coo_format_ratingsMtx_itemID_host + last_index + 1, coo_format_ratingsMtx_rating_host + first_index);
+				
+				first_index = last_index + 1;
+				last_index = first_index + 1;		
+			}
+		}
+		if(0){
+			save_host_arrays_side_by_side_to_file(coo_format_ratingsMtx_userID_host, coo_format_ratingsMtx_itemID_host, 
+	                                           coo_format_ratingsMtx_rating_host, num_entries, "coo_after");
+		}
 	}catch(const std::ifstream::failure& e){
 		std::cout<<"CSVReader::getData() failure."<<std::endl;
 	}
+
  	
  	gettimeofday(&program_end, NULL);
     program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));

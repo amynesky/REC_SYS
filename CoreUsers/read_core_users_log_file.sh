@@ -9,18 +9,9 @@ START=$(date +%s)
 # awk 'BEGIN { FS="ERROR" }{ print $2 }' "$OBSERVATIONS/core_users_training_error_3.txt" 2>&1 | tee $OBSERVATIONS/core_users_training_error_2.txt
 # awk '{ print $2 }' "$OBSERVATIONS/core_users_training_error_2.txt" 2>&1 | tee $OBSERVATIONS/core_users_training_error.txt
 
-
-grep "gpu_R_error_training error :" "$OBSERVATIONS/core_users_log.txt" 2>&1 | tee $OBSERVATIONS/core_users_training_error_3.txt
-awk 'BEGIN { FS=" error :" }{ print $2 }' "$OBSERVATIONS/core_users_training_error_3.txt" 2>&1 | tee $OBSERVATIONS/core_users_training_error_2.txt
-awk '{ print $1 }' "$OBSERVATIONS/core_users_training_error_2.txt" 2>&1 | tee $OBSERVATIONS/core_users_training_error.txt
-
 grep "gpu_R_error_testing error :" "$OBSERVATIONS/core_users_log.txt" 2>&1 | tee $OBSERVATIONS/core_users_testing_error_3.txt
 awk 'BEGIN { FS=" error :" }{ print $2 }' "$OBSERVATIONS/core_users_testing_error_3.txt" 2>&1 | tee $OBSERVATIONS/core_users_testing_error_2.txt
 awk '{ print $1 }' "$OBSERVATIONS/core_users_testing_error_2.txt" 2>&1 | tee $OBSERVATIONS/core_users_testing_error.txt
-
-grep "gpu_R_error_training total iterations :" "$OBSERVATIONS/core_users_log.txt" 2>&1 | tee $OBSERVATIONS/core_users_training_error_iterations_3.txt
-awk 'BEGIN { FS="iterations" }{ print $2 }' "$OBSERVATIONS/core_users_training_error_iterations_3.txt" 2>&1 | tee $OBSERVATIONS/core_users_training_error_iterations_2.txt
-awk '{ print $2 }' "$OBSERVATIONS/core_users_training_error_iterations_2.txt" 2>&1 | tee $OBSERVATIONS/core_users_training_error_iterations.txt
 
 grep "gpu_R_error_testing total iterations :" "$OBSERVATIONS/core_users_log.txt" 2>&1 | tee $OBSERVATIONS/core_users_testing_error_iterations_3.txt
 awk 'BEGIN { FS="iterations" }{ print $2 }' "$OBSERVATIONS/core_users_testing_error_iterations_3.txt" 2>&1 | tee $OBSERVATIONS/core_users_testing_error_iterations_2.txt
@@ -30,15 +21,10 @@ grep "num_latent_factors =" "$OBSERVATIONS/core_users_log.txt" 2>&1 | tee $OBSER
 awk 'BEGIN { FS="=" }{ print $2 }' "$OBSERVATIONS/core_users_latent_factors_3.txt" 2>&1 | tee $OBSERVATIONS/core_users_latent_factors_2.txt
 awk '{ print $1 }' "$OBSERVATIONS/core_users_latent_factors_2.txt" 2>&1 | tee $OBSERVATIONS/core_users_latent_factors.txt
 
-grep "full_ratingsMtx_dev_GU_current_batch_abs_max =" "$OBSERVATIONS/core_users_log.txt" 2>&1 | tee $OBSERVATIONS/core_users_R_abs_max_3.txt
+grep "full_ratingsMtx_dev_CU_current_batch_abs_max =" "$OBSERVATIONS/core_users_log.txt" 2>&1 | tee $OBSERVATIONS/core_users_R_abs_max_3.txt
 awk 'BEGIN { FS="=" }{ print $2 }' "$OBSERVATIONS/core_users_R_abs_max_3.txt" 2>&1 | tee $OBSERVATIONS/core_users_R_abs_max_2.txt
 awk '{ print $1 }' "$OBSERVATIONS/core_users_R_abs_max_2.txt" 2>&1 | tee $OBSERVATIONS/core_users_R_abs_max.txt
 
-
-rm $OBSERVATIONS/core_users_training_error_3.txt
-rm $OBSERVATIONS/core_users_training_error_2.txt
-rm $OBSERVATIONS/core_users_training_error_iterations_3.txt
-rm $OBSERVATIONS/core_users_training_error_iterations_2.txt
 rm $OBSERVATIONS/core_users_testing_error_iterations_3.txt
 rm $OBSERVATIONS/core_users_testing_error_iterations_2.txt
 rm $OBSERVATIONS/core_users_latent_factors_3.txt

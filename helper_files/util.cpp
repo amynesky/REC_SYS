@@ -2,12 +2,14 @@
 #include <fstream>
 #include <sstream>
 #include <vector>
+#include <map>
 #include <iterator> 
 #include <string>
 #include <algorithm>
 #include <sys/time.h>
 #include <boost/algorithm/string.hpp>
 #include <boost/random.hpp>
+#include <boost/random/uniform_real.hpp>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -47,6 +49,16 @@
 #include "util.h"
 #include "util_gpu.cuh"
 
+typedef boost::minstd_rand base_generator_type;
+
+
+bool too_big(long long int li){
+  if (li >= (long long int)INT_MIN && li <= (long long int)INT_MAX) {
+    return false;
+  } else {
+    return true;
+  }
+}
 
 // Get current date/time, format is YYYY-MM-DD.HH:mm:ss
 const std::string currentDateTime() {
@@ -102,10 +114,10 @@ void cpu_permute(Dtype* A, const int* P, const long long int rows, const long lo
     if(Debug) LOG("permute_rows is true") ;
     //pvt is an array length rows
     for(long long int  j = 0; j <cols; j++) {
-      long long int  ind=0;
-      Dtype temp=0;
+      long long int  ind=(long long int)0;
+      Dtype temp = (Dtype)0;
 
-      for(long long int  i=0; i<(rows-1); i++){
+      for(long long int i = 0; i < rows - (long long int)1; i++){
         // get next index
         ind = P[i];
         while(ind<i)
@@ -120,11 +132,11 @@ void cpu_permute(Dtype* A, const int* P, const long long int rows, const long lo
   } else{
     if(Debug) LOG("permute_rows is false") ;
     //pvt is an array length cols
-    for(long long int  i=0; i<rows; i++) {
-      long long int  ind=0;
-      Dtype temp=0;
+    for(long long int i = 0; i<rows; i++) {
+      long long int ind = (long long int)0;
+      Dtype temp = (Dtype)0.0;
 
-      for(long long int  j=0; j<(cols-1); j++){
+      for(long long int j=0; j < cols - (long long int)1; j++){
         // get next index
         ind = P[j];
         while(ind<j)
@@ -225,12 +237,34 @@ template double nextafter(const double b);
 
 template <typename Dtype>
 void host_rng_uniform(const long long int n, const Dtype a, const Dtype b, Dtype* r) {
-  ABORT_IF_NEQ(0, 1, "host_rng_uniform not yet supported");
-
+  //ABORT_IF_NEQ(0, 1, "host_rng_uniform not yet supported");
+  bool Debug = false;
+  if(Debug){
+    LOG("a : "<<a);
+    LOG("b : "<<b);
+  }
 
   ABORT_IF_LESS(n, 1, "host_rng_uniform has n < 0");
-  ABORT_IF_NEQ(a, b, "host_rng_uniform has a = b");
+  ABORT_IF_EQ(a, b, "host_rng_uniform has a = b");
   ABORT_IF_LESS(b, a, "host_rng_uniform has b < a");
+
+  base_generator_type generator(static_cast<unsigned int>(std::time(0)));
+
+  // Define a uniform random number distribution which produces "double"
+  // values between 0 and 1 (0 inclusive, 1 exclusive).
+  boost::uniform_real<> uni_dist(static_cast<double>(a), static_cast<double>(b));
+  boost::variate_generator<base_generator_type&, boost::uniform_real<> > uni(generator, uni_dist);
+
+  std::cout.setf(std::ios::fixed);
+  // You can now retrieve random numbers from that distribution by means
+  // of a STL Generator interface, i.e. calling the generator as a zero-
+  // argument function.
+  for(long long int i = 0; i < n; i++)
+    r[i] = static_cast<Dtype>(uni()) ;
+
+  if(Debug){
+    save_host_array_to_file<Dtype>(r, static_cast<int>(n), "random_array");
+  }
   // boost::uniform_real<Dtype> random_distribution(a, nextafter<Dtype>(b));
   // boost::variate_generator<rng_t*, boost::uniform_real<Dtype> >
   //     variate_generator(_rng(), random_distribution);
@@ -516,7 +550,8 @@ void save_host_array_to_file(const Dtype* A_host, int count, std::string title)
   for (int i = 0; i < count; i++){
     entries<<A_host[i ];
     if(i < count - 1){
-      entries<<", ";
+      //entries<<", ";
+      entries<<"\r\n";
     };
   };
 }
@@ -524,6 +559,24 @@ void save_host_array_to_file(const Dtype* A_host, int count, std::string title)
 template void save_host_array_to_file<int>(const int* A_host, int count, std::string title);
 template void save_host_array_to_file<float>(const float* A_host, int count, std::string title);
 template void save_host_array_to_file<double>(const double* A_host, int count, std::string title);
+
+template<typename Dtype>
+void get_host_array_from_saved_txt(const Dtype* A_host, int count, std::string title)
+{
+  ABORT_IF_EQ(0, 1, "Function not ready.");
+  std::ifstream A_host_file ((ToString(title + ".txt")).c_str());
+
+  for (int i = 0; i < count; i++){
+    //A_host_file>>A_host[i];
+  }
+
+  //LOG(INFO)<<"It_count grabbed from file: "<<It_count;
+  A_host_file.close();
+}
+
+template void get_host_array_from_saved_txt<int>(const int* A_host, int count, std::string title);
+template void get_host_array_from_saved_txt<float>(const float* A_host, int count, std::string title);
+template void get_host_array_from_saved_txt<double>(const double* A_host, int count, std::string title);
 
 template<typename Dtype>
 void append_host_array_to_file(const Dtype* A_host, int count, std::string title)
@@ -592,6 +645,24 @@ template void save_host_mtx_to_file<int>(const int* A_host, const int lda, const
 template void save_host_mtx_to_file<float>(const float* A_host, const int lda, const int sda, std::string title);
 template void save_host_mtx_to_file<double>(const double* A_host, const int lda, const int sda, std::string title);
 
+void save_map(std::map<int, int>* items_dictionary, std::string title){
+
+  std::map<int, int>::iterator it = items_dictionary -> begin();
+
+  std::stringstream filename;
+  filename << title<< ".txt";
+  std::ofstream entries (filename.str().c_str());
+
+  // Iterate over the map using Iterator till end.
+  while (it != items_dictionary->end())
+  {
+    entries<<it->first;
+    entries<<", ";
+    entries<<it->second;
+    entries<<"\r\n";
+    it++;
+  }
+}
 
 //============================================================================================
 // Me Made
@@ -630,9 +701,31 @@ void cpu_fill_training_mtx(const long long int ratings_rows_training, const long
   }
 }
 
+template < typename Dtype>
+void cpu_shuffle_array(const long long int n,  Dtype* x)
+{
+  bool Debug = false;
+  if(too_big(n) ) {ABORT_IF_EQ(0, 1,"Long long long int too big");}
+  double* order = (double *)malloc(n * sizeof(double));
+  checkErrors(order);
+  host_rng_uniform<double>(n, (double)0.0, (double)1.0, order);
+  if(Debug){
+    save_host_array_to_file<Dtype>(x, static_cast<int>(n), "before_shuffle");
+  }
+  thrust::sort_by_key(thrust::host, order, order + n, x);
+  if(Debug){
+    save_host_array_to_file<Dtype>(x, static_cast<int>(n), "after_shuffle");
+  }
+  free(order);
+
+}
+
 
 void cpu_shuffle_mtx_rows_or_cols(cublasHandle_t dn_handle, const long long int M, const long long int N, bool row_major_ordering, float* x, bool shuffle_rows)
 {
+
+  if(too_big(M) ) {ABORT_IF_EQ(0, 1,"Long long long int too big");}
+  if(too_big(N) ) {ABORT_IF_EQ(0, 1,"Long long long int too big");}
 
   bool Debug = false;
   int * indicies_host = NULL;
@@ -643,6 +736,7 @@ void cpu_shuffle_mtx_rows_or_cols(cublasHandle_t dn_handle, const long long int 
     if(Debug) LOG("shuffle_rows is true") ;
     CUDA_CHECK(cudaMalloc((void**)&indicies_dev, M * sizeof(int)));
     indicies_host = (int *)malloc(M * sizeof(int));
+    checkErrors(indicies_host);
     gpu_set_as_index(indicies_dev, M);
     gpu_shuffle_array<int>(dn_handle, M, indicies_dev);
     CUDA_CHECK(cudaMemcpy(indicies_host, indicies_dev, M * sizeof(int), cudaMemcpyDeviceToHost));
@@ -658,6 +752,7 @@ void cpu_shuffle_mtx_rows_or_cols(cublasHandle_t dn_handle, const long long int 
     // shuffle columns
     CUDA_CHECK(cudaMalloc((void**)&indicies_dev, N * sizeof(int)));
     indicies_host = (int *)malloc(N * sizeof(int));
+    checkErrors(indicies_host);
     gpu_set_as_index(indicies_dev, N);
     gpu_shuffle_array<int>(dn_handle, N, indicies_dev);
     CUDA_CHECK(cudaMemcpy(indicies_host, indicies_dev, N * sizeof(int), cudaMemcpyDeviceToHost));
@@ -670,6 +765,41 @@ void cpu_shuffle_mtx_rows_or_cols(cublasHandle_t dn_handle, const long long int 
     free(indicies_host);
   }
 } 
+
+void cpu_shuffle_map_second(const long long int M, std::map<int, int>* items_dictionary )
+{
+
+  if(too_big(M) ) {ABORT_IF_EQ(0, 1,"Long long long int too big");}
+  
+  bool Debug = false;
+  int * indicies_host = NULL;
+  int * indicies_dev;
+
+  CUDA_CHECK(cudaMalloc((void**)&indicies_dev, M * sizeof(int)));
+  indicies_host = (int *)malloc(M * sizeof(int));
+  checkErrors(indicies_host);
+
+  gpu_set_as_index(indicies_dev, M);
+  CUDA_CHECK(cudaMemcpy(indicies_host, indicies_dev, M * sizeof(int), cudaMemcpyDeviceToHost));
+  cudaFree(indicies_dev);
+
+  cpu_shuffle_array<int>(M, indicies_host);
+
+  std::map<int, int>::iterator it = items_dictionary -> begin();
+  int i = 0; 
+  // Iterate over the map using Iterator till end.
+  while (it != items_dictionary->end())
+  {
+    it->second = indicies_host[i];
+    i++;
+    it++;
+  }
+
+  free(indicies_host);
+
+} 
+
+
 
 template<typename Dtype>
 void cpu_set_all(Dtype* x, const int N, Dtype alpha)

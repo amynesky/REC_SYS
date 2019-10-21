@@ -5,6 +5,7 @@
 #include <fstream>
 #include <sstream>
 #include <vector>
+#include <map>
 #include <iterator>
 #include <string>
 #include <algorithm>
@@ -337,6 +338,9 @@ void gpu_get_rand_bools(const long long int n,  Dtype* x, unsigned long seed, fl
 
 void gpu_get_rand_groups(const long long int n,  int* x, unsigned long seed, float* probability_of_success, const int num_groups);
 
+template < typename Dtype>
+void gpu_reverse_bools(const long long int n,  Dtype* x);
+
 template <typename Dtype>
 void gpu_rng_uniform(cublasHandle_t handle, const long long int n, const Dtype a, const Dtype b, Dtype* r);
 
@@ -652,7 +656,7 @@ void gpu_spXdense_MMM(const cusparseHandle_t handle, const bool TransA, const bo
                               const int m, const int n, const int k, const int nnz, const int first_ind,
                               const Dtype *alpha, const cusparseMatDescr_t descrA, 
                               const Dtype *csrValA, const int *csrRowPtrA, const int *csrColIndA,
-                              const Dtype *B, const int ldb, const Dtype *beta, Dtype *C, const int ldc);
+                              const Dtype *B, const int ldb, const Dtype *beta, Dtype *C, const int ldc, bool Debug);
 
 template <typename Dtype>
 void gpu_R_error(const cublasHandle_t dn_handle, const cusparseHandle_t sp_handle, const cusparseMatDescr_t sp_descr,
@@ -687,7 +691,9 @@ void gpu_R_error_testing(const cublasHandle_t dn_handle, const cusparseHandle_t 
                         const int *csr_format_ratingsMtx_userID_dev_testing_batch, 
                         const int *coo_format_ratingsMtx_itemID_dev_testing,
                         const Dtype *V, Dtype *U_testing, Dtype *R_testing, const unsigned long seed,
-                        float training_rate, float regularization_constant);
+                        float training_rate, float regularization_constant,
+                        float* testing_error_on_training_entries, float* testing_error_on_testing_entries, 
+                        long long int* total_iterations);
 
 
 

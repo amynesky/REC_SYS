@@ -33,6 +33,8 @@ const bool Debug = 1;
 
 bool Content_Based = 1;
 bool Conserve_GPU_Mem = 0;
+bool load_from_preprocessing = 0;
+std::string preprocessing_path = "";
 
 #define update_Mem(new_mem) \
     allocatedMem += static_cast<long long int>(new_mem); \
@@ -74,9 +76,9 @@ bool Conserve_GPU_Mem = 0;
 
 int main(int argc, char *argv[])
 {
-    struct timeval program_start, program_end, training_start, training_end;
+    struct timeval program_start, program_end, testing_start, testing_end;
     double program_time;
-    double training_time;
+    double testing_time;
     gettimeofday(&program_start, NULL);
 
     long long int allocatedMem = (long long int)0; 
@@ -255,6 +257,8 @@ int main(int argc, char *argv[])
             csv_keyWords_path = (preamble + "/pylon5/ac560rp/nesky/REC_SYS/datasets/ml-20m/movies.csv").c_str();
             //temp_num_entries = csv_Ratings.num_rows() - 1; // the first row is a title row
             Content_Based = 0;
+            load_from_preprocessing = true;
+            preprocessing_path = "/pylon5/ac560rp/nesky/REC_SYS/CoreUsers/preprocessing/ml-20m/top_users.txt";
             temp_num_entries = 20000264 - 1;   // MovieLens 20 million
             break;
         }case 2:{ // code to be executed if n = 2;
@@ -599,14 +603,14 @@ int main(int argc, char *argv[])
 
 
 
-    int top_N = std::min((int)ratings_rows / 10, 50);
+    int top_N = std::min((int)((float)ratings_rows / (float)10.0), 50);
     LOG("Compute the top-"<<top_N<<" most similar neighbors of each user based on the cosine similarities.");
-    const float probability_CU       = (float)1.0/(float)100.0;
+    const float probability_CU       = (float)1.0/(float)100.0; //(float)1.0/(float)100.0;
     const float probability_testing  = ((float)1.0 - probability_CU);
     LOG("percentage of users for testing: " <<probability_testing);
     LOG("percentage of users for CU: "      <<(float)1.0 - probability_testing<<std::endl);
 
-    const long long int ratings_rows_CU      = (long long int)(probability_CU * ratings_rows);
+    const long long int ratings_rows_CU      = (long long int)(probability_CU * (float)ratings_rows);
     const long long int ratings_rows_testing = ratings_rows - ratings_rows_CU;
     LOG("num testing users : "   <<ratings_rows_testing);
     LOG("num CU users : "        <<ratings_rows_CU);
@@ -616,73 +620,88 @@ int main(int argc, char *argv[])
         return 0;
     }
 
-    const long long int num_below_diag = (ratings_rows * (ratings_rows - (long long int)1)) / (long long int)2;
-
-    float* cosine_similarity  = (float *)malloc(num_below_diag * sizeof(float));
-    int*   col_index          = (int *)malloc(top_N * ratings_rows * sizeof(int));
-    checkErrors(cosine_similarity);
-    checkErrors(col_index);
-
-
-    /*
-    cpu_get_cosine_similarity(ratings_rows, 
-                              coo_format_ratingsMtx_userID_host,
-                              coo_format_ratingsMtx_itemID_host,
-                              coo_format_ratingsMtx_rating_host,
-                              cosine_similarity);
-                              */
-
-    
-    get_cosine_similarity_host(ratings_rows, 
-                              csr_format_ratingsMtx_userID_dev,
-                              coo_format_ratingsMtx_itemID_dev,
-                              coo_format_ratingsMtx_rating_dev,
-                              cosine_similarity);
-                              
-                              
-
-    //cpu_set_as_index(col_index, ratings_rows, ratings_rows);
-    //gpu_set_as_index_host(col_index, ratings_rows, ratings_rows);
-
-
-
-    /*
-        we want to know column indicies of the max N elements in each row
-        excluding the row index itself
-    */
-    //cpu_sort_index_by_max(ratings_rows, ratings_rows,  cosine_similarity, col_index);
-    cpu_sort_index_by_max<float>(ratings_rows,  cosine_similarity, col_index, top_N);
-
-    if(Debug && 0){
-        save_host_array_to_file<float>(cosine_similarity, static_cast<int>(5*ratings_rows), "cosine_similarity_chunk");
-        save_host_mtx_to_file<int>(col_index, static_cast<int>(top_N), ratings_rows, "col_index_sorted");
-    }
-    free(cosine_similarity);
-    /*
-        for each user index, count how many times that user appears in the top_N + 1 most similar users.
-    */
-    int* count= (int *)malloc(ratings_rows * sizeof(int));
-    checkErrors(count);
-    cpu_set_all<int>(count, ratings_rows, 0);
-
-    cpu_count_appearances(top_N, ratings_rows, count, col_index);
-    free(col_index);
-    if(Debug && 0){
-        save_host_array_to_file<int>(count, (int)ratings_rows, "count");
-    }
-
-    /*
-        sort the count to find the top_N core users
-    */
     int* top_users= (int *)malloc(ratings_rows * sizeof(int));
     checkErrors(top_users);
-    cpu_set_as_index<int>(top_users, ratings_rows, 1);
+    int* count= (int *)malloc(ratings_rows * sizeof(int));
+    checkErrors(count);
+
+    if(!load_from_preprocessing){
+        const long long int num_below_diag = (ratings_rows * (ratings_rows - (long long int)1)) / (long long int)2;
+
+        float* cosine_similarity  = (float *)malloc(num_below_diag * sizeof(float));
+        int*   col_index          = (int *)malloc(top_N * ratings_rows * sizeof(int));
+        checkErrors(cosine_similarity);
+        checkErrors(col_index);
 
 
-    cpu_sort_index_by_max(1, ratings_rows,  count, top_users);
-    if(Debug && 0){
-        save_host_array_to_file<int>(top_users, ratings_rows, "top_users");
+        /*
+        cpu_get_cosine_similarity(ratings_rows, 
+                                  coo_format_ratingsMtx_userID_host,
+                                  coo_format_ratingsMtx_itemID_host,
+                                  coo_format_ratingsMtx_rating_host,
+                                  cosine_similarity);
+                                  */
 
+        
+        get_cosine_similarity_host(ratings_rows, 
+                                  csr_format_ratingsMtx_userID_dev,
+                                  coo_format_ratingsMtx_itemID_dev,
+                                  coo_format_ratingsMtx_rating_dev,
+                                  cosine_similarity);
+                                  
+                                  
+
+        //cpu_set_as_index(col_index, ratings_rows, ratings_rows);
+        //gpu_set_as_index_host(col_index, ratings_rows, ratings_rows);
+
+
+
+        /*
+            we want to know column indicies of the max N elements in each row
+            excluding the row index itself
+        */
+        //cpu_sort_index_by_max(ratings_rows, ratings_rows,  cosine_similarity, col_index);
+        cpu_sort_index_by_max<float>(ratings_rows,  cosine_similarity, col_index, top_N);
+
+        if(Debug && 0){
+            save_host_array_to_file<float>(cosine_similarity, static_cast<int>(5*ratings_rows), "cosine_similarity_chunk");
+            save_host_mtx_to_file<int>(col_index, static_cast<int>(top_N), ratings_rows, "col_index_sorted");
+        }
+        free(cosine_similarity);
+        /*
+            for each user index, count how many times that user appears in the top_N + 1 most similar users.
+        */
+
+        cpu_set_all<int>(count, ratings_rows, 0);
+
+        cpu_count_appearances(top_N, ratings_rows, count, col_index);
+        free(col_index);
+        if(Debug && 0){
+            save_host_array_to_file<int>(count, (int)ratings_rows, "count");
+        }
+
+        /*
+            sort the count to find the ratings_rows_CU core users
+        */
+
+        cpu_set_as_index<int>(top_users, ratings_rows, 1);
+
+
+        cpu_sort_index_by_max(1, ratings_rows,  count, top_users);
+        //if(Debug && 0){
+            save_host_array_to_file<int>(top_users, ratings_rows, "top_users");
+
+        //}
+    }else{
+        LOG("Load top_users from saved file in "<<preprocessing_path);
+        // Load top_users from saved file
+        //get_host_array_from_saved_txt<int>(top_users, ratings_rows, preprocessing_path);
+
+        CSVReader csv_Preprocessing(preprocessing_path);
+        csv_Preprocessing.getData(top_users, ratings_rows, 1);
+        LOG("Sanity Check : ");
+        LOG("top_users[0] : "<<top_users[0]);
+        LOG("top_users[ratings_rows - 1] : "<<top_users[ratings_rows - 1]);
     }
     /*
         The ratings_rows_CU core users indicies are the indicies 
@@ -1013,9 +1032,10 @@ int main(int argc, char *argv[])
     const float regularization_constant = (float)0.01;         //use for rent the runway
 
     const float testing_fraction        = 0.25; //percent of known entries used for testing
-    bool        compress                = false;
+    bool        compress                = true;
 
-    const int num_batches    = 100;
+    const long long int batch_size_testing  = 200;//ratings_rows_testing / num_batches;
+    const int num_batches    = ratings_rows_testing / batch_size_testing;//100;
     const int testing_rate   = 1;
 
     LOG("training_rate : "          <<training_rate);
@@ -1029,7 +1049,7 @@ int main(int argc, char *argv[])
     testing_error = (float *)malloc(num_batches * sizeof(float)); 
     checkErrors(testing_error);
 
-    const long long int batch_size_testing  = ratings_rows_testing / num_batches;
+    
     LOG(std::endl);
     LOG("batch_size_testing : " <<batch_size_testing);
     // LOG("Press Enter to continue.") ;
@@ -1100,9 +1120,11 @@ int main(int argc, char *argv[])
     // Begin Testing
     //============================================================================================  
     LOG(std::endl<<std::endl<<"                              Begin Testing..."<<std::endl); 
-    gettimeofday(&training_start, NULL);
+    gettimeofday(&testing_start, NULL);
     int num_tests = 0;
-    float testing_error_temp = (float)0.0;
+    float testing_error_on_testing_entries_temp = (float)0.0;
+    float testing_error_on_training_entries_temp = (float)0.0;
+    long long int total_iterations = (long long int)0;
     long long int total_testing_nnz = (long long int)0;
     int count_tests = 0;
     if(row_major_ordering){
@@ -1192,15 +1214,21 @@ int main(int argc, char *argv[])
             //                    V, U_testing, R_testing, time(0), "testing", (float)0.1, (float)0.01);
 
             gpu_R_error_testing<float>(dn_handle, sp_handle, sp_descr,
-                               batch_size_testing, ratings_rows_CU, num_latent_factors, ratings_cols,
-                               nnz_testing, first_coo_ind_testing, compress, 
-                               testing_entries, coo_testing_errors, testing_fraction,
-                               coo_format_ratingsMtx_rating_dev_testing + first_coo_ind_testing, 
-                               csr_format_ratingsMtx_userID_dev_testing_batch, 
-                               coo_format_ratingsMtx_itemID_dev_testing + first_coo_ind_testing,
-                               V, U_testing, R_testing, time(0), training_rate, regularization_constant);
+                                       batch_size_testing, ratings_rows_CU, num_latent_factors, ratings_cols,
+                                       nnz_testing, first_coo_ind_testing, compress, 
+                                       testing_entries, coo_testing_errors, testing_fraction,
+                                       coo_format_ratingsMtx_rating_dev_testing + first_coo_ind_testing, 
+                                       csr_format_ratingsMtx_userID_dev_testing_batch, 
+                                       coo_format_ratingsMtx_itemID_dev_testing + first_coo_ind_testing,
+                                       V, U_testing, R_testing, time(0), training_rate, regularization_constant,
+                                       &testing_error_on_training_entries_temp, &total_iterations);
 
-            testing_error_temp += gpu_sum_of_squares<float>(nnz_testing, coo_testing_errors);
+            gpu_reverse_bools<float>(nnz_testing,  testing_entries);
+            gpu_hadamard<float>(nnz_testing, testing_entries, coo_testing_errors );
+            //save_device_arrays_side_by_side_to_file<float>(coo_testing_errors, testing_entries, nnz_testing, "testing_entry_errors");
+
+            //testing_error_on_training_entries_temp += gpu_sum_of_squares<float>(nnz_testing, coo_testing_errors);
+            testing_error_on_testing_entries_temp += gpu_sum_of_squares<float>(nnz_testing, coo_testing_errors);
             
             cudaFree(coo_testing_errors);
             cudaFree(testing_entries);  
@@ -1210,9 +1238,11 @@ int main(int argc, char *argv[])
 
             float nnz_ = (float)total_testing_nnz * testing_fraction;
             long long int num_batches_ = (long long int)((float)(batch_size_testing * num_batches) * testing_fraction);
-            LOG("testing error : "<< testing_error_temp / nnz_ ); 
-            testing_error[num_tests] = testing_error_temp / nnz_ ;
-            //testing_error[num_tests] = testing_error_temp / (float)(nnz_ * 2.0);
+            LOG("Average testing error on training entries : "<< testing_error_on_training_entries_temp / (float)(count_tests) );
+            LOG("Average training iterations : "<< (int)((float)total_iterations / (float)(count_tests) ));
+            LOG("Average TESTING ERROR : "<< testing_error_on_testing_entries_temp / nnz_ ); 
+            testing_error[num_tests] = testing_error_on_testing_entries_temp / nnz_ ;
+            //testing_error[num_tests] = testing_error_on_testing_entries_temp / (float)(nnz_ * 2.0);
             save_host_array_to_file<float>(testing_error, (int)num_tests, "testing_error");
             num_tests += 1;
             //total_testing_nnz = (long long int)0;
@@ -1220,6 +1250,9 @@ int main(int argc, char *argv[])
             
         }
 
+        gettimeofday(&testing_end, NULL);
+        testing_time = (testing_end.tv_sec * 1000 +(testing_end.tv_usec/1000.0))-(testing_start.tv_sec * 1000 +(testing_start.tv_usec/1000.0));  
+        LOG("average batch time : "<<readable_time(testing_time / (double)(batch + 1)));
 
     }//end for loop on batches
 
@@ -1231,9 +1264,9 @@ int main(int argc, char *argv[])
 
     
     cudaDeviceSynchronize();
-    gettimeofday(&training_end, NULL);
-    training_time = (training_end.tv_sec * 1000 +(training_end.tv_usec/1000.0))-(training_start.tv_sec * 1000 +(training_start.tv_usec/1000.0));  
-    LOG("training_time : "<<training_time<<"ms");
+    gettimeofday(&testing_end, NULL);
+    testing_time = (testing_end.tv_sec * 1000 +(testing_end.tv_usec/1000.0))-(testing_start.tv_sec * 1000 +(testing_start.tv_usec/1000.0));  
+    LOG("testing_time : "<<readable_time(testing_time));
     //============================================================================================
     // Destroy
     //============================================================================================
@@ -1280,7 +1313,7 @@ int main(int argc, char *argv[])
     gettimeofday(&program_end, NULL);
     program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
     //printf("program_time: %f\n", program_time);   
-    LOG("program_time : "<<program_time<<"ms");
+    LOG("program_time : "<<readable_time(program_time));
 
     //if(Debug && memLeft!=devMem)LOG("WARNING POSSIBLE DEVICE MEMORY LEAK");
          

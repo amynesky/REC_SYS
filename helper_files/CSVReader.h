@@ -36,13 +36,15 @@ class CSVReader
 	std::vector<std::vector<std::string> > getData();
 
 	// Function to fetch data from a CSV File
-	void getData(float* data, const int rows, const int cols);
+	template < typename Dtype>
+	void getData(Dtype* data, const int rows, const int cols);
 
 	// Function to fetch data from a CSV File
 	void getData(int* coo_format_ratingsMtx_userID_host,
 			    int* coo_format_ratingsMtx_itemID_host,
 			    float* coo_format_ratingsMtx_rating_host,
-			    int num_entries);
+			    int num_entries, bool all_items, 
+			    std::map<int, int>* items_dictionary);
 
 	void getDataJSON(int* coo_format_ratingsMtx_userID_host,
 				    int* coo_format_ratingsMtx_itemID_host,
