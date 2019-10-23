@@ -108,7 +108,7 @@ int main(int argc, char *argv[])
     LOG("Debug = "<<Debug);
 
     /* initialize random seed: */
-    srand (time(0));
+    srand (cluster_seedgen());
 
     int dev = findCudaDevice(argc, (const char **) argv);
     cudaDeviceProp devProp;
@@ -460,7 +460,7 @@ int main(int argc, char *argv[])
     checkCudaErrors(cudaMalloc((void**)&group_indicies, ratings_rows * sizeof(int)));
     update_Mem( ratings_rows * sizeof(int) );
 
-    gpu_get_rand_groups(ratings_rows,  group_indicies, time(0), probability_of_groups_dev, 3);
+    gpu_get_rand_groups(ratings_rows,  group_indicies, probability_of_groups_dev, 3);
 
     int* group_sizes = NULL;
     group_sizes = (int *)malloc(num_groups * sizeof(int)); 
@@ -1141,7 +1141,10 @@ int main(int argc, char *argv[])
 
 
 
+    float* old_R_GU;
+    long long int total_testing_iterations = (long long int) 10000;
 
+    checkCudaErrors(cudaMalloc((void**)&old_R_GU, batch_size_GU * ratings_cols * sizeof(float)));
 
 
 
@@ -1160,12 +1163,14 @@ int main(int argc, char *argv[])
     int num_tests = 0;
     int count_GU_rounds = 0;
     for(int it = 0; it < num_iterations; it ++){
+        if(training_rate < (float)0.00001) break;
         float testing_error_temp = (float)0.0;
         float training_error_temp = testing_error_temp;
         long long int total_training_nnz = (long long int)0;
         long long int total_testing_nnz = (long long int)0;
         int count_tests = 0;
         for(int batch = 0; batch < num_batches; batch ++){
+            if(training_rate < (float)0.00001) break;
             if( print_training_error){
                 //LOG(std::endl<<"                                       ~ITERATION "<<it<<", BATCH "<<batch<<"~"<<std::endl);
                 LOG(std::endl<<"                              ITERATION "<<it<<" ( / "<<num_iterations<<" ), BATCH "<<batch<<" ( / "<<num_batches<<" )");
@@ -1311,7 +1316,7 @@ int main(int argc, char *argv[])
             //                    coo_format_ratingsMtx_rating_dev_training + first_coo_ind_training, 
             //                    csr_format_ratingsMtx_userID_dev_training_batch,         // <-- already has shifted to correct start
             //                    coo_format_ratingsMtx_itemID_dev_training + first_coo_ind_training,
-            //                    V, U_training, R_training, time(0), "training", (float)0.1, (float)0.01);
+            //                    V, U_training, R_training, "training", (float)0.1, (float)0.01);
 
             gpu_R_error_training<float>(dn_handle, sp_handle, sp_descr,
                                        batch_size_training, batch_size_GU, num_latent_factors, ratings_cols,
@@ -1319,7 +1324,7 @@ int main(int argc, char *argv[])
                                        coo_format_ratingsMtx_rating_dev_training + first_coo_ind_training, 
                                        csr_format_ratingsMtx_userID_dev_training_batch,         // <-- already has shifted to correct start
                                        coo_format_ratingsMtx_itemID_dev_training + first_coo_ind_training,
-                                       V, U_training, R_training, time(0), (float)0.1, (float)0.01);
+                                       V, U_training, R_training, (float)0.1, (float)0.01);
 
 
             training_error_temp += gpu_sum_of_squares<float>(nnz_training, coo_training_errors);
@@ -1328,7 +1333,7 @@ int main(int argc, char *argv[])
                     //LOG("           ~Finished round "<<count_GU_rounds<<" of GA training~"<<std::endl); 
                     LOG("num_latent_factors = "<< num_latent_factors);
                     long long int nnz_ = (long long int)((float)total_training_nnz /* * testing_fraction*/);
-                    LOG("TRAINING ERROR : "<< training_error_temp / (float)(nnz_)); 
+                    LOG("TRAINING AVERAGE SQUARED ERROR : "<< training_error_temp / (float)(nnz_)); 
 
                     // float temp = gpu_sum_of_squares<float>(nnz_training, testing_entries);
                     // float temp = gpu_sum_of_squares_of_diff(dn_handle, nnz_training, 
@@ -1416,10 +1421,10 @@ int main(int argc, char *argv[])
                     //                    coo_format_ratingsMtx_rating_dev_testing + first_coo_ind_testing, 
                     //                    csr_format_ratingsMtx_userID_dev_testing_batch, 
                     //                    coo_format_ratingsMtx_itemID_dev_testing + first_coo_ind_testing,
-                    //                    V, U_testing, R_testing, time(0), "testing", (float)0.1, (float)0.01);
+                    //                    V, U_testing, R_testing, "testing", (float)0.1, (float)0.01);
 
                     float testing_error_on_training_entries_temp;
-                    long long int total_iterations_temp;
+                    long long int total_iterations_temp = (long long int)0;
                     gpu_R_error_testing<float>(dn_handle, sp_handle, sp_descr,
                                        batch_size_testing, batch_size_GU, num_latent_factors, ratings_cols,
                                        nnz_testing, first_coo_ind_testing, compress_when_testing, 
@@ -1427,7 +1432,7 @@ int main(int argc, char *argv[])
                                        coo_format_ratingsMtx_rating_dev_testing + first_coo_ind_testing, 
                                        csr_format_ratingsMtx_userID_dev_testing_batch, 
                                        coo_format_ratingsMtx_itemID_dev_testing + first_coo_ind_testing,
-                                       V, U_testing, R_testing, time(0), (float)0.1, (float)0.01,
+                                       V, U_testing, R_testing, (float)0.1, (float)0.01,
                                        &testing_error_on_training_entries_temp, &testing_error_temp, 
                                        &total_iterations_temp);
 
@@ -1445,14 +1450,29 @@ int main(int argc, char *argv[])
                     if(num_batches_testing < num_batches_GU && num_batches_testing == count_tests){
 
                         LOG("~~Iteration "<<it<<" TESTING~~"); 
+
                         float nnz_ = (float)total_testing_nnz * testing_fraction;
+                        LOG("num testing entries : "<<  nnz_ );
                         long long int num_batches_ = (long long int)((float)(batch_size_testing * num_batches_testing) * testing_fraction);
-                        LOG("TESTING ERROR : "<< testing_error_temp / nnz_ ); 
+                        LOG("AVERAGE SQUARED TESTING ERROR : "<< testing_error_temp / nnz_ ); 
+
+                    
                         testing_error[num_tests] = testing_error_temp / nnz_ ;
                         //testing_error[num_tests] = testing_error_temp / (float)(nnz_ * 2.0);
                         save_host_array_to_file<float>(testing_error, num_tests, "testing_error");
                         num_tests += 1;
                         total_testing_nnz = (long long int)0;
+                    }
+                    if((float)total_iterations_temp > (float)total_testing_iterations * (float)1.25){
+                        LOG("total_iterations_temp > total_testing_iterations * 1.25 : "<<total_iterations_temp<<" > "<<total_testing_iterations<<" * "<<1.25<<" = "<< (float)total_testing_iterations * (float)1.25);
+                        checkCudaErrors(cudaMemcpy(full_ratingsMtx_dev_GU_current_batch, old_R_GU,
+                                                    batch_size_GU * ratings_cols * sizeof(float), cudaMemcpyDeviceToDevice));
+
+                        training_rate = training_rate / (float)10.0;
+                        LOG("REDUCING LEARNING RATE TO : "<<training_rate);
+                        break;
+                    }else{
+                       total_testing_iterations = total_iterations_temp; 
                     }
                     LOG("      ~~~ DONE TESTING ~~~ "<<std::endl); 
                     
@@ -1562,6 +1582,9 @@ int main(int argc, char *argv[])
             //============================================================================================ 
             //if(Debug) LOG("iteration "<<it<<" made it to check point");
 
+            checkCudaErrors(cudaMemcpy(old_R_GU, full_ratingsMtx_dev_GU_current_batch, 
+                                            batch_size_GU * ratings_cols * sizeof(float), cudaMemcpyDeviceToDevice));
+
             float* delta_R_GU;
 
             if(1){
@@ -1604,9 +1627,9 @@ int main(int argc, char *argv[])
             }
 
             if(Conserve_GPU_Mem){
-                save_host_mtx_to_file<float>(full_ratingsMtx_host_GU, ratings_cols, ratings_rows_GU, "full_ratingsMtx_GU");
+                save_host_mtx_to_file<float>(full_ratingsMtx_host_GU, ratings_rows_GU, ratings_cols, "full_ratingsMtx_GU");
             }else{
-                save_device_mtx_to_file<float>(full_ratingsMtx_dev_GU, ratings_cols, ratings_rows_GU, "full_ratingsMtx_GU", false);
+                save_device_mtx_to_file<float>(full_ratingsMtx_dev_GU, ratings_rows_GU, ratings_cols, "full_ratingsMtx_GU", false);
             }
             
             
@@ -1625,7 +1648,20 @@ int main(int argc, char *argv[])
             cudaFree(coo_training_errors);
 
 
+            if(batch_size_GU == ratings_rows_GU){
+                LOG("shuffle GU matrix rows");
+                if(Conserve_GPU_Mem){
+                    cpu_shuffle_mtx_rows_or_cols(dn_handle, ratings_rows_GU, ratings_cols, 
+                                                 false, full_ratingsMtx_host_GU, 1);
+                }else{
+                    //shuffle GU rows
+                    gpu_shuffle_mtx_rows_or_cols(dn_handle, ratings_rows_GU, ratings_cols,  
+                                                false, full_ratingsMtx_dev_GU, 1);
 
+
+                    //shuffle training rows??
+                }
+            }
 
 
         }//end for loop on batches
@@ -1635,16 +1671,16 @@ int main(int argc, char *argv[])
             LOG("shuffle GU matrix rows");
             if(Conserve_GPU_Mem){
                 cpu_shuffle_mtx_rows_or_cols(dn_handle, ratings_rows_GU, ratings_cols, 
-                                             false, full_ratingsMtx_host_GU, 1);
+                                             row_major_ordering, full_ratingsMtx_host_GU, 1);
             }else{
                 //shuffle GU rows
                 gpu_shuffle_mtx_rows_or_cols(dn_handle, ratings_rows_GU, ratings_cols,  
-                                            false, full_ratingsMtx_dev_GU, 1);
+                                            row_major_ordering, full_ratingsMtx_dev_GU, 1);
 
 
                 //shuffle training rows??
             }
-        } //end loop on batches
+        }
         gettimeofday(&training_end, NULL);
         training_time = (training_end.tv_sec * 1000 +(training_end.tv_usec/1000.0))-(training_start.tv_sec * 1000 +(training_start.tv_usec/1000.0));  
         LOG("average training iteration time : "<<readable_time(training_time / (double)(it + 1)));
@@ -1670,6 +1706,7 @@ int main(int argc, char *argv[])
     cudaFree(U_GU);
     cudaFree(U_training);
     cudaFree(U_testing);
+    cudaFree(old_R_GU);
     cudaFree(V);
     cudaFree(R_training);
     cudaFree(R_testing);

@@ -753,10 +753,11 @@ void gpu_scale<double>(cublasHandle_t dn_handle, const long long int n, const do
 
 
 
-__global__ void initCurand(curandState *state, unsigned long seed, const int n)
+__global__ void initCurand(curandState *state, const unsigned long seed, const int n)
 {
   //int idx = threadIdx.x + blockIdx.x * blockDim.x;
   //curand_init(seed, idx, 0, &state[idx]);
+
   CUDA_KERNEL_LOOP(i, n){
     curand_init(seed, i, 0, &state[i]);
   }
@@ -780,10 +781,12 @@ __global__ void gpu_get_rand_bools_kernel(curandState *state, Dtype *a, const in
 // }
 
 template < typename Dtype>
-void gpu_get_rand_bools(const long long int n,  Dtype* x, unsigned long seed, float probability_of_success) 
+void gpu_get_rand_bools(const long long int n,  Dtype* x, float probability_of_success) 
 {
   curandState *devState;  
   gpuErrchk(cudaMalloc((void**)&devState, n*sizeof(curandState)));
+
+  const unsigned long seed = cluster_seedgen();
 
   const long long int num_gpu_blocks= GET_BLOCKS(n);
 
@@ -803,8 +806,8 @@ void gpu_get_rand_bools(const long long int n,  Dtype* x, unsigned long seed, fl
 
 }
 
-template void gpu_get_rand_bools<bool>(const long long int n,  bool* x, unsigned long seed, float probability_of_success) ;
-template void gpu_get_rand_bools<float>(const long long int n,  float* x, unsigned long seed, float probability_of_success) ;
+template void gpu_get_rand_bools<bool>(const long long int n,  bool* x, float probability_of_success) ;
+template void gpu_get_rand_bools<float>(const long long int n,  float* x, float probability_of_success) ;
 
 __global__ void gpu_get_rand_groups_kernel(curandState *state, const int n,  int* x, float* probability_of_success, const int num_groups)
 {
@@ -823,10 +826,12 @@ __global__ void gpu_get_rand_groups_kernel(curandState *state, const int n,  int
   }
 }
 
-void gpu_get_rand_groups(const long long int n,  int* x, unsigned long seed, float* probability_of_success, const int num_groups) 
+void gpu_get_rand_groups(const long long int n,  int* x, float* probability_of_success, const int num_groups) 
 {
   curandState *devState;  
   gpuErrchk(cudaMalloc((void**)&devState, n*sizeof(curandState)));
+
+  const unsigned long seed = cluster_seedgen();
 
   const long long int num_gpu_blocks= GET_BLOCKS(n);
 
@@ -894,8 +899,7 @@ void gpu_rng_uniform(const long long int n, unsigned int* r)
   CURAND_CHECK(curandCreateGenerator(&gen, 
     CURAND_RNG_PSEUDO_DEFAULT));
     /* Set seed */
-  CURAND_CHECK(curandSetPseudoRandomGeneratorSeed(gen, 
-    1234ULL));
+  CURAND_CHECK(curandSetPseudoRandomGeneratorSeed(gen, cluster_seedgen()));
   CURAND_CHECK(curandGenerate(gen, r, n));
   CURAND_CHECK(curandDestroyGenerator(gen));
 }
@@ -914,7 +918,7 @@ void gpu_rng_uniform<float>(cublasHandle_t handle, const long long int n, const 
     /* Create pseudo-random number generator */
   CURAND_CHECK(curandCreateGenerator(&gen, CURAND_RNG_PSEUDO_DEFAULT));
     /* Set seed */
-  CURAND_CHECK(curandSetPseudoRandomGeneratorSeed(gen, 1234ULL));
+  CURAND_CHECK(curandSetPseudoRandomGeneratorSeed(gen, cluster_seedgen()));
   CURAND_CHECK(curandGenerateUniform(gen, r, n));
   const float range = b - a;
   if (range != static_cast<float>(1)) {
@@ -940,7 +944,7 @@ void gpu_rng_uniform<double>(cublasHandle_t handle, const long long int n, const
     /* Create pseudo-random number generator */
   CURAND_CHECK(curandCreateGenerator(&gen, CURAND_RNG_PSEUDO_DEFAULT));
     /* Set seed */
-  CURAND_CHECK(curandSetPseudoRandomGeneratorSeed(gen, 1234ULL));
+  CURAND_CHECK(curandSetPseudoRandomGeneratorSeed(gen, cluster_seedgen()));
   CURAND_CHECK(curandGenerateUniformDouble(gen, r, n));
   const double range = b - a;
   if (range != static_cast<double>(1)) {
@@ -951,6 +955,37 @@ void gpu_rng_uniform<double>(cublasHandle_t handle, const long long int n, const
   }
   CURAND_CHECK(curandDestroyGenerator(gen));
 }
+
+
+
+template <>
+void gpu_rng_gaussian<float>(const long long int n, const float mu, const float sigma, float* r) 
+{
+  if(too_big(n) ) {ABORT_IF_EQ(0, 1, "Long long long int too big");}
+  if(n % (long long int)2 !=  (long long int)0) {ABORT_IF_EQ(0, 1, "Must request even number");}
+  curandGenerator_t gen;
+    /* Create pseudo-random number generator */
+  CURAND_CHECK(curandCreateGenerator(&gen, CURAND_RNG_PSEUDO_DEFAULT));
+    /* Set seed */
+  CURAND_CHECK(curandSetPseudoRandomGeneratorSeed(gen, cluster_seedgen()));
+  CURAND_CHECK(curandGenerateNormal(gen, r, n, mu, sigma));
+  CURAND_CHECK(curandDestroyGenerator(gen));
+}
+
+template <>
+void gpu_rng_gaussian<double>(const long long int n, const double mu, const double sigma, double* r) 
+{
+  if(too_big(n) ) {ABORT_IF_EQ(0, 1, "Long long long int too big");}
+  if(n % (long long int)2 !=  (long long int)0) {ABORT_IF_EQ(0, 1, "Must request even number");}
+  curandGenerator_t gen;
+    /* Create pseudo-random number generator */
+  CURAND_CHECK(curandCreateGenerator(&gen, CURAND_RNG_PSEUDO_DEFAULT));
+    /* Set seed */
+  CURAND_CHECK(curandSetPseudoRandomGeneratorSeed(gen, cluster_seedgen()));
+  CURAND_CHECK(curandGenerateNormalDouble(gen, r, n, mu, sigma));
+  CURAND_CHECK(curandDestroyGenerator(gen));
+}
+
 
 template < typename Dtype>
 void gpu_shuffle_array(cublasHandle_t handle, const long long int n,  Dtype* x)
@@ -1363,6 +1398,22 @@ float gpu_sum<float>(const long long int n,  const float* x)
   return sum;
 }
 
+template <>
+float gpu_norm<float>(cublasHandle_t dn_handle, const long long int n, const float* x) {
+  if(too_big(n) ) {ABORT_IF_EQ(0, 1, "Long long long int too big");}
+  float s;
+  CUBLAS_CHECK(cublasSnrm2(dn_handle, n, x, 1, &s));
+  return s;
+}
+
+template <>
+double gpu_norm<double>(cublasHandle_t dn_handle, const long long int n, const double* x) {
+  if(too_big(n) ) {ABORT_IF_EQ(0, 1, "Long long long int too big");}
+  double s;
+  CUBLAS_CHECK(cublasDnrm2(dn_handle, n, x, 1, &s));
+  return s;
+}
+
 template<typename Dtype> 
 Dtype gpu_expected_value(const long long int n,  const Dtype* x) 
 {
@@ -1430,6 +1481,49 @@ float gpu_variance<float>(const long long int n, const float* x) {
 
   //pow( base, exp )
   return (float)(s/(float)n - pow(expt_ , (float)2.0));
+}
+
+
+template<typename Dtype>
+Dtype gpu_expected_dist_two_guassian(cublasHandle_t dn_handle, const long long int n){
+  bool Debug = false;
+
+  struct timeval program_start, program_end;
+  double program_time;
+  gettimeofday(&program_start, NULL);
+  long long int m = n;
+  if(m % (long long int)2 != (long long int)0){
+    m = m + (long long int)1;
+  }
+
+  int trials = 500;
+  Dtype sum = (Dtype)0.0;
+  Dtype* x;
+  Dtype* y;
+  CUDA_CHECK(cudaMalloc((void**)&x, n * sizeof(Dtype)));
+  CUDA_CHECK(cudaMalloc((void**)&y, n * sizeof(Dtype)));
+  for(int i = 0; i < trials; i++){
+    gpu_rng_gaussian<Dtype>(m, (Dtype)0.0, (Dtype)1.0, x);
+    gpu_rng_gaussian<Dtype>(m, (Dtype)0.0, (Dtype)1.0, y);
+
+    gpu_axpy<Dtype>(dn_handle, n, (Dtype)(-1.0), x, y);
+    if(Debug){
+      save_device_arrays_side_by_side_to_file<Dtype>(x, y, n, "x and y-x");
+    }
+
+    sum += gpu_norm<Dtype>(dn_handle, n, y);
+    if(Debug){
+      LOG("sum so far : "<<sum);
+      return (Dtype)0.0;
+    }
+  }
+  cudaFree(x);
+  cudaFree(y);
+  gettimeofday(&program_end, NULL);
+  program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));  
+  if(1) LOG("gpu_expected_dist_two_guassian run time : "<<readable_time(program_time)<<std::endl);
+
+  return sum / ((Dtype)trials);
 }
 
 template <>
@@ -4773,7 +4867,7 @@ void gpu_R_error<float>(const cublasHandle_t dn_handle, const cusparseHandle_t s
   const float *coo_format_ratingsMtx_rating_dev_testing, 
   const int *csr_format_ratingsMtx_userID_dev_testing_batch, 
   const int *coo_format_ratingsMtx_itemID_dev_testing,
-  const float *V, float *U_testing, float *R_testing, const unsigned long seed,
+  const float *V, float *U_testing, float *R_testing,
   std::string name, float training_rate, float regularization_constant)
 {
   ABORT_IF_EQ(0, 1, "This version is currently outdated.");
@@ -4784,6 +4878,8 @@ void gpu_R_error<float>(const cublasHandle_t dn_handle, const cusparseHandle_t s
     struct timeval program_start, program_end;
     double program_time;
     gettimeofday(&program_start, NULL);
+
+
   //============================================================================================
   // Initialize  R_testing * V = U_testing
   //============================================================================================ 
@@ -4804,7 +4900,7 @@ void gpu_R_error<float>(const cublasHandle_t dn_handle, const cusparseHandle_t s
       V   * V^T is not the identity mtx 
   */
 
-  gpu_get_rand_bools<float>(nnz,  testing_entries, seed, (float)1.0 - testing_fraction /*probability of 1*/);
+  gpu_get_rand_bools<float>(nnz,  testing_entries, (float)1.0 - testing_fraction /*probability of 1*/);
 
       if(Debug && 0){
         save_device_arrays_side_by_side_to_file<float>(coo_format_ratingsMtx_rating_dev_testing, testing_entries, nnz, "ratings_testing_before_hadamard");
@@ -5061,7 +5157,7 @@ void gpu_R_error_training<float>(const cublasHandle_t dn_handle, const cusparseH
   const float *coo_format_ratingsMtx_rating_dev_training, 
   const int *csr_format_ratingsMtx_userID_dev_training_batch, 
   const int *coo_format_ratingsMtx_itemID_dev_training,
-  const float *V, float *U_training, float *R_training, const unsigned long seed,
+  const float *V, float *U_training, float *R_training, 
   float training_rate, float regularization_constant)
 {
   bool Debug = false;
@@ -5070,6 +5166,7 @@ void gpu_R_error_training<float>(const cublasHandle_t dn_handle, const cusparseH
   struct timeval program_start, program_end;
   double program_time;
   gettimeofday(&program_start, NULL);
+
   //============================================================================================
   // Initialize  R_training * V = U_training
   //============================================================================================ 
@@ -5325,7 +5422,7 @@ void gpu_R_error_testing<float>(const cublasHandle_t dn_handle, const cusparseHa
   const float *coo_format_ratingsMtx_rating_dev_testing, 
   const int *csr_format_ratingsMtx_userID_dev_testing_batch, 
   const int *coo_format_ratingsMtx_itemID_dev_testing,
-  const float *V, float *U_testing, float *R_testing, const unsigned long seed,
+  const float *V, float *U_testing, float *R_testing, 
   float training_rate, float regularization_constant,
   float* testing_error_on_training_entries, float* testing_error_on_testing_entries, 
   long long int* total_iterations)
@@ -5336,6 +5433,7 @@ void gpu_R_error_testing<float>(const cublasHandle_t dn_handle, const cusparseHa
   struct timeval program_start, program_end;
   double program_time;
   gettimeofday(&program_start, NULL);
+
   //============================================================================================
   // Initialize  R_testing * V = U_testing
   //============================================================================================ 
@@ -5357,7 +5455,7 @@ void gpu_R_error_testing<float>(const cublasHandle_t dn_handle, const cusparseHa
   */
       float *coo_R;
 
-  gpu_get_rand_bools<float>(nnz,  testing_entries, seed, (float)1.0 - testing_fraction /*probability of 1*/);
+  gpu_get_rand_bools<float>(nnz,  testing_entries, (float)1.0 - testing_fraction /*probability of 1*/);
       float *testing_entries_cpy; 
       checkCudaErrors(cudaMalloc((void**)&testing_entries_cpy, nnz * sizeof(float)));
       checkCudaErrors(cudaMemcpy(testing_entries_cpy, testing_entries, nnz * sizeof(float), cudaMemcpyDeviceToDevice));
@@ -5629,10 +5727,15 @@ void gpu_R_error_testing<float>(const cublasHandle_t dn_handle, const cusparseHa
   if(1) {
     //LOG("gpu_R_error call finished");
     LOG("gpu_R_error_testing total iterations : "<<i);
-    LOG("gpu_R_error_testing error on training entries: "<<error); 
+    LOG("gpu_R_error_testing average squared error on training entries: "<<error); 
 
     float nnz_ = (float)nnz * testing_fraction; 
-    LOG("gpu_R_error_testing error on testing entries: "<<error_test / nnz_);     
+    LOG("gpu_R_error_testing average squared error on testing entries: "<<error_test / nnz_); 
+
+    float expected_dist_two_guassian = gpu_expected_dist_two_guassian<float>(dn_handle, nnz_);
+    LOG("expected distance between two guassian vectors : "<<expected_dist_two_guassian);
+
+    LOG("Testing error norm over expected distance between two guassian vectors: "<< std::sqrt(error_test) / expected_dist_two_guassian );    
   }
 
   //checkCudaErrors(cudaMemcpy(testing_entries, testing_entries_cpy, nnz * sizeof(float), cudaMemcpyDeviceToDevice));

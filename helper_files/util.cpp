@@ -201,9 +201,31 @@ void MatrixInplaceTranspose<float>(float *A, int r, int c)
 //============================================================================================
 
 
+
+// random seeding
+int64_t cluster_seedgen(void) {
+  int64_t s, seed, pid;
+  FILE* f = fopen("/dev/urandom", "rb");
+  if (f && fread(&seed, 1, sizeof(seed), f) == sizeof(seed)) {
+    fclose(f);
+    return seed;
+  }
+
+  LOG("System entropy source not available, using fallback algorithm to generate seed instead.");
+  if (f)
+    fclose(f);
+
+  pid = getpid();
+  s = time(NULL);
+  seed = std::abs(((s * 181) * ((pid - 83) * 359)) % 104729);
+  return seed;
+}
+
+
 template <typename Dtype>
-void fillupMatrix(Dtype *A , int lda , int rows, int cols, int seed)
+void fillupMatrix(Dtype *A , int lda , int rows, int cols)
 {
+  int seed = cluster_seedgen();
   int sign;
   for (int j = 0; j < cols; j++)
   {
@@ -223,8 +245,8 @@ void fillupMatrix(Dtype *A , int lda , int rows, int cols, int seed)
   }
 }
 /* Explicit instantiation */
-template void  fillupMatrix<float>(float *A , int lda , int rows, int cols, int seed);
-template void  fillupMatrix<double>(double *A , int lda , int rows, int cols, int seed);
+template void  fillupMatrix<float>(float *A , int lda , int rows, int cols);
+template void  fillupMatrix<double>(double *A , int lda , int rows, int cols);
 
 template <typename Dtype>
 Dtype nextafter(const Dtype b) {
@@ -248,7 +270,7 @@ void host_rng_uniform(const long long int n, const Dtype a, const Dtype b, Dtype
   ABORT_IF_EQ(a, b, "host_rng_uniform has a = b");
   ABORT_IF_LESS(b, a, "host_rng_uniform has b < a");
 
-  base_generator_type generator(static_cast<unsigned int>(std::time(0)));
+  base_generator_type generator(static_cast<unsigned int>(cluster_seedgen()));
 
   // Define a uniform random number distribution which produces "double"
   // values between 0 and 1 (0 inclusive, 1 exclusive).

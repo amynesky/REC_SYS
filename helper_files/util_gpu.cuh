@@ -334,15 +334,19 @@ void gpu_scale(cublasHandle_t dn_handle, const long long int n, const Dtype alph
 //============================================================================================
 
 template < typename Dtype>
-void gpu_get_rand_bools(const long long int n,  Dtype* x, unsigned long seed, float probability_of_success);
+void gpu_get_rand_bools(const long long int n,  Dtype* x, float probability_of_success);
 
-void gpu_get_rand_groups(const long long int n,  int* x, unsigned long seed, float* probability_of_success, const int num_groups);
+void gpu_get_rand_groups(const long long int n,  int* x, float* probability_of_success, const int num_groups);
 
 template < typename Dtype>
 void gpu_reverse_bools(const long long int n,  Dtype* x);
 
 template <typename Dtype>
 void gpu_rng_uniform(cublasHandle_t handle, const long long int n, const Dtype a, const Dtype b, Dtype* r);
+
+template <typename Dtype>
+void gpu_rng_gaussian(const long long int n, const Dtype mu, const Dtype sigma,
+                            Dtype* r);
 
 template <typename Dtype>
 void gpu_shuffle_array(cublasHandle_t handle, const long long int n,  Dtype* x);
@@ -385,6 +389,9 @@ Dtype gpu_range(const long long int n, const Dtype* x);
 template<typename Dtype>
 Dtype gpu_sum(const long long int n,  const Dtype* x);
 
+template <typename Dtype>
+Dtype gpu_norm(cublasHandle_t dn_handle, const long long int n, const Dtype* x);
+
 template<typename Dtype>
 Dtype gpu_expected_value(const long long int n,  const Dtype* x);
 
@@ -393,6 +400,9 @@ Dtype gpu_expected_abs_value(const long long int n,  const Dtype* x);
 
 template<typename Dtype>
 Dtype gpu_variance(const long long int n, const Dtype* x);
+
+template<typename Dtype>
+Dtype gpu_expected_dist_two_guassian(cublasHandle_t dn_handle, const long long int n);
 
 template<typename Dtype>
 Dtype gpu_sum_of_squares(const long long int n, const Dtype* x);
@@ -666,7 +676,7 @@ void gpu_R_error(const cublasHandle_t dn_handle, const cusparseHandle_t sp_handl
                         const Dtype *coo_format_ratingsMtx_rating_dev_testing, 
                         const int *csr_format_ratingsMtx_userID_dev_testing_batch, 
                         const int *coo_format_ratingsMtx_itemID_dev_testing,
-                        const Dtype *V, Dtype *U_testing, Dtype *R_testing, const unsigned long seed,
+                        const Dtype *V, Dtype *U_testing, Dtype *R_testing, 
                         std::string name, float training_rate, float regularization_constant);
 
 
@@ -678,7 +688,7 @@ void gpu_R_error_training(const cublasHandle_t dn_handle, const cusparseHandle_t
                                 const Dtype *coo_format_ratingsMtx_rating_dev_training, 
                                 const int *csr_format_ratingsMtx_userID_dev_training_batch, 
                                 const int *coo_format_ratingsMtx_itemID_dev_training,
-                                const Dtype *V, Dtype *U_training, Dtype *R_training, const unsigned long seed,
+                                const Dtype *V, Dtype *U_training, Dtype *R_training, 
                                 Dtype training_rate, Dtype regularization_constant);
 
 
@@ -690,7 +700,7 @@ void gpu_R_error_testing(const cublasHandle_t dn_handle, const cusparseHandle_t 
                         const Dtype *coo_format_ratingsMtx_rating_dev_testing, 
                         const int *csr_format_ratingsMtx_userID_dev_testing_batch, 
                         const int *coo_format_ratingsMtx_itemID_dev_testing,
-                        const Dtype *V, Dtype *U_testing, Dtype *R_testing, const unsigned long seed,
+                        const Dtype *V, Dtype *U_testing, Dtype *R_testing, 
                         float training_rate, float regularization_constant,
                         float* testing_error_on_training_entries, float* testing_error_on_testing_entries, 
                         long long int* total_iterations);

@@ -121,9 +121,10 @@ void MatrixInplaceTranspose(Dtype *A, int r, int c);
 // random utilities
 //============================================================================================
 
+int64_t cluster_seedgen(void);
 
 template < typename Dtype>
-void  fillupMatrix(Dtype *A , int lda , int rows, int cols, int seed = 0);
+void  fillupMatrix(Dtype *A , int lda , int rows, int cols);
 
 template <typename Dtype>
 void host_rng_uniform(const long long int n, const Dtype a, const Dtype b, Dtype* r);
