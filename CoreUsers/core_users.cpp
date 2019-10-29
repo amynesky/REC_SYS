@@ -1149,6 +1149,8 @@ int main(int argc, char *argv[])
         columns of each matrix
     */
     LOG("num_latent_factors = "<< num_latent_factors);
+    save_device_mtx_to_file<float>(V, ratings_cols, num_latent_factors, "V_compressed");
+    save_device_mtx_to_file<float>(U_CU, batch_size_GU, num_latent_factors, "U_CU_compressed");
     if(compress){
         //ABORT_IF_NEQ(0, 1, "Not Yet Supported");
     }

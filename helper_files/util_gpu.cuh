@@ -560,6 +560,12 @@ void gpu_supplement_training_mtx_with_content_based(const long long int ratings_
                                                     const int* csr_format_keyWordMtx_itemID_dev,
                                                     const int* coo_format_keyWordMtx_keyWord_dev);
 
+template <typename Dtype>
+void sparse_nearest_row(const int rows_A, const int cols, const Dtype* dense_mtx_A, 
+ const int rows_B, const int num_sparse_entries, const int* csr_rows_B, const int* coo_cols_B,
+ const Dtype* coo_entries_B, int* selection,  
+ Dtype* error);
+
 void center_ratings(const float* user_means, const float* user_var, 
                     const int ratings_rows, const int num_entries,
                     const int* csr_format_ratingsMtx_userID_dev,

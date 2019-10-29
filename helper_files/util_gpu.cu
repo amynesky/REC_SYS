@@ -1521,7 +1521,7 @@ Dtype gpu_expected_dist_two_guassian(cublasHandle_t dn_handle, const long long i
   cudaFree(y);
   gettimeofday(&program_end, NULL);
   program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));  
-  if(1) LOG("gpu_expected_dist_two_guassian run time : "<<readable_time(program_time)<<std::endl);
+  if(0) LOG("gpu_expected_dist_two_guassian run time : "<<readable_time(program_time)<<std::endl);
 
   return sum / ((Dtype)trials);
 }
@@ -2668,37 +2668,37 @@ __global__ void gpu_supplement_training_mtx_with_content_based_kernel(const long
   CUDA_KERNEL_LOOP(b, how_many){
     long long int mtx_index = (long long int)b + start;
     int user = 0;
-    int movie = 0;
+    int item = 0;
     if(row_major_ordering){
       user = mtx_index / ratings_cols_training;
-      movie = mtx_index % ratings_cols_training;
+      item = mtx_index % ratings_cols_training;
     }else{
       user = mtx_index % ratings_rows_training;
-      movie = mtx_index / ratings_rows_training;
+      item = mtx_index / ratings_rows_training;
     }
 
     bool could_estimate = true;
     for(int coo_index = csr_format_ratingsMtx_userID_dev_training[user]; coo_index < csr_format_ratingsMtx_userID_dev_training[user + 1]; coo_index++){
-      if(coo_format_ratingsMtx_itemID_dev_training[coo_index] == movie) could_estimate = false;
-      if(coo_format_ratingsMtx_itemID_dev_training[coo_index]  > movie) break;
+      if(coo_format_ratingsMtx_itemID_dev_training[coo_index] == item) could_estimate = false;
+      if(coo_format_ratingsMtx_itemID_dev_training[coo_index]  > item) break;
     }
     if (could_estimate){
       int   count  = 0;
       float rating = (float)0.0;
       for(int j = csr_format_ratingsMtx_userID_dev_training[user]; j < csr_format_ratingsMtx_userID_dev_training[user + 1]; j++){
-        int other_movie = coo_format_ratingsMtx_itemID_dev_training[j];
-        for(int k = csr_format_keyWordMtx_itemID_dev[other_movie]; k < csr_format_keyWordMtx_itemID_dev[other_movie + 1]; k++){
+        int other_item = coo_format_ratingsMtx_itemID_dev_training[j];
+        for(int k = csr_format_keyWordMtx_itemID_dev[other_item]; k < csr_format_keyWordMtx_itemID_dev[other_item + 1]; k++){
           int other_keyWord = coo_format_keyWordMtx_keyWord_dev[k];
-          int start_l = csr_format_keyWordMtx_itemID_dev[movie];
-          for(int l = start_l; l < csr_format_keyWordMtx_itemID_dev[movie + 1]; l++){
+          int start_l = csr_format_keyWordMtx_itemID_dev[item];
+          for(int l = start_l; l < csr_format_keyWordMtx_itemID_dev[item + 1]; l++){
             int keyword = coo_format_keyWordMtx_keyWord_dev[l];
             if(keyword == other_keyWord){
               count += 1;
               //rating += coo_format_ratingsMtx_rating_dev_training[j];
               if(row_major_ordering){
-                rating += full_training_ratings_mtx[(long long int)user * ratings_cols_training + (long long int)other_movie];
+                rating += full_training_ratings_mtx[(long long int)user * ratings_cols_training + (long long int)other_item];
               }else{
-                rating += full_training_ratings_mtx[(long long int)user + (long long int)other_movie * ratings_rows_training];
+                rating += full_training_ratings_mtx[(long long int)user + (long long int)other_item * ratings_rows_training];
               }
               start_l = l+1;
             } else if (keyword > other_keyWord){
@@ -2799,6 +2799,113 @@ void gpu_supplement_training_mtx_with_content_based(const long long int ratings_
   //printf("program_time: %f\n", program_time);   
   /*if(Debug)*/ LOG("content based run time : "<<readable_time(program_time)<<std::endl);
 }
+
+
+
+template<typename Dtype>
+__global__ void sparse_nearest_row_kernel(const int rows_A, const int cols, const Dtype* dense_mtx_A, 
+ const int rows_B, const int* csr_rows_B, const int* coo_cols_B,
+ const Dtype* coo_entries_B, int* selection,  
+ Dtype* error, bool* isBad)
+{
+  /*
+    subtract dense_mtx_A from sparse mtx B and put the sparse results in coo_errors
+    dense_mtx_A must be in column major ordering
+  */
+
+  const int row_skip = csr_rows_B[0];
+  CUDA_KERNEL_LOOP(row_B,rows_B) {
+    Dtype closest_A_row_dist = (Dtype)10000.0;
+    int   closest_A_row      = 0;
+    for(int row_A = 0; row_A < rows_A; row_A++){
+      Dtype temp = (Dtype)0.0;
+      for(int coo_index = csr_rows_B[row_B]; coo_index < csr_rows_B[row_B + 1]; coo_index++){
+        int col = coo_cols_B[coo_index];
+        temp += pow(dense_mtx_A[row_A + col * rows_A] - coo_entries_B[coo_index],(Dtype)2.0);
+      }
+      if(temp < closest_A_row_dist || row_A == 0){
+        closest_A_row_dist = temp;
+        closest_A_row      = row_A;
+      }
+    }
+    selection[row_B] = closest_A_row;
+    error[row_B] = closest_A_row_dist;
+
+    if (::isinf(error[row_B]) || ::isnan(error[row_B])){
+      isBad[0] = true;
+    };
+  };
+}
+
+template <typename Dtype>
+void sparse_nearest_row(const int rows_A, const int cols, const Dtype* dense_mtx_A, 
+ const int rows_B, const int num_sparse_entries, const int* csr_rows_B, const int* coo_cols_B,
+ const Dtype* coo_entries_B, int* selection,  
+ Dtype* error) 
+{
+  /*
+    subtract dense_mtx_A from sparse mtx B and put the sparse results in coo_errors
+    dense_mtx_A must be in column major ordering
+  */
+
+
+    bool Debug = false;
+    bool isBad_host = false;
+    bool* isBad;
+    CUDA_CHECK(cudaMalloc((void**)&isBad, sizeof(bool)));
+    CUDA_CHECK(cudaMemcpy(isBad, &isBad_host, sizeof(bool), cudaMemcpyHostToDevice));
+
+    // if(coo_A == NULL){
+    //   Debug = false;
+    // }else{
+    //   Debug = true;
+    // }
+
+    if(Debug) LOG("sparse_nearest_row called");
+
+
+    const long long int num_gpu_blocks= GET_BLOCKS(rows_B);
+
+    if (num_gpu_blocks > CUDA_NUM_BLOCKS){
+      ABORT_IF_NEQ(0, 1, "Max Blocks Exceeded");
+    };
+
+
+    if(Debug) {
+      LOG("rows_A : "<< rows_A);
+      LOG("cols : "<< cols);
+      LOG("num_sparse_entries : "<< num_sparse_entries);
+      LOG("sparse_error called");
+      save_device_mtx_to_file<Dtype>(dense_mtx_A, rows_A, cols, "dense_mtx_A");
+    //save_device_array_to_file<Dtype>(coo_errors, num_sparse_entries, "coo_errors");
+      save_device_array_to_file<Dtype>(coo_entries_B, num_sparse_entries, "coo_entries_B");
+      save_device_array_to_file<int>(coo_cols_B, num_sparse_entries, "coo_cols_B");
+      save_device_array_to_file<int>(csr_rows_B, rows_B + 1, "csr_rows_B");
+    // LOG("Press Enter to continue.") ;
+    // std::cin.ignore();
+    };
+
+    sparse_nearest_row_kernel<Dtype><<<num_gpu_blocks, CUDA_NUM_THREADS>>>(rows_A, cols, dense_mtx_A, 
+                              rows_B, csr_rows_B, coo_cols_B, coo_entries_B, selection, error, isBad);
+    if(Debug) {
+      save_device_array_to_file<Dtype>(error, rows_B, "row_errors");
+      save_device_array_to_file<int>(selection, rows_B, "nearest_row");
+      LOG("Press Enter to continue.") ;
+      std::cin.ignore();
+    };    
+    if(Debug && 0)LOG("Here!");
+    CUDA_CHECK(cudaMemcpy(&isBad_host, isBad, sizeof(bool), cudaMemcpyDeviceToHost));
+    cudaFree(isBad);
+    if(isBad_host){
+      ABORT_IF_NEQ(0, 1, "isBad");
+    };
+    if(Debug) LOG("sparse_nearest_row call finished");
+  }
+
+template void sparse_nearest_row(const int rows_A, const int cols, const float* dense_mtx_A, 
+ const int rows_B, const int num_sparse_entries, const int* csr_rows_B, const int* coo_cols_B,
+ const float* coo_entries_B, int* selection,  
+ float* error);
 
 
   __global__ void center_ratings_kernel(const float* user_means, const float* user_var, const int ratings_rows,
@@ -4164,12 +4271,12 @@ void gpu_orthogonal_decomp<float>(cublasHandle_t handle, cusolverDnHandle_t dn_s
     save_device_mtx_to_file<float>(U, m, m, "U_3");
     save_device_mtx_to_file<float>(V, n, m, "V_3");
     save_device_mtx_to_file<float>(A, m, n, "A");
-    save_device_array_to_file<float>(d_S, std::min(m,n), "singular_values");
+    
 
     // LOG("Press Enter to continue.") ;
     // std::cin.ignore();
   }    
-
+  save_device_array_to_file<float>(d_S, std::min(m,n), "singular_values");
 
 
   if (d_S    ) cudaFree(d_S);
@@ -5720,22 +5827,25 @@ void gpu_R_error_testing<float>(const cublasHandle_t dn_handle, const cusparseHa
 
   gpu_reverse_bools<float>(nnz,  testing_entries_cpy);
   gpu_hadamard<float>(nnz, testing_entries_cpy, coo_testing_errors );
+  gpu_hadamard<float>(nnz, coo_format_ratingsMtx_rating_dev_testing, testing_entries_cpy );
   //save_device_arrays_side_by_side_to_file<float>(coo_testing_errors, testing_entries, nnz, "testing_entry_errors");
 
   float error_test = gpu_sum_of_squares<float>(nnz, coo_testing_errors);
+  float mean_guess_error = gpu_sum_of_squares<float>(nnz, testing_entries_cpy);
 
   if(1) {
     //LOG("gpu_R_error call finished");
     LOG("gpu_R_error_testing total iterations : "<<i);
-    LOG("gpu_R_error_testing average squared error on training entries: "<<error); 
+    LOG("gpu_R_error_testing MSQER on training entries: "<<error); 
 
     float nnz_ = (float)nnz * testing_fraction; 
-    LOG("gpu_R_error_testing average squared error on testing entries: "<<error_test / nnz_); 
+    LOG("gpu_R_error_testing MSQER on testing entries: "<<error_test / nnz_); 
 
     float expected_dist_two_guassian = gpu_expected_dist_two_guassian<float>(dn_handle, nnz_);
-    LOG("expected distance between two guassian vectors : "<<expected_dist_two_guassian);
+    LOG("expected distance between two "<<nnz_<<" dimenstional guassian vectors : "<<expected_dist_two_guassian);
 
-    LOG("Testing error norm over expected distance between two guassian vectors: "<< std::sqrt(error_test) / expected_dist_two_guassian );    
+    LOG("Testing error norm over E[|N(0,1) - N(0,1)|]: "<< std::sqrt(error_test) / expected_dist_two_guassian ); 
+    LOG("Testing error norm over norm of testing only entries: "<< std::sqrt(error_test) / std::sqrt(mean_guess_error) );    
   }
 
   //checkCudaErrors(cudaMemcpy(testing_entries, testing_entries_cpy, nnz * sizeof(float), cudaMemcpyDeviceToDevice));

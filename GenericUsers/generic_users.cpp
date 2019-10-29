@@ -435,7 +435,7 @@ int main(int argc, char *argv[])
 
 
 
-    const float probability_GU       = (float)1.0/(float)100.0;
+    const float probability_GU       = (float)5.0/(float)100.0;
     const float p                    = (float)1.0/(float)10.0;
     const float probability_testing  =         p        * ((float)1.0 - probability_GU);
     const float probability_training = ((float)1.0 - p) * ((float)1.0 - probability_GU);
@@ -1607,8 +1607,8 @@ int main(int argc, char *argv[])
             }
 
             if(1){
-                save_device_mtx_to_file<float>(V, ratings_cols, (compress == false) ? batch_size_GU : num_latent_factors, "V");
-                save_device_mtx_to_file<float>(U_GU, batch_size_GU, (compress == false) ? batch_size_GU : num_latent_factors, "U_GU");
+                save_device_mtx_to_file<float>(V, ratings_cols, num_latent_factors, "V_compressed");
+                save_device_mtx_to_file<float>(U_GU, batch_size_GU, num_latent_factors, "U_GU_compressed");
                 float* copy;
                 checkCudaErrors(cudaMalloc((void**)&copy, batch_size_GU * ratings_cols * sizeof(float)));
                 checkCudaErrors(cudaMemcpy(copy, delta_R_GU, batch_size_GU * ratings_cols * sizeof(float), cudaMemcpyDeviceToDevice));
@@ -1687,7 +1687,21 @@ int main(int argc, char *argv[])
     }//end for loop on iterations
     //save_host_array_to_file<float>(testing_error, (num_iterations / testing_rate), "testing_error");
 
-    
+    float* errors;
+    int* selection;
+    checkCudaErrors(cudaMalloc((void**)&coo_training_errors, nnz_training * sizeof(float)));
+    checkCudaErrors(cudaMalloc((void**)&testing_entries, nnz_training * sizeof(float)));
+    if(!Conserve_GPU_Mem){
+        sparse_nearest_row<float>(ratings_rows_GU, ratings_cols, full_ratingsMtx_dev_GU, 
+             ratings_rows_training, num_entries_training, 
+             csr_format_ratingsMtx_userID_dev_training, 
+             coo_format_ratingsMtx_itemID_dev_training,
+             coo_format_ratingsMtx_rating_dev_training, 
+             selection, errors);
+    }
+
+    cudaFree(errors);
+    cudaFree(selection);
     cudaDeviceSynchronize();
     gettimeofday(&training_end, NULL);
     training_time = (training_end.tv_sec * 1000 +(training_end.tv_usec/1000.0))-(training_start.tv_sec * 1000 +(training_start.tv_usec/1000.0));  
