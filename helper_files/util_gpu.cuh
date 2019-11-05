@@ -617,7 +617,7 @@ void gpu_mult_US_in_SVD(const long long int m, const long long int num_latent_fa
                         Dtype* U, const Dtype* S, const bool right_multiply_by_S);
 
 template <typename Dtype>
-void get_num_latent_factors(cublasHandle_t dn_handle, const long long int m, Dtype* S, 
+void gpu_get_num_latent_factors(cublasHandle_t dn_handle, const long long int m, Dtype* S, 
                                   long long int* num_latent_factors, const Dtype percent);
 
 template <typename Dtype>
@@ -626,6 +626,14 @@ void preserve_first_m_rows(const long long int old_lda, const long long int new_
 
 template <typename Dtype>
 void gpu_orthogonal_decomp(cublasHandle_t handle, cusolverDnHandle_t dn_solver_handle,
+                          const long long int m, const long long int n, 
+                          long long int* num_latent_factors, const Dtype percent,
+                          Dtype* A, Dtype* U, Dtype* V, bool S_with_U);
+
+void gpu_orthogonal_decomp_test(cublasHandle_t handle, cusolverDnHandle_t dn_solver_handle);
+
+template <typename Dtype>
+void gpu_block_orthogonal_decomp_from_host(cublasHandle_t handle, cusolverDnHandle_t dn_solver_handle,
                           const long long int m, const long long int n, 
                           long long int* num_latent_factors, const Dtype percent,
                           Dtype* A, Dtype* U, Dtype* V); 

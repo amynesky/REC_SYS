@@ -310,11 +310,11 @@ void print_gpu_mtx_entries(const Dtype* array, int lda, int sda, bool transpose)
 
   std::string line;
   line="[ ";
-    if(!transpose){
+    if(transpose){
       for( int j = 0; j < sda; j+= 1 ) {
         for( int i = 0; i < lda; i+= 1 ) {
-          if (j==sda-1){
-            if (i==lda-1){
+          if (i==lda-1){
+            if (j==sda-1){
               line = (line + ToString<Dtype>(host_pointer[i  + j* lda])).c_str();
             }else{
               line = (line + ToString<Dtype>(host_pointer[i  + j* lda]) + " ; ").c_str();
@@ -624,31 +624,31 @@ void save_device_mtx_to_file(const Dtype* A_dev, int lda, int sda, std::string t
   std::ofstream entries (filename.str().c_str());
   //entries<<"[ ";
   if(!transpose){
-    for (int j = 0; j < sda; j++){
-      //entries<<"***"<<j<<"***";
-      for (int i = 0; i < lda; i++){
-        entries<<A_host[(long long int)i + (long long int)j * (long long int)lda];
-        if(i < lda - 1){
-          entries<<", ";
-        };
-      };
-      if(j < sda - 1){
-        //entries<<"\r\n";
-        entries<<"; ";
-      };
-
-    }; 
-  }else{
     for (int i = 0; i < lda; i++){
       //entries<<"***"<<i<<"***";
       for (int j = 0; j < sda; j++){
         entries<<A_host[(long long int)i + (long long int)j * (long long int)lda];
         if(j < sda - 1){
+          //entries<<"\r\n";
+          entries<<", ";
+        }
+      };
+      if(i < lda - 1){
+        entries<<"; ";
+      };
+
+    }; 
+  }else{
+    for (int j = 0; j < sda; j++){
+      //entries<<"***"<<j<<"***";
+      for (int i = 0; i < lda; i++){
+        entries<<A_host[(long long int)i + (long long int)j * (long long int)lda];
+        if(i < lda - 1){
+          //entries<<"\r\n";
           entries<<", ";
         };
       };
-      if(i < lda - 1){
-        //entries<<"\r\n";
+      if(j < sda - 1){
         entries<<"; ";
       };
     };    
@@ -715,7 +715,7 @@ template <>
 void gpu_scale<float>(cublasHandle_t dn_handle, const long long int n, const float alpha, 
   const float *x, float* y) 
 {
-  if(too_big(n) ) {ABORT_IF_EQ(0, 1,"Long long long int too big");}
+  if(too_big(n) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
   CUBLAS_CHECK(cublasScopy(dn_handle, n, x, 1, y, 1));
   CUBLAS_CHECK(cublasSscal(dn_handle, n, &alpha, y, 1));
 }
@@ -724,7 +724,7 @@ template <>
 void gpu_scale<double>(cublasHandle_t dn_handle, const long long int n, const double alpha, 
   const double *x, double* y) 
 {
-  if(too_big(n) ) {ABORT_IF_EQ(0, 1,"Long long long int too big");}
+  if(too_big(n) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
     // This function scales copies a scaled version of the vector x by the scalar α  into the result y.
   CUBLAS_CHECK(cublasDcopy(dn_handle, n, x, 1, y, 1));
   CUBLAS_CHECK(cublasDscal(dn_handle, n, &alpha, y, 1));
@@ -732,7 +732,7 @@ void gpu_scale<double>(cublasHandle_t dn_handle, const long long int n, const do
 template <>
 void gpu_scale<float>(cublasHandle_t dn_handle, const long long int n, const float alpha, float *x) 
 {
-  if(too_big(n) ) {ABORT_IF_EQ(0, 1,"Long long long int too big");}
+  if(too_big(n) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
   // This function scales the vector x by the scalar α and overwrites it with the result.
   CUBLAS_CHECK(cublasSscal(dn_handle, n, &alpha, x, 1));
 }
@@ -740,7 +740,7 @@ void gpu_scale<float>(cublasHandle_t dn_handle, const long long int n, const flo
 template <>
 void gpu_scale<double>(cublasHandle_t dn_handle, const long long int n, const double alpha, double *x) 
 {
-  if(too_big(n) ) {ABORT_IF_EQ(0, 1,"Long long long int too big");}
+  if(too_big(n) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
   // This function scales the vector x by the scalar α and overwrites it with the result.
   CUBLAS_CHECK(cublasDscal(dn_handle, n, &alpha, x, 1));
 }
@@ -891,7 +891,7 @@ template void gpu_reverse_bools<float>(const long long int n,  float* x);
 
 void gpu_rng_uniform(const long long int n, unsigned int* r) 
 {
-  if(too_big(n) ) {ABORT_IF_EQ(0, 1,"Long long long int too big");}
+  if(too_big(n) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
     // gpu_rng_uniform with two arguments generates integers in the range
     // [0, UINT_MAX].
   curandGenerator_t gen;
@@ -913,7 +913,7 @@ void gpu_rng_uniform<float>(cublasHandle_t handle, const long long int n, const 
     // specification of curandGenerateUniform.  With a = 0, b = 1, just calls
     // curandGenerateUniform; with other limits will shift and scale the outputs
     // appropriately after calling curandGenerateUniform.
-  if(too_big(n) ) {ABORT_IF_EQ(0, 1,"Long long long int too big");}
+  if(too_big(n) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
   curandGenerator_t gen;
     /* Create pseudo-random number generator */
   CURAND_CHECK(curandCreateGenerator(&gen, CURAND_RNG_PSEUDO_DEFAULT));
@@ -939,7 +939,7 @@ void gpu_rng_uniform<double>(cublasHandle_t handle, const long long int n, const
     // specification of curandGenerateUniform.  With a = 0, b = 1, just calls
     // curandGenerateUniform; with other limits will shift and scale the outputs
     // appropriately after calling curandGenerateUniform.
-  if(too_big(n) ) {ABORT_IF_EQ(0, 1,"Long long long int too big");}
+  if(too_big(n) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
   curandGenerator_t gen;
     /* Create pseudo-random number generator */
   CURAND_CHECK(curandCreateGenerator(&gen, CURAND_RNG_PSEUDO_DEFAULT));
@@ -961,36 +961,58 @@ void gpu_rng_uniform<double>(cublasHandle_t handle, const long long int n, const
 template <>
 void gpu_rng_gaussian<float>(const long long int n, const float mu, const float sigma, float* r) 
 {
-  if(too_big(n) ) {ABORT_IF_EQ(0, 1, "Long long long int too big");}
-  if(n % (long long int)2 !=  (long long int)0) {ABORT_IF_EQ(0, 1, "Must request even number");}
+  if(too_big(n) ) {ABORT_IF_NEQ(0, 1, "Long long long int too big");}
+
   curandGenerator_t gen;
-    /* Create pseudo-random number generator */
+  /* Create pseudo-random number generator */
   CURAND_CHECK(curandCreateGenerator(&gen, CURAND_RNG_PSEUDO_DEFAULT));
-    /* Set seed */
+  /* Set seed */
   CURAND_CHECK(curandSetPseudoRandomGeneratorSeed(gen, cluster_seedgen()));
-  CURAND_CHECK(curandGenerateNormal(gen, r, n, mu, sigma));
-  CURAND_CHECK(curandDestroyGenerator(gen));
+
+  if((bool)(n % (long long int)2 !=  (long long int)0)) {
+    float* r_temp;
+    checkCudaErrors(cudaMalloc((void**)&r_temp,  (n + (long long int)1) * sizeof(float)));
+    CURAND_CHECK(curandGenerateNormal(gen, r_temp, (n + (long long int)1), mu, sigma));
+    CURAND_CHECK(curandDestroyGenerator(gen));  
+    checkCudaErrors(cudaMemcpy(r,  r_temp, n * sizeof(float), cudaMemcpyDeviceToDevice));
+    cudaFree(r_temp);
+  }else{
+    CURAND_CHECK(curandGenerateNormal(gen, r, n, mu, sigma));
+    CURAND_CHECK(curandDestroyGenerator(gen));    
+  }
+
 }
 
 template <>
 void gpu_rng_gaussian<double>(const long long int n, const double mu, const double sigma, double* r) 
 {
-  if(too_big(n) ) {ABORT_IF_EQ(0, 1, "Long long long int too big");}
-  if(n % (long long int)2 !=  (long long int)0) {ABORT_IF_EQ(0, 1, "Must request even number");}
+  if(too_big(n) ) {ABORT_IF_NEQ(0, 1, "Long long long int too big");}
+
   curandGenerator_t gen;
-    /* Create pseudo-random number generator */
+  /* Create pseudo-random number generator */
   CURAND_CHECK(curandCreateGenerator(&gen, CURAND_RNG_PSEUDO_DEFAULT));
-    /* Set seed */
+  /* Set seed */
   CURAND_CHECK(curandSetPseudoRandomGeneratorSeed(gen, cluster_seedgen()));
-  CURAND_CHECK(curandGenerateNormalDouble(gen, r, n, mu, sigma));
-  CURAND_CHECK(curandDestroyGenerator(gen));
+
+  if((bool)(n % (long long int)2 !=  (long long int)0)) {
+    double* r_temp;
+    checkCudaErrors(cudaMalloc((void**)&r_temp,  (n + (long long int)1) * sizeof(double)));
+    CURAND_CHECK(curandGenerateNormalDouble(gen, r_temp, (n + (long long int)1), mu, sigma));
+    CURAND_CHECK(curandDestroyGenerator(gen));  
+    checkCudaErrors(cudaMemcpy(r,  r_temp, n * sizeof(double), cudaMemcpyDeviceToDevice));
+    cudaFree(r_temp);
+  }else{
+    CURAND_CHECK(curandGenerateNormalDouble(gen, r, n, mu, sigma));
+    CURAND_CHECK(curandDestroyGenerator(gen));    
+  }
+
 }
 
 
 template < typename Dtype>
 void gpu_shuffle_array(cublasHandle_t handle, const long long int n,  Dtype* x)
 {
-  if(too_big(n) ) {ABORT_IF_EQ(0, 1,"Long long long int too big");}
+  if(too_big(n) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
   float* order;
   CUDA_CHECK(cudaMalloc((void**)&order, n* sizeof(float)));
 
@@ -1027,7 +1049,7 @@ template void gpu_shuffle_array<int>(cublasHandle_t handle, const long long int 
 template <>
 void gpu_sort_index_by_max<float>(cublasHandle_t handle, const long long int n,  float* x, float* indicies)
 {
-  if(too_big(n) ) {ABORT_IF_EQ(0, 1,"Long long long int too big");}
+  if(too_big(n) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
     // print_gpu_array_entries<float>(indicies, 10 , 1 , n);
     // print_gpu_array_entries<float>(x, 10 , 1 , n);
 
@@ -1058,7 +1080,7 @@ void gpu_sort_index_by_max<float>(cublasHandle_t handle, const long long int row
 
     // print_gpu_array_entries<float>(indicies, 10 , 1 , n);
     // print_gpu_array_entries<float>(x, 10 , 1 , n);
-  if(too_big(cols) ) {ABORT_IF_EQ(0, 1,"Long long long int too big");}
+  if(too_big(cols) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
   for(long long int i = (long long int)0; i < rows; i++){
     thrust::device_ptr<float> indicies_(indicies + i * cols);
     thrust::device_vector<float> indicies__(indicies_, indicies_ + cols);
@@ -1400,7 +1422,7 @@ float gpu_sum<float>(const long long int n,  const float* x)
 
 template <>
 float gpu_norm<float>(cublasHandle_t dn_handle, const long long int n, const float* x) {
-  if(too_big(n) ) {ABORT_IF_EQ(0, 1, "Long long long int too big");}
+  if(too_big(n) ) {ABORT_IF_NEQ(0, 1, "Long long long int too big");}
   float s;
   CUBLAS_CHECK(cublasSnrm2(dn_handle, n, x, 1, &s));
   return s;
@@ -1408,7 +1430,7 @@ float gpu_norm<float>(cublasHandle_t dn_handle, const long long int n, const flo
 
 template <>
 double gpu_norm<double>(cublasHandle_t dn_handle, const long long int n, const double* x) {
-  if(too_big(n) ) {ABORT_IF_EQ(0, 1, "Long long long int too big");}
+  if(too_big(n) ) {ABORT_IF_NEQ(0, 1, "Long long long int too big");}
   double s;
   CUBLAS_CHECK(cublasDnrm2(dn_handle, n, x, 1, &s));
   return s;
@@ -1417,7 +1439,7 @@ double gpu_norm<double>(cublasHandle_t dn_handle, const long long int n, const d
 template<typename Dtype> 
 Dtype gpu_expected_value(const long long int n,  const Dtype* x) 
 {
-  if(too_big(n) ) {ABORT_IF_EQ(0, 1,"Long long long int too big");}
+  if(too_big(n) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
   Dtype* y = (Dtype*) x;
   thrust::device_ptr<Dtype> X = thrust::device_pointer_cast(y);
   Dtype sum = thrust::reduce(X, X + n, (Dtype)0., thrust::plus<Dtype>());
@@ -1442,7 +1464,7 @@ struct abss
 
 template <>
 float gpu_expected_abs_value<float>(const long long int n,  const float* x) {
-  if(too_big(n) ) {ABORT_IF_EQ(0, 1,"Long long long int too big");}
+  if(too_big(n) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
   // setup arguments 
   abss<float> unary_op; 
   thrust::plus<float> binary_op; 
@@ -1468,7 +1490,7 @@ struct square
 
 template <>
 float gpu_variance<float>(const long long int n, const float* x) {
-  if(too_big(n) ) {ABORT_IF_EQ(0, 1,"Long long long int too big");}
+  if(too_big(n) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
   float expt_ =  gpu_expected_value<float>(n, x);
   // setup arguments 
   square<float> unary_op; 
@@ -1528,7 +1550,7 @@ Dtype gpu_expected_dist_two_guassian(cublasHandle_t dn_handle, const long long i
 
 template <>
 float gpu_sum_of_squares<float>(const long long int n, const float* x) {
-  if(too_big(n) ) {ABORT_IF_EQ(0, 1,"Long long long int too big");}
+  if(too_big(n) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
   square<float> unary_op; 
   thrust::plus<float> binary_op; 
   float init = 0; 
@@ -1544,26 +1566,26 @@ float gpu_sum_of_squares<float>(const long long int n, const float* x) {
 template <>
 void gpu_dot<float>(cublasHandle_t dn_handle, const long long int n, const float* x, const float* y,
   float* out) {
-  if(too_big(n) ) {ABORT_IF_EQ(0, 1,"Long long long int too big");}
+  if(too_big(n) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
   CUBLAS_CHECK(cublasSdot(dn_handle, n, x, 1, y, 1, out));
 }
 
 template <>
 void gpu_dot<double>(cublasHandle_t dn_handle, const long long int n, const double* x, const double* y,
   double * out) {
-  if(too_big(n) ) {ABORT_IF_EQ(0, 1,"Long long long int too big");}
+  if(too_big(n) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
   CUBLAS_CHECK(cublasDdot(dn_handle, n, x, 1, y, 1, out));
 }
 
 template <>
 void gpu_asum<float>(cublasHandle_t dn_handle, const long long int n, const float* x, float* y) {
-  if(too_big(n) ) {ABORT_IF_EQ(0, 1,"Long long long int too big");}
+  if(too_big(n) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
   CUBLAS_CHECK(cublasSasum(dn_handle, n, x, 1, y));
 }
 
 template <>
 void gpu_asum<double>(cublasHandle_t dn_handle, const long long int n, const double* x, double* y) {
-  if(too_big(n) ) {ABORT_IF_EQ(0, 1,"Long long long int too big");}
+  if(too_big(n) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
   CUBLAS_CHECK(cublasDasum(dn_handle, n, x, 1, y));
 }
 
@@ -1573,7 +1595,7 @@ template <>
 cublasStatus_t transpose<float>(cublasHandle_t handle, 
   long long int m, long long int n, const float *A, float *result)
 {
-  if(too_big(n) || too_big(m)) {ABORT_IF_EQ(0, 1,"Long long long int too big");}
+  if(too_big(n) || too_big(m)) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
   float one = 1;
   float zero = 0;
   cublasOperation_t trans = CUBLAS_OP_T;
@@ -1585,7 +1607,7 @@ template <>
 cublasStatus_t transpose<double>(cublasHandle_t handle,
  long long int m, long long int n, const double *A, double *result)
 {
-  if(too_big(n) || too_big(m)) {ABORT_IF_EQ(0, 1,"Long long long int too big");}
+  if(too_big(n) || too_big(m)) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
   double one = 1;
   double zero = 0;
   cublasOperation_t trans = CUBLAS_OP_T;
@@ -1822,7 +1844,7 @@ template <>
 void gpu_axpy<float>(cublasHandle_t dn_handle, const long long int N, const float alpha, const float* X,
  float* Y) 
 {
-  if(too_big(N)) {ABORT_IF_EQ(0, 1,"Long long long int too big");}
+  if(too_big(N)) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
   CUBLAS_CHECK(cublasSaxpy(dn_handle, N, &alpha, X, 1, Y, 1));
   /*
      cublasSaxpy multiplies the vector x by the scalar α and adds it
@@ -1838,7 +1860,7 @@ template <>
 void gpu_axpy<double>(cublasHandle_t dn_handle, const long long int N, const double alpha, const double* X,
 double* Y) 
 {
-  if(too_big(N)) {ABORT_IF_EQ(0, 1,"Long long long int too big");}
+  if(too_big(N)) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
   CUBLAS_CHECK(cublasDaxpy(dn_handle, N, &alpha, X, 1, Y, 1));
   /*
    cublasSaxpy multiplies the vector x by the scalar α and adds it
@@ -2406,21 +2428,8 @@ void cublasCSCSparseXgemm<float>(cusparseHandle_t handle,int m, int n, int k, in
               //isBad[0] = true;
             }
         }else{
-            if(row < ratings_rows_training + ratings_rows_GA){
+            if(row < ratings_rows_training + ratings_rows_testing){
                 long long int r = row - ratings_rows_training;
-                for(long long int i = csr_format_ratingsMtx_userID_dev_GA[r]; i < csr_format_ratingsMtx_userID_dev_GA[r + 1]; i++){
-                    m += coo_format_ratingsMtx_rating_dev_GA[i];
-                    v += pow(coo_format_ratingsMtx_rating_dev_GA[i],(float)2.0); 
-                    count++;
-                }
-                user_means_GA[r] = m / (float)count;
-                user_var_GA[r] = v / (float)count - pow(user_means_GA[r], (float)2.0);
-                if(user_var_GA[r] <= (float)0.0) {
-                  user_var_GA[r] = (float)0.0;
-                  //isBad[0] = true;
-                }
-            }else{
-                long long int r = row - ratings_rows_training - ratings_rows_GA;
                 for(long long int i = csr_format_ratingsMtx_userID_dev_testing[r]; i < csr_format_ratingsMtx_userID_dev_testing[r + 1]; i++){
                     m += coo_format_ratingsMtx_rating_dev_testing[i];
                     v += pow(coo_format_ratingsMtx_rating_dev_testing[i],(float)2.0); 
@@ -2431,7 +2440,20 @@ void cublasCSCSparseXgemm<float>(cusparseHandle_t handle,int m, int n, int k, in
                 if(user_var_testing[r] <= (float)0.0) {
                   user_var_testing[r] = (float)0.0; 
                   //isBad[0] = true; 
-                }           
+                } 
+            }else{
+                long long int r = row - ratings_rows_training - ratings_rows_testing;
+                for(long long int i = csr_format_ratingsMtx_userID_dev_GA[r]; i < csr_format_ratingsMtx_userID_dev_GA[r + 1]; i++){
+                    m += coo_format_ratingsMtx_rating_dev_GA[i];
+                    v += pow(coo_format_ratingsMtx_rating_dev_GA[i],(float)2.0); 
+                    count++;
+                }
+                user_means_GA[r] = m / (float)count;
+                user_var_GA[r] = v / (float)count - pow(user_means_GA[r], (float)2.0);
+                if(user_var_GA[r] <= (float)0.0) {
+                  user_var_GA[r] = (float)0.0;
+                  //isBad[0] = true;
+                }          
             }
 
         }
@@ -4065,7 +4087,7 @@ void gpu_copy_and_transpose(const int M, const int N,  const float* x, float* y)
 }
 
 template <>
-void get_num_latent_factors<float>(cublasHandle_t dn_handle, const long long int m, float* S, 
+void gpu_get_num_latent_factors<float>(cublasHandle_t dn_handle, const long long int m, float* S, 
   long long int* num_latent_factors, const float percent) 
 {
   bool Debug = false;
@@ -4119,11 +4141,15 @@ void preserve_first_m_rows<float>(const long long int old_lda, const long long i
 
 }
 
+
+
+
+
 template <>
 void gpu_orthogonal_decomp<float>(cublasHandle_t handle, cusolverDnHandle_t dn_solver_handle,
   const long long int m, const long long int n, 
   long long int* num_latent_factors, const float percent,
-  float* A, float* U, float* V) 
+  float* A, float* U, float* V, bool S_with_U) 
 {
   /*
     A is m by n stored in col-maj ordering
@@ -4139,6 +4165,7 @@ void gpu_orthogonal_decomp<float>(cublasHandle_t handle, cusolverDnHandle_t dn_s
   */
 
   bool Debug = false;
+  const long long int min_dim = std::min(m,n);
 
 
   struct timeval program_start, program_end;
@@ -4227,9 +4254,9 @@ void gpu_orthogonal_decomp<float>(cublasHandle_t handle, cusolverDnHandle_t dn_s
   CUDA_CHECK(cudaDeviceSynchronize());
   if(Debug && 0){
     CUDA_CHECK(cudaDeviceSynchronize());
-    save_device_mtx_to_file<float>(U, m, m, "U");
-    save_device_mtx_to_file<float>(V, n, m, "V");
-    save_device_array_to_file<float>(d_S, std::min(m,n), "singular_values");
+    save_device_mtx_to_file<float>(U, m, min_dim, "U");
+    save_device_mtx_to_file<float>(V, n, min_dim, "V");
+    save_device_array_to_file<float>(d_S, min_dim, "singular_values");
       // LOG("Press Enter to continue.") ;
       // std::cin.ignore();
   }
@@ -4242,41 +4269,49 @@ void gpu_orthogonal_decomp<float>(cublasHandle_t handle, cusolverDnHandle_t dn_s
     if(Debug) LOG("need to transpose "<<m<<" by "<<m<<" mtx U");
     transpose_in_place<float>(handle, sda,  sda, U);
     gpu_gemm<float>(handle, false, true, m, n, m, (float)1.0, U, A, (float)0.0, V);
+    if(Debug && 0){
+      CUDA_CHECK(cudaDeviceSynchronize());
+      save_device_mtx_to_file<float>(U, m, min_dim, "U_2");
+      save_device_mtx_to_file<float>(V, n, min_dim, "V_2");\
+        // LOG("Press Enter to continue.") ;
+        // std::cin.ignore();
+    }
+    if(S_with_U){
+      gpu_mult_US_in_SVD<float>(m, min_dim, U, d_S, true);
+      gpu_div_US_in_SVD<float>(n, min_dim, V, d_S, true);
+    }
   }else{
       //sda = n;
     if(Debug) LOG("need to transpose "<<n<<" by "<<m<<" mtx V");
     transpose_in_place<float>(handle, sda,  sda, V);
     gpu_gemm<float>(handle, false, false, m, m, n, (float)1.0, V, A, (float)0.0, U);
+    if(!S_with_U){
+      gpu_div_US_in_SVD<float>(m, min_dim, U, d_S, true);
+      gpu_mult_US_in_SVD<float>(n, min_dim, V, d_S, true);
+    }
   };
-  if(Debug && 0){
-    CUDA_CHECK(cudaDeviceSynchronize());
-    save_device_mtx_to_file<float>(U, m, m, "U_2");
-    save_device_mtx_to_file<float>(V, n, m, "V_2");\
-      // LOG("Press Enter to continue.") ;
-      // std::cin.ignore();
-  }
 
-  gpu_mult_US_in_SVD<float>(m, std::min(m,n), U, d_S, true);
-  gpu_div_US_in_SVD<float>(n, std::min(m,n), V, d_S, true);
+
+
 
   float max_S = (float)0.0;
   CUDA_CHECK(cudaMemcpy(&max_S, d_S, sizeof(float), cudaMemcpyDeviceToHost));
   LOG("Largest Singular Value : "<<max_S);
 
-  get_num_latent_factors<float>(handle, std::min(m,n), d_S, num_latent_factors, percent);
+  gpu_get_num_latent_factors<float>(handle, min_dim, d_S, num_latent_factors, percent);
 
   if(Debug){
     CUDA_CHECK(cudaDeviceSynchronize());
     LOG("num_latent_factors : "<<num_latent_factors[0]) ;
-    save_device_mtx_to_file<float>(U, m, m, "U_3");
-    save_device_mtx_to_file<float>(V, n, m, "V_3");
+    save_device_mtx_to_file<float>(U, m, min_dim, "U_3");
+    save_device_mtx_to_file<float>(V, n, min_dim, "V_3");
     save_device_mtx_to_file<float>(A, m, n, "A");
     
 
     // LOG("Press Enter to continue.") ;
     // std::cin.ignore();
   }    
-  save_device_array_to_file<float>(d_S, std::min(m,n), "singular_values");
+  save_device_array_to_file<float>(d_S, min_dim, "singular_values");
 
 
   if (d_S    ) cudaFree(d_S);
@@ -4306,23 +4341,23 @@ void gpu_orthogonal_decomp<float>(cublasHandle_t handle, cusolverDnHandle_t dn_s
     // performs C=alpha op ( B ) op ( A ) + beta C
 
     gpu_gemm<float>(handle, false,
-               true, m, m, m /*num_latent_factors[0]*/,
+               true, min_dim, min_dim, m /*num_latent_factors[0]*/,
      (float)1.0, U, U, (float)0.0,
      R);
 
-    save_device_mtx_to_file<float>(R, m, m, "UUT", false);
+    save_device_mtx_to_file<float>(R, min_dim, min_dim, "UTU", false);
 
     gpu_gemm<float>(handle, false,
-               true, m, m, n /*num_latent_factors[0]*/,
+               true, min_dim, min_dim, n /*num_latent_factors[0]*/,
      (float)1.0, V, V, (float)0.0,
      R);
 
-    save_device_mtx_to_file<float>(R, m, m, "VTV", false);
+    save_device_mtx_to_file<float>(R, min_dim, min_dim, "VTV", false);
 
 
 
     gpu_gemm<float>(handle, true,
-               false, n, m, m /*num_latent_factors[0]*/,
+               false, n, m, min_dim /*num_latent_factors[0]*/,
      (float)1.0, V, U, (float)0.0,
      R);
 
@@ -4351,7 +4386,69 @@ void gpu_orthogonal_decomp<float>(cublasHandle_t handle, cusolverDnHandle_t dn_s
   program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
   //printf("program_time: %f\n", program_time);   
   /*if(Debug)*/ LOG("gpu_orthogonal_decomp run time : "<<readable_time(program_time)<<std::endl);
-}                    
+}  
+
+void gpu_orthogonal_decomp_test(cublasHandle_t handle, cusolverDnHandle_t dn_solver_handle) {
+  const long long int m = 5;
+  const long long int n = 3;
+  const long long int min_dim = std::min(m,n);
+
+  float* A;
+  float* U;
+  float* V;
+  checkCudaErrors(cudaMalloc((void**)&A,  m*n * sizeof(float)));
+  checkCudaErrors(cudaMalloc((void**)&U,  m*min_dim * sizeof(float)));
+  checkCudaErrors(cudaMalloc((void**)&V,  min_dim*n * sizeof(float)));
+
+  gpu_rng_gaussian<float>(m*n, (float)0.0, (float)1.0, A);
+  save_device_mtx_to_file<float>(A, m, n, "A");
+
+  long long int num_latent_factors;
+  const float percent = (float)0.95;
+
+  gpu_orthogonal_decomp<float>(handle, dn_solver_handle, m, n, &num_latent_factors, percent,
+  A, U, V, 1);
+
+}
+
+
+template <>
+void gpu_block_orthogonal_decomp_from_host<float>(cublasHandle_t handle, cusolverDnHandle_t dn_solver_handle,
+                                                  const long long int m, const long long int n, 
+                                                  long long int* num_latent_factors, const float percent,
+                                                  float* A, float* U, float* V)
+{
+  /*
+    A is m by n stored in col-maj ordering
+
+    solution     A      =       U       *      S      *       V^T
+              m by n          m by m         m by n         n by n
+
+              ..but S only has min(m,n) non zero entries so if m < n
+
+    solution     A      =       U*S      *       V^T
+              m by n          m by n           n by n
+
+  */
+
+  bool Debug = false;
+  LOG("gpu_block_orthogonal_decomp_from_host called...");
+  LOG("We assume A exists on host in row major order");
+
+
+  struct timeval program_start, program_end;
+  double program_time;
+  gettimeofday(&program_start, NULL);
+
+
+
+  if(Debug) LOG("finished call to gpu_block_orthogonal_decomp_from_host") ;
+  cudaDeviceSynchronize();
+  gettimeofday(&program_end, NULL);
+  program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
+  //printf("program_time: %f\n", program_time);   
+  /*if(Debug)*/ LOG("gpu_block_orthogonal_decomp_from_host run time : "<<readable_time(program_time)<<std::endl);
+}                 
 
 
 
@@ -4977,7 +5074,7 @@ void gpu_R_error<float>(const cublasHandle_t dn_handle, const cusparseHandle_t s
   const float *V, float *U_testing, float *R_testing,
   std::string name, float training_rate, float regularization_constant)
 {
-  ABORT_IF_EQ(0, 1, "This version is currently outdated.");
+  ABORT_IF_NEQ(0, 1, "This version is currently outdated.");
     bool Debug = false;
     std::string title  =  (name + "_gpu_R_error").c_str();
     LOG((title + " called").c_str());

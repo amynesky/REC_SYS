@@ -10,6 +10,11 @@
 #include <boost/algorithm/string.hpp>
 #include <boost/random.hpp>
 #include <boost/random/uniform_real.hpp>
+#include <mkl.h>
+#include <mkl_cblas.h>
+#include <mkl_blas.h>
+#include <mkl_lapack.h>
+#include <mkl_lapacke.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -48,6 +53,8 @@
 
 #include "util.h"
 #include "util_gpu.cuh"
+
+using namespace Eigen;
 
 typedef boost::minstd_rand base_generator_type;
 
@@ -95,6 +102,26 @@ template void host_copy<double>(const int N, const double* X, double* Y);
 //============================================================================================
 // math functions
 //============================================================================================
+
+template <>
+int cpu_asum<int>(const int n, const int* x) {
+  int s = 0;
+  for (int k = 0; k < n; ++k){
+    s += abs(x[k]);
+    //LOG(INFO) << x[k];
+  };
+  return s;
+}
+
+template <>
+float cpu_asum<float>(const int n, const float* x) {
+  return cblas_sasum(n, x, 1);
+}
+
+template <>
+double cpu_asum<double>(const int n, const double* x) {
+  return cblas_dasum(n, x, 1);
+}
 
 
 int gcd(int a, int b) 
@@ -195,6 +222,71 @@ void MatrixInplaceTranspose<float>(float *A, int r, int c)
   //     std::cout << endl; 
   // } 
 } 
+
+template <>
+void cpu_axpby<float>(const int N, const float alpha, const float* X,
+                            const float beta, float* Y) {
+  /*
+  y := a*x + b*y
+  where:
+
+  a and b are scalars
+
+  x and y are vectors each with n elements.
+  */
+  cblas_saxpby(N, alpha, X, 1, beta, Y, 1);
+}
+
+template <>
+void cpu_axpby<double>(const int N, const double alpha, const double* X,
+                             const double beta, double* Y) {
+  /*
+  y := a*x + b*y
+  where:
+
+  a and b are scalars
+
+  x and y are vectors each with n elements.
+  */
+  cblas_daxpby(N, alpha, X, 1, beta, Y, 1);
+}
+
+template <typename Dtype>
+Dtype cpu_abs_max(long long int n, Dtype* X){
+  Dtype max_ = abs(X[0]);
+  for(long long int i = (long long int)1; i < n; i++){
+    Dtype temp = abs(X[i]);
+    if(temp > max_) max_ = temp;
+  }
+  return max_;
+}
+
+template float cpu_abs_max<float>(long long int n, float* X);
+
+template<>
+void cpu_gemm<float>(const bool TransA,
+                     const bool TransB, const int M, const int N, const int K,
+                     const float alpha, const float* A, const float* B, const float beta,
+                     float* C) 
+{
+  int lda = (TransA == false) ? K : M;
+  int ldb = (TransB == false) ? N : K;
+  cblas_sgemm(CblasRowMajor, (TransA == false) ? CblasNoTrans : CblasTrans, (TransB == false) ? CblasNoTrans : CblasTrans, M, N, K, alpha, A, lda, B,
+      ldb, beta, C, N);
+  //https://developer.apple.com/library/mac/documentation/Accelerate/Reference/BLAS_Ref/index.html#//apple_ref/doc/uid/TP30000414-SW27
+}
+
+template<>
+void cpu_gemm<double>(const bool TransA,
+                      const bool TransB, const int M, const int N, const int K,
+                      const double alpha, const double* A, const double* B, const double beta,
+                      double* C) 
+{
+  int lda = (TransA == false) ? K : M;
+  int ldb = (TransB == false) ? N : K;
+  cblas_dgemm(CblasRowMajor, (TransA == false) ? CblasNoTrans : CblasTrans, (TransB == false) ? CblasNoTrans : CblasTrans, M, N, K, alpha, A, lda, B,
+      ldb, beta, C, N);
+}
 
 //============================================================================================
 // random utilities
@@ -585,7 +677,7 @@ template void save_host_array_to_file<double>(const double* A_host, int count, s
 template<typename Dtype>
 void get_host_array_from_saved_txt(const Dtype* A_host, int count, std::string title)
 {
-  ABORT_IF_EQ(0, 1, "Function not ready.");
+  ABORT_IF_NEQ(0, 1, "Function not ready.");
   std::ifstream A_host_file ((ToString(title + ".txt")).c_str());
 
   for (int i = 0; i < count; i++){
@@ -647,25 +739,28 @@ void save_host_arrays_side_by_side_to_file(const int* A_host, const int* B_host,
 
 
 template<typename Dtype>
-void save_host_mtx_to_file(const Dtype* A_host, const int lda, const int sda, std::string title)
+void save_host_mtx_to_file(const Dtype* A_host, const int rows, const int cols, std::string title)
 {
+  //assumes row major order
+
   std::stringstream filename;
   filename << title<< ".txt";
   std::ofstream entries (filename.str().c_str());
   //entries<<"[ ";
-  for (int i = 0; i < lda; i++){
-    for (int j = 0; j < sda; j++){
-      entries<<A_host[i + j * lda];
+  for (int i = 0; i < rows; i++){
+    for (int j = 0; j < cols; j++){
+      //entries<<A_host[i + j * rows];
+      entries<<A_host[i * cols + j];
       entries<<", ";
     }
     entries<<"\r\n";
   }
 }
 
-template void save_host_mtx_to_file<int>(const int* A_host, const int lda, const int sda, std::string title);
-//template void save_host_mtx_to_file<long long int>(const long long int* A_host, int lda, int sda, std::string title);
-template void save_host_mtx_to_file<float>(const float* A_host, const int lda, const int sda, std::string title);
-template void save_host_mtx_to_file<double>(const double* A_host, const int lda, const int sda, std::string title);
+template void save_host_mtx_to_file<int>(const int* A_host, const int rows, const int cols, std::string title);
+//template void save_host_mtx_to_file<long long int>(const long long int* A_host, int rows, int cols, std::string title);
+template void save_host_mtx_to_file<float>(const float* A_host, const int rows, const int cols, std::string title);
+template void save_host_mtx_to_file<double>(const double* A_host, const int rows, const int cols, std::string title);
 
 void save_map(std::map<int, int>* items_dictionary, std::string title){
 
@@ -697,6 +792,7 @@ void cpu_fill_training_mtx(const long long int ratings_rows_training, const long
  const float* coo_format_ratingsMtx_rating_host_training,
  float* full_training_ratings_mtx)
 {
+  LOG("cpu_fill_training_mtx called...");
   bool Debug = false;
   LOG("ratings_rows_training : "<< ratings_rows_training);
   LOG("ratings_cols_training : "<< ratings_cols_training);
@@ -721,13 +817,14 @@ void cpu_fill_training_mtx(const long long int ratings_rows_training, const long
       };
     }
   }
+  LOG("cpu_fill_training_mtx finished...");
 }
 
 template < typename Dtype>
 void cpu_shuffle_array(const long long int n,  Dtype* x)
 {
   bool Debug = false;
-  if(too_big(n) ) {ABORT_IF_EQ(0, 1,"Long long long int too big");}
+  if(too_big(n) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
   double* order = (double *)malloc(n * sizeof(double));
   checkErrors(order);
   host_rng_uniform<double>(n, (double)0.0, (double)1.0, order);
@@ -746,8 +843,8 @@ void cpu_shuffle_array(const long long int n,  Dtype* x)
 void cpu_shuffle_mtx_rows_or_cols(cublasHandle_t dn_handle, const long long int M, const long long int N, bool row_major_ordering, float* x, bool shuffle_rows)
 {
 
-  if(too_big(M) ) {ABORT_IF_EQ(0, 1,"Long long long int too big");}
-  if(too_big(N) ) {ABORT_IF_EQ(0, 1,"Long long long int too big");}
+  if(too_big(M) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
+  if(too_big(N) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
 
   bool Debug = false;
   int * indicies_host = NULL;
@@ -791,7 +888,7 @@ void cpu_shuffle_mtx_rows_or_cols(cublasHandle_t dn_handle, const long long int 
 void cpu_shuffle_map_second(const long long int M, std::map<int, int>* items_dictionary )
 {
 
-  if(too_big(M) ) {ABORT_IF_EQ(0, 1,"Long long long int too big");}
+  if(too_big(M) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
   
   bool Debug = false;
   int * indicies_host = NULL;
@@ -997,7 +1094,7 @@ template int partition<float>(float* x, int low_index, int high_index, int* indi
 template<typename Dtype>
 void quickSort_by_key(Dtype* x, int low_index, int high_index, int* indicies)
 {
-  ABORT_IF_EQ(0, 1, "function not ready");
+  ABORT_IF_NEQ(0, 1, "function not ready");
   if (x[low_index] < x[high_index])
   {
     /* pi is partitioning index, arr[pi] is now
@@ -1469,7 +1566,141 @@ long long int from_whole_to_below_diag(long long int whole_index, long long int 
   return num_below_diag + row - (dimension - num_in_col);
 }
 
+template <>
+void cpu_get_num_latent_factors<float>(const long long int m, float* S_host, 
+  long long int* num_latent_factors, const float percent) 
+{
+  bool Debug = false;
+  float sum = cpu_asum<float>( m, S_host);
 
 
+  float sum_so_far;
+  num_latent_factors[0] = m-1;
+  for(int j = 0; j < m-1; j++){
+    sum_so_far += S_host[j];
+    if(sum_so_far / sum >= percent) {
+      num_latent_factors[0] = j+1;
+      if(Debug) LOG("num_latent_factors = "<< j+1);
+      break;
+    }
+  }
+
+}
+
+
+template<>
+void cpu_orthogonal_decomp<float>(const long long int m, const long long int n, 
+                                  long long int* num_latent_factors, const float percent,
+                                  float* A, float* U, float* V)
+{
+
+  // Make sure the matrix A is in row major ordering!!!
+  bool Debug = true;
+  LOG("cpu_orthogonal_decomp called");
+
+  struct timeval program_start, program_end;
+  double program_time;
+  gettimeofday(&program_start, NULL);
+
+  long long int smaller_dim = std::min(m, n);
+
+  MatrixXf eigen_A = Map<MatrixXf>( A, m, n );
+  float* S  = NULL;
+  S = (float *)malloc(smaller_dim *  sizeof(float)); 
+  checkErrors(S);
+  //MatrixXf eigen_U(m, smaller_dim);
+  //MatrixXf eigen_V(smaller_dim, n);
+
+  if(Debug) LOG("ComputeThinV...") ;
+  BDCSVD<MatrixXf> svd(eigen_A, ComputeThinV);
+  //MatrixXf eigen_V(smaller_dim, n) = svd.matrixV();
+
+  
+
+  //Map<MatrixXf>( U, eigen_U.rows(), eigen_U.cols() ) = eigen_U;
+  Map<MatrixXf>( V, smaller_dim, n ) = svd.matrixV();
+  Map<VectorXf>( S, smaller_dim ) = svd.singularValues();
+
+  if(Debug) LOG("solving for U now...") ;
+  //C←αAB + βC
+  cpu_gemm<float>(false, false, m, smaller_dim, n,
+                  (float)1.0, A, V, (float)0.0, U);
+
+  cpu_get_num_latent_factors<float>(smaller_dim, S, num_latent_factors, percent);
+
+  if(Debug && 0){
+
+    LOG("num_latent_factors : "<<num_latent_factors[0]) ;
+    save_host_mtx_to_file<float>(U, m, m, "U_3");
+    save_host_mtx_to_file<float>(V, n, m, "V_3");
+    save_host_mtx_to_file<float>(A, m, n, "A");
+    
+
+    // LOG("Press Enter to continue.") ;
+    // std::cin.ignore();
+  }    
+  save_host_array_to_file<float>(S, std::min(m,n), "singular_values");
+
+  if(Debug){
+    float* R  = NULL;
+    R = (float *)malloc(m * n *  sizeof(float)); 
+    checkErrors(R);
+
+    /*
+        A is m by n stored in col-maj ordering where m<<n
+        V is n by m stored in col-maj ordering
+        (V^T is m by n)
+        U is m by m stored in col-maj ordering
+    */
+    // M, N, K
+    //M number of columns of matrix op(A) and C.
+    //N is number of rows of matrix op(B) and C.]
+    //K is number of columns of op(B) and rows of op(A).
+
+    // op(B) is N by K
+    // op(A) is K by M
+    // C is N by M
+    // cublasDgemm(handle, transb, transa, N, M, K, alpha, B, ldb, A, lda, beta, C, ldc) 
+    // performs C=alpha op ( B ) op ( A ) + beta C
+
+    cpu_gemm<float>(false, true, m, m, smaller_dim /*num_latent_factors[0]*/,
+     (float)1.0, U, U, (float)0.0, R);
+
+    save_host_mtx_to_file<float>(R, m, m, "UUT");
+
+    cpu_gemm<float>(true, false, smaller_dim, smaller_dim, n /*num_latent_factors[0]*/,
+     (float)1.0, V, V, (float)0.0, R);
+
+    save_host_mtx_to_file<float>(R, smaller_dim, smaller_dim, "VTV");
+
+
+
+    cpu_gemm<float>(false, true, m, n, smaller_dim /*num_latent_factors[0]*/,
+     (float)1.0, U, V, (float)0.0,
+     R);
+
+    cpu_axpby<float>(m * n, (float)1.0, A,
+      (float)(-1.0), R);
+
+    save_host_mtx_to_file<float>(R, m, n, "svd_error");
+
+    //float range_A    = gpu_range<float>(m * n,  A);
+        float error      = cpu_abs_max<float>(m * n, R); 
+    //float error_expt = gpu_expected_abs_value<float>(m * n, R); 
+        free(R);
+    // LOG("A mtx range of values = "<<range_A) ;
+        LOG("SVD max error = "<<error) ;
+    // LOG("SVD max error over range of values = "<<error/range_A) ;
+    // LOG("SVD expected absolute error = "<<error_expt) ;
+    // LOG("SVD expected absolute error over range of values = "<<error_expt/range_A) ;
+        LOG("Press Enter to continue.") ;
+        std::cin.ignore();
+
+  }
+  gettimeofday(&program_end, NULL);
+  program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
+  //printf("program_time: %f\n", program_time);   
+  if(1) LOG("cpu_orthogonal_decomp run time : "<<readable_time(program_time)<<std::endl);
+}
 
 

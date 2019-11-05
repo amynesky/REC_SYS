@@ -231,7 +231,7 @@ endif
 
 ALL_CCFLAGS += -dc
 
-LIBRARIES += -lcublas -lcusparse -lcublas_device -lcudadevrt -lcusolver -lcurand
+LIBRARIES += -lcublas -lcusparse -lcublas_device -lcudadevrt -lcusolver -lcurand -lmkl_rt
 
 ################################################################################
 

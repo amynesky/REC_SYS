@@ -32,7 +32,7 @@ const char *sSDKname = "Core Users Recommender Systems";
 const bool Debug = 1;
 
 bool Content_Based = 1;
-bool Conserve_GPU_Mem = 0;
+bool Conserve_GPU_Mem = 1;
 bool load_from_preprocessing = 0;
 std::string preprocessing_path = "";
 
@@ -223,7 +223,6 @@ int main(int argc, char *argv[])
 
 
 
-
     //============================================================================================
     // Get the ratings data from CSV File
     //============================================================================================
@@ -238,6 +237,8 @@ int main(int argc, char *argv[])
     std::string csv_keyWords_path;
 
     long long int temp_num_entries;
+
+    std::map<int, int> items_dictionary;
 
     int case_ = 1;
 
@@ -257,7 +258,6 @@ int main(int argc, char *argv[])
             csv_keyWords_path = (preamble + "/pylon5/ac560rp/nesky/REC_SYS/datasets/ml-20m/movies.csv").c_str();
             //temp_num_entries = csv_Ratings.num_rows() - 1; // the first row is a title row
             Content_Based = 0;
-            load_from_preprocessing = true;
             preprocessing_path = "/pylon5/ac560rp/nesky/REC_SYS/CoreUsers/preprocessing/ml-20m/top_users.txt";
             temp_num_entries = 20000264 - 1;   // MovieLens 20 million
             break;
@@ -282,8 +282,8 @@ int main(int argc, char *argv[])
     CSVReader csv_Ratings(csv_Ratings_Path);
     
 
-    const long long int num_entries = temp_num_entries;
-    //const long long int num_entries = temp_num_entries/10; //for debuging code
+    //const long long int num_entries = temp_num_entries;
+    const long long int num_entries = temp_num_entries/10; //for debuging code
 
     LOG("The dataset has "<<num_entries<<" specified entries.");
     
@@ -306,7 +306,7 @@ int main(int argc, char *argv[])
             csv_Ratings.getData(coo_format_ratingsMtx_userID_host,
                                 coo_format_ratingsMtx_itemID_host,
                                 coo_format_ratingsMtx_rating_host, 
-                                num_entries);
+                                num_entries, Content_Based == 1, &items_dictionary);
             break;
         }case 2:{ // code to be executed if n = 2;
             //Dataset_Name = "Rent The Runaway";
@@ -374,6 +374,7 @@ int main(int argc, char *argv[])
     } 
 
     LOG("The sparse data matrix has "<<ratings_rows<<" users and "<<ratings_cols<<" items with "<<num_entries<<" specified entries.");
+    LOG("The sparse data matrix has "<<(float)(ratings_rows * ratings_cols - num_entries) / (float)(ratings_rows * ratings_cols)<<" empty entries.");
     if(Debug){
         // save_device_array_to_file<int>(csr_format_ratingsMtx_userID_dev, ratings_rows + 1, "csr_format_ratingsMtx_userID_dev");
         // LOG("csr_format_ratingsMtx_userID_dev : ");
@@ -605,7 +606,7 @@ int main(int argc, char *argv[])
 
     int top_N = std::min((int)((float)ratings_rows / (float)10.0), 50);
     LOG("Compute the top-"<<top_N<<" most similar neighbors of each user based on the cosine similarities.");
-    const float probability_CU       = (float)1.0/(float)100.0; //(float)1.0/(float)100.0;
+    const float probability_CU       = (float)20.0/(float)100.0; //(float)1.0/(float)100.0;
     const float probability_testing  = ((float)1.0 - probability_CU);
     LOG("percentage of users for testing: " <<probability_testing);
     LOG("percentage of users for CU: "      <<(float)1.0 - probability_testing<<std::endl);
@@ -864,7 +865,8 @@ int main(int argc, char *argv[])
     const long long int CU_mtx_size_bytes = (long long int)ratings_rows_CU * (long long int)ratings_cols * (long long int)sizeof(float);
     LOG("Will need "<<CU_mtx_size<< " floats for the CU mtx.") ;
     LOG("Will need "<<CU_mtx_size_bytes<< " bytes for the CU mtx.") ;
-    if(allocatedMem + CU_mtx_size_bytes > (long long int)((double)devMem * (double)0.75)){
+    bool Conserve_GPU_Mem_temp = Conserve_GPU_Mem;
+    if(!Conserve_GPU_Mem_temp && allocatedMem + CU_mtx_size_bytes > (long long int)((double)devMem * (double)0.75)){
         LOG("Conserving Memory Now");
         Conserve_GPU_Mem = 1;
     }
@@ -880,8 +882,6 @@ int main(int argc, char *argv[])
         csr_format_ratingsMtx_userID_host_CU  = (int *)  malloc((ratings_rows_CU + 1) * sizeof(int)  );
         coo_format_ratingsMtx_itemID_host_CU  = (int *)  malloc(num_entries_CU        * sizeof(int)  );
         coo_format_ratingsMtx_rating_host_CU  = (float *)malloc(num_entries_CU        * sizeof(float));
-
-
         checkErrors(csr_format_ratingsMtx_userID_host_CU);
         checkErrors(coo_format_ratingsMtx_itemID_host_CU);
         checkErrors(coo_format_ratingsMtx_rating_host_CU);
@@ -1061,8 +1061,10 @@ int main(int argc, char *argv[])
 
 
     float * U_CU;       // U_CU is ratings_rows_CU * ratings_rows_CU
+    float * V_dev;          // V_CU is ratings_cols * ratings_cols
+    float * V_host;          // V_CU is ratings_cols * ratings_cols
     float * U_testing;
-    float * V;          // V_CU is ratings_cols * ratings_cols
+
     float * R_testing;
     if(Debug && 0){
         // const int batch_size_CU = 3;
@@ -1076,7 +1078,7 @@ int main(int argc, char *argv[])
     }
 
     long long int min_CU_dimension = std::min(ratings_rows_CU, ratings_cols);
-    bool temp = Conserve_GPU_Mem;
+    Conserve_GPU_Mem_temp = Conserve_GPU_Mem;
     const long long int Training_bytes = (batch_size_testing  * std::max(min_CU_dimension, batch_size_testing) + 
                                           ratings_cols        * min_CU_dimension +
                                           ratings_cols        * batch_size_testing)* (long long int)sizeof(float) ;
@@ -1086,7 +1088,7 @@ int main(int argc, char *argv[])
     };
 
 
-    if(!temp && Conserve_GPU_Mem){
+    if(!Conserve_GPU_Mem_temp && Conserve_GPU_Mem){
         LOG("Conserving Memory Now");
         //put the CU ratings mtx on the CPU;
         full_ratingsMtx_host_CU = (float *)malloc(CU_mtx_size_bytes);
@@ -1096,16 +1098,23 @@ int main(int argc, char *argv[])
         update_Mem((float)(-1.0) * CU_mtx_size_bytes );
     };
     if(Conserve_GPU_Mem){
-        // full_ratingsMtx_dev_CU hasn't been allocated yet
-        checkCudaErrors(cudaMalloc((void**)&full_ratingsMtx_dev_CU, ratings_rows_CU * ratings_cols * sizeof(float)));
-        checkCudaErrors(cudaMemcpy(full_ratingsMtx_dev_CU, full_ratingsMtx_host_CU, ratings_rows_CU * ratings_cols * sizeof(float), cudaMemcpyHostToDevice));
-        update_Mem(ratings_rows_CU * ratings_cols* sizeof(float) );
+        U_CU = (float *)malloc(ratings_rows_CU     * ratings_rows_CU);
+        V_host = (float *)malloc(ratings_cols        * min_CU_dimension);
+        checkErrors(U_CU);
+        checkErrors(V_host);
+        update_Mem((ratings_rows_CU * ratings_rows_CU + ratings_cols * min_CU_dimension) * sizeof(float) );
+        checkCudaErrors(cudaMalloc((void**)&V_dev,          ratings_cols        * min_CU_dimension           * sizeof(float)));
+        if(!row_major_ordering){
+            ABORT_IF_EQ(0,1,"try again with row_major_ordering = true.")
+        }
+    }else{
+        checkCudaErrors(cudaMalloc((void**)&U_CU,       ratings_rows_CU     * ratings_rows_CU            * sizeof(float)));
+        checkCudaErrors(cudaMalloc((void**)&V_dev,          ratings_cols        * min_CU_dimension           * sizeof(float)));
     }
     
     
     // LOG(ratings_cols * ratings_cols * sizeof(float)) ;
-    checkCudaErrors(cudaMalloc((void**)&U_CU,       ratings_rows_CU     * ratings_rows_CU            * sizeof(float)));
-    checkCudaErrors(cudaMalloc((void**)&V,          ratings_cols        * min_CU_dimension           * sizeof(float)));
+
     // cudaDeviceSynchronize();
     // LOG("Press Enter to continue.") ;
     // std::cin.ignore();  
@@ -1127,18 +1136,32 @@ int main(int argc, char *argv[])
     long long int total_iterations = (long long int)0;
     long long int total_testing_nnz = (long long int)0;
     int count_tests = 0;
-    if(row_major_ordering){
-        //rember that ratings_CU is stored in row major ordering
-        swap_ordering<float>(ratings_rows_CU, ratings_cols, full_ratingsMtx_dev_CU, row_major_ordering);
-    }
+
     //============================================================================================
     // Find U_CU, V such that U_CU * V^T ~ R_CU 
     //============================================================================================  
-    
-    gpu_orthogonal_decomp<float>(dn_handle, dn_solver_handle,
+
+
+    if(Conserve_GPU_Mem){
+        cpu_orthogonal_decomp<float>(ratings_rows_CU, ratings_cols, 
+                                &num_latent_factors, percent,
+                                full_ratingsMtx_host_CU, U_CU, V_host);
+        checkCudaErrors(cudaMemcpy(V_dev, V_host, ratings_cols        * min_CU_dimension, cudaMemcpyHostToDevice));
+        swap_ordering<float>(ratings_cols, min_CU_dimension, V_dev, true);
+
+        //save_host_mtx_to_file<float>(U_CU, ratings_rows_CU, num_latent_factors, "U_CU_compressed");
+    }else{
+        if(row_major_ordering){
+            //rember that ratings_CU is stored in row major ordering
+            swap_ordering<float>(ratings_rows_CU, ratings_cols, full_ratingsMtx_dev_CU, row_major_ordering);
+        }
+        gpu_orthogonal_decomp<float>(dn_handle, dn_solver_handle,
                                 ratings_rows_CU, ratings_cols, 
                                 &num_latent_factors, percent,
-                                full_ratingsMtx_dev_CU, U_CU, V);
+                                full_ratingsMtx_dev_CU, U_CU, V_dev, 1);
+
+        //save_device_mtx_to_file<float>(U_CU, ratings_rows_CU, num_latent_factors, "U_CU_compressed");
+    }
 
     /*
         At this point U_CU is batch_size_CU by batch_size_CU in memory stored in column major
@@ -1148,9 +1171,10 @@ int main(int argc, char *argv[])
         to compress V into ratings_cols by num_latent_factors, just take the first num_latent_factors
         columns of each matrix
     */
+
     LOG("num_latent_factors = "<< num_latent_factors);
-    save_device_mtx_to_file<float>(V, ratings_cols, num_latent_factors, "V_compressed");
-    save_device_mtx_to_file<float>(U_CU, batch_size_GU, num_latent_factors, "U_CU_compressed");
+    //save_device_mtx_to_file<float>(V_dev, ratings_cols, num_latent_factors, "V_compressed");
+    
     if(compress){
         //ABORT_IF_NEQ(0, 1, "Not Yet Supported");
     }
@@ -1222,15 +1246,16 @@ int main(int argc, char *argv[])
                                        coo_format_ratingsMtx_rating_dev_testing + first_coo_ind_testing, 
                                        csr_format_ratingsMtx_userID_dev_testing_batch, 
                                        coo_format_ratingsMtx_itemID_dev_testing + first_coo_ind_testing,
-                                       V, U_testing, R_testing, time(0), training_rate, regularization_constant,
-                                       &testing_error_on_training_entries_temp, &total_iterations);
+                                       V_dev, U_testing, R_testing, training_rate, regularization_constant,
+                                       &testing_error_on_training_entries_temp, &testing_error_on_testing_entries_temp, 
+                                       &total_iterations);
 
             gpu_reverse_bools<float>(nnz_testing,  testing_entries);
             gpu_hadamard<float>(nnz_testing, testing_entries, coo_testing_errors );
             //save_device_arrays_side_by_side_to_file<float>(coo_testing_errors, testing_entries, nnz_testing, "testing_entry_errors");
 
             //testing_error_on_training_entries_temp += gpu_sum_of_squares<float>(nnz_testing, coo_testing_errors);
-            testing_error_on_testing_entries_temp += gpu_sum_of_squares<float>(nnz_testing, coo_testing_errors);
+            //testing_error_on_testing_entries_temp += gpu_sum_of_squares<float>(nnz_testing, coo_testing_errors);
             
             cudaFree(coo_testing_errors);
             cudaFree(testing_entries);  
@@ -1280,7 +1305,8 @@ int main(int argc, char *argv[])
 
     cudaFree(U_CU);
     cudaFree(U_testing);
-    cudaFree(V);
+    cudaFree(V_dev);
+    free(V_host);
     cudaFree(R_testing);
     update_Mem((ratings_rows_CU * std::min(ratings_rows_CU, ratings_cols)  + ratings_cols * std::min(ratings_rows_CU, ratings_cols))* static_cast<long long int>(sizeof(float))* (-1));
     

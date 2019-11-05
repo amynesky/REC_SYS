@@ -1,10 +1,10 @@
  #!/usr/bin/env sh
 
 OBSERVATIONS=/pylon5/ac560rp/nesky/REC_SYS/GenericUsers
-OBSERVATIONS=$OBSERVATIONS/observations/ml-20m/not/1_percent_GU/trial_2
+#OBSERVATIONS=$OBSERVATIONS/observations/ml-20m/not/1_percent_GU/trial_2
 
-# FILENAME=generic_users_log.txt
-FILENAME=slurm-6611016.out
+FILENAME=generic_users_log.txt
+#FILENAME=slurm-6611016.out
 
 START=$(date +%s)
 
@@ -26,8 +26,12 @@ grep "gpu_R_error_testing MSQER on testing entries:" "$OBSERVATIONS/$FILENAME" 2
 awk 'BEGIN { FS=" entries:" }{ print $2 }' "$OBSERVATIONS/generic_users_testing_MSQER_on_testing_entries_3.txt" 2>&1 | tee $OBSERVATIONS/generic_users_testing_MSQER_on_testing_entries_2.txt
 awk '{ print $1 }' "$OBSERVATIONS/generic_users_testing_MSQER_on_testing_entries_2.txt" 2>&1 | tee $OBSERVATIONS/generic_users_testing_MSQER_on_testing_entries.txt
 
-grep "Testing error norm over" "$OBSERVATIONS/$FILENAME" 2>&1 | tee $OBSERVATIONS/generic_users_testing_normalized_error_3.txt
-awk 'BEGIN { FS="|]:" }{ print $2 }' "$OBSERVATIONS/generic_users_testing_normalized_error_3.txt" 2>&1 | tee $OBSERVATIONS/generic_users_testing_normalized_error_2.txt
+grep "Testing error norm over E" "$OBSERVATIONS/$FILENAME" 2>&1 | tee $OBSERVATIONS/generic_users_testing_normalized_over_rand_error_3.txt
+awk 'BEGIN { FS="|]:" }{ print $2 }' "$OBSERVATIONS/generic_users_testing_normalized_over_rand_error_3.txt" 2>&1 | tee $OBSERVATIONS/generic_users_testing_normalized_over_rand_error_2.txt
+awk '{ print $1 }' "$OBSERVATIONS/generic_users_testing_normalized_over_rand_error_2.txt" 2>&1 | tee $OBSERVATIONS/generic_users_testing_normalized_over_rand_error.txt
+
+grep "Testing error norm over norm of testing only entries:" "$OBSERVATIONS/$FILENAME" 2>&1 | tee $OBSERVATIONS/generic_users_testing_normalized_error_3.txt
+awk 'BEGIN { FS=" entries:" }{ print $2 }' "$OBSERVATIONS/generic_users_testing_normalized_error_3.txt" 2>&1 | tee $OBSERVATIONS/generic_users_testing_normalized_error_2.txt
 awk '{ print $1 }' "$OBSERVATIONS/generic_users_testing_normalized_error_2.txt" 2>&1 | tee $OBSERVATIONS/generic_users_testing_normalized_error.txt
 
 grep "gpu_R_error_training total iterations :" "$OBSERVATIONS/$FILENAME" 2>&1 | tee $OBSERVATIONS/generic_users_training_MSQER_iterations_3.txt
@@ -46,6 +50,14 @@ grep "full_ratingsMtx_dev_GU_current_batch_abs_max =" "$OBSERVATIONS/$FILENAME" 
 awk 'BEGIN { FS="=" }{ print $2 }' "$OBSERVATIONS/generic_users_R_abs_max_3.txt" 2>&1 | tee $OBSERVATIONS/generic_users_R_abs_max_2.txt
 awk '{ print $1 }' "$OBSERVATIONS/generic_users_R_abs_max_2.txt" 2>&1 | tee $OBSERVATIONS/generic_users_R_abs_max.txt
 
+grep "err norm when clustering over training norm:" "$OBSERVATIONS/$FILENAME" 2>&1 | tee $OBSERVATIONS/generic_users_k_mean_er_normalized_3.txt
+awk 'BEGIN { FS=" norm:" }{ print $2 }' "$OBSERVATIONS/generic_users_k_mean_er_normalized_3.txt" 2>&1 | tee $OBSERVATIONS/generic_users_k_mean_er_normalized_2.txt
+awk '{ print $1 }' "$OBSERVATIONS/generic_users_k_mean_er_normalized_2.txt" 2>&1 | tee $OBSERVATIONS/generic_users_k_mean_er_normalized.txt
+
+grep "mean sqed err when clustering :" "$OBSERVATIONS/$FILENAME" 2>&1 | tee $OBSERVATIONS/generic_users_k_mean_MSQER_3.txt
+awk 'BEGIN { FS="clustering :" }{ print $2 }' "$OBSERVATIONS/generic_users_k_mean_MSQER_3.txt" 2>&1 | tee $OBSERVATIONS/generic_users_k_mean_MSQER_2.txt
+awk '{ print $1 }' "$OBSERVATIONS/generic_users_k_mean_MSQER_2.txt" 2>&1 | tee $OBSERVATIONS/generic_users_k_mean_MSQER.txt
+
 
 rm $OBSERVATIONS/generic_users_training_MSQER_3.txt
 rm $OBSERVATIONS/generic_users_training_MSQER_2.txt
@@ -57,12 +69,16 @@ rm $OBSERVATIONS/generic_users_testing_MSQER_on_testing_entries_3.txt
 rm $OBSERVATIONS/generic_users_testing_MSQER_on_testing_entries_2.txt
 rm $OBSERVATIONS/generic_users_testing_MSQER_on_training_entries_3.txt
 rm $OBSERVATIONS/generic_users_testing_MSQER_on_training_entries_2.txt
-#rm $OBSERVATIONS/generic_users_testing_normalized_error_3.txt
-#rm $OBSERVATIONS/generic_users_testing_normalized_error_2.txt
+rm $OBSERVATIONS/generic_users_testing_normalized_over_rand_error_3.txt
+rm $OBSERVATIONS/generic_users_testing_normalized_over_rand_error_2.txt
+rm $OBSERVATIONS/generic_users_testing_normalized_error_3.txt
+rm $OBSERVATIONS/generic_users_testing_normalized_error_2.txt
 rm $OBSERVATIONS/generic_users_latent_factors_3.txt
 rm $OBSERVATIONS/generic_users_latent_factors_2.txt
-rm $OBSERVATIONS/generic_users_testing_error_3.txt
-rm $OBSERVATIONS/generic_users_testing_error_2.txt
+rm $OBSERVATIONS/generic_users_k_mean_MSQER_3.txt
+rm $OBSERVATIONS/generic_users_k_mean_MSQER_2.txt
+rm $OBSERVATIONS/generic_users_k_mean_er_normalized_3.txt
+rm $OBSERVATIONS/generic_users_k_mean_er_normalized_2.txt
 rm $OBSERVATIONS/generic_users_R_abs_max_3.txt
 rm $OBSERVATIONS/generic_users_R_abs_max_2.txt
 

@@ -1,4 +1,4 @@
-  #ifndef UTIL_H_
+#ifndef UTIL_H_
 #define UTIL_H_
 
 #include <iostream>
@@ -12,6 +12,7 @@
 #include <sys/time.h>
 #include <boost/algorithm/string.hpp>
 #include <boost/random.hpp>
+#include <Eigen/Dense>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -109,6 +110,12 @@ void host_copy(const int N, const Dtype* X, Dtype* Y);
 //============================================================================================
 // math functions
 //============================================================================================
+
+// Returns the sum of the absolute values of the elements of vector x
+
+template <typename Dtype>
+Dtype cpu_asum(const int n, const Dtype* x);
+
 int gcd(int a, int b);
 
 template < typename Dtype>
@@ -116,6 +123,19 @@ void cpu_permute(Dtype* a, const int* pvt, const long long int rows, const long 
 
 template < typename Dtype>
 void MatrixInplaceTranspose(Dtype *A, int r, int c);
+
+template < typename Dtype>
+void cpu_axpby(const int N, const Dtype alpha, const Dtype* X,
+                            const Dtype beta, Dtype* Y);
+
+template < typename Dtype>
+Dtype cpu_abs_max(long long int n, Dtype* X);
+
+template < typename Dtype>
+void cpu_gemm(const bool TransA,
+             const bool TransB, const int M, const int N, const int K,
+             const Dtype alpha, const Dtype* A, const Dtype* B, const Dtype beta,
+             Dtype* C);
 
 //============================================================================================
 // random utilities
@@ -160,7 +180,7 @@ void save_host_arrays_side_by_side_to_file(const int* A_host, const int* B_host,
                                            const float* C_host, int count, std::string title);
 
 template <typename Dtype>
-void save_host_mtx_to_file(const Dtype* A_host, const int lda, const int  sda, std::string title);
+void save_host_mtx_to_file(const Dtype* A_host, const int rows, const int  cols, std::string title);
 
 void save_map(std::map<int, int>* items_dictionary, std::string title);
 
@@ -216,7 +236,14 @@ long long int from_below_diag_to_whole_faster(long long int below_diag_index, lo
 long long int from_whole_to_below_diag(long long int whole_index, long long int dimension);
 
 
+template <typename Dtype>
+void cpu_get_num_latent_factors(const long long int m, Dtype* S_host, 
+                                long long int* num_latent_factors, const Dtype percent);
 
+template <typename Dtype>
+void cpu_orthogonal_decomp(const long long int m, const long long int n, 
+                          long long int* num_latent_factors, const Dtype percent,
+                          Dtype* A, Dtype* U, Dtype* V);
 
 
 
