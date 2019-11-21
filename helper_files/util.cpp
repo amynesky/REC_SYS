@@ -59,7 +59,7 @@ using namespace Eigen;
 typedef boost::minstd_rand base_generator_type;
 
 
-bool too_big(long long int li){
+bool too_big(const long long int li){
   if (li >= (long long int)INT_MIN && li <= (long long int)INT_MAX) {
     return false;
   } else {
@@ -86,7 +86,7 @@ const std::string currentDateTime() {
 
 
 template <typename Dtype>
-void host_copy(const int N, const Dtype* X, Dtype* Y) 
+void host_copy(const long long int N, const Dtype* X, Dtype* Y) 
 {
   if (X != Y) {
     memcpy(Y, X, sizeof(Dtype) * N);  // NOLINT(caffe/alt_fn)
@@ -94,10 +94,36 @@ void host_copy(const int N, const Dtype* X, Dtype* Y)
 
 }
 
-template void host_copy<int>(const int N, const int* X, int* Y);
-template void host_copy<unsigned int>(const int N, const unsigned int* X, unsigned int* Y);
-template void host_copy<float>(const int N, const float* X, float* Y);
-template void host_copy<double>(const int N, const double* X, double* Y);
+template void host_copy<int>(const long long int N, const int* X, int* Y);
+template void host_copy<unsigned int>(const long long int N, const unsigned int* X, unsigned int* Y);
+template void host_copy<float>(const long long int N, const float* X, float* Y);
+template void host_copy<double>(const long long int N, const double* X, double* Y);
+
+template <typename Dtype>
+void copy_device_mtx_into_host_submtx(const int M, const int N, const Dtype* X, Dtype* Y, const int inc_Y)
+{
+  int nthreads = 1;
+  #ifdef _OPENMP
+    int nProcessors = omp_get_max_threads();
+    nthreads = (int)std::min(nProcessors, N);
+    omp_set_num_threads(nthreads);
+  #endif
+  #pragma omp parallel shared(nthreads)
+  {
+    int th_id = 0;
+    #ifdef _OPENMP
+      th_id = omp_get_thread_num();
+    #endif
+    for(long long int j = (long long int)th_id; j < N; j += (long long int)nthreads){
+      Dtype* Y_temp = Y + j * (long long int)inc_Y;
+      const Dtype* X_temp = X + j * (long long int)M;
+      checkCudaErrors(cudaMemcpy(Y_temp,  X_temp,  M * sizeof(float), cudaMemcpyDeviceToHost));
+    }
+  }
+
+}
+
+template void copy_device_mtx_into_host_submtx<float>(const int M, const int N, const float* X, float* Y, const int inc_Y);
 
 //============================================================================================
 // math functions
@@ -123,6 +149,28 @@ double cpu_asum<double>(const int n, const double* x) {
   return cblas_dasum(n, x, 1);
 }
 
+template <>
+void cpu_scal<float>(const long long int N, const float alpha, float *X) {
+  bool Debug = false;
+  if(Debug) {
+    LOG("INT_MAX : "<<INT_MAX);
+    LOG("N : "<<N);
+    LOG("(int)N : "<<(int)N);
+    LOG("alpha : "<<alpha);
+  }
+  if(too_big(N) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
+  //cblas_sscal((int)N, alpha, X, 1);
+  for (long long int k = (long long int)0; k < N; ++k){
+    X[k] = X[k] * alpha;
+  };
+}
+
+template <>
+void cpu_scal<double>(const long long int N, const double alpha, double *X) {
+  if(too_big(N) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
+  cblas_dscal((int)N, alpha, X, 1);
+}
+
 
 int gcd(int a, int b) 
 {
@@ -140,43 +188,71 @@ void cpu_permute(Dtype* A, const int* P, const long long int rows, const long lo
   if(permute_rows){
     if(Debug) LOG("permute_rows is true") ;
     //pvt is an array length rows
-    for(long long int  j = 0; j <cols; j++) {
-      long long int  ind=(long long int)0;
-      Dtype temp = (Dtype)0;
+    int nthreads = 1;
+    #ifdef _OPENMP
+      int nProcessors = omp_get_max_threads();
+      nthreads = (int)std::min((long long int)nProcessors, cols);
+      omp_set_num_threads(nthreads);
+    #endif
+    #pragma omp parallel shared(nthreads)
+    {
+      int th_id = 0;
+      #ifdef _OPENMP
+        th_id = omp_get_thread_num();
+      #endif
+      for(long long int j = (long long int)th_id; j < cols; j += (long long int)nthreads){
+      //for(long long int  j = 0; j <cols; j++) {
+        long long int  ind=(long long int)0;
+        Dtype temp = (Dtype)0;
 
-      for(long long int i = 0; i < rows - (long long int)1; i++){
-        // get next index
-        ind = P[i];
-        while(ind<i)
-          ind = P[ind];
+        for(long long int i = 0; i < rows - (long long int)1; i++){
+          // get next index
+          ind = P[i];
+          while(ind<i)
+            ind = P[ind];
 
-        // swap elements in array
-        temp = A[i + j * rows];
-        A[i + j * rows] = A[ind + j * rows];
-        A[ind + j * rows] = temp;
+          // swap elements in array
+          temp = A[i + j * rows];
+          A[i + j * rows] = A[ind + j * rows];
+          A[ind + j * rows] = temp;
+        };
       };
-    };
+    }
   } else{
     if(Debug) LOG("permute_rows is false") ;
     //pvt is an array length cols
-    for(long long int i = 0; i<rows; i++) {
-      long long int ind = (long long int)0;
-      Dtype temp = (Dtype)0.0;
+    int nthreads = 1;
+    #ifdef _OPENMP
+      int nProcessors = omp_get_max_threads();
+      nthreads = (int)std::min((long long int)nProcessors, rows);
+      omp_set_num_threads(nthreads);
+    #endif
+    #pragma omp parallel shared(nthreads)
+    {
+      int th_id = 0;
+      #ifdef _OPENMP
+        th_id = omp_get_thread_num();
+      #endif
+      for(long long int i = (long long int)th_id; i < rows; i += (long long int)nthreads){
+      //for(long long int i = 0; i<rows; i++) {
+        long long int ind = (long long int)0;
+        Dtype temp = (Dtype)0.0;
 
-      for(long long int j=0; j < cols - (long long int)1; j++){
-        // get next index
-        ind = P[j];
-        while(ind<j)
-          ind = P[ind];
+        for(long long int j=0; j < cols - (long long int)1; j++){
+          // get next index
+          ind = P[j];
+          while(ind<j)
+            ind = P[ind];
 
-        // swap elements in array
-        if(Debug) LOG("i + j * rows: "<<i<<" + "<<j<<" * "<<rows<<" = "<<i + j * rows) ;
-        if(Debug) LOG("i + ind * rows: "<<i<<" + "<<ind<<" * "<<rows<<" = "<<i + ind * rows) ;
-        temp = A[i + j * rows];
-        A[i + j * rows] = A[i + ind * rows];
-        A[i + ind * rows] = temp;
+          // swap elements in array
+          if(Debug) LOG("i + j * rows: "<<i<<" + "<<j<<" * "<<rows<<" = "<<i + j * rows) ;
+          if(Debug) LOG("i + ind * rows: "<<i<<" + "<<ind<<" * "<<rows<<" = "<<i + ind * rows) ;
+          temp = A[i + j * rows];
+          A[i + j * rows] = A[i + ind * rows];
+          A[i + ind * rows] = temp;
+        };
       };
-    };
+    }
   }
 }
 template void cpu_permute<float>(float* A, const int* P, const long long int rows, const long long int cols, bool permute_rows) ;
@@ -185,8 +261,8 @@ template void cpu_permute<double>(double* a, const int* pvt,const long long int 
 
 // Non-square matrix transpose of matrix of size r x c and base address A 
 template <>
-void MatrixInplaceTranspose<float>(float *A, int r, int c) 
-{ ABORT_IF_NEQ(0, 1, "Function Not Supported Yet");
+void MatrixInplaceTranspose<float>(float *A, int r, int c, bool row_major_ordering) 
+{ //ABORT_IF_NEQ(0, 1, "Function Not Supported Yet");
 
   // int HASH_SIZE = 128;
 
@@ -221,6 +297,11 @@ void MatrixInplaceTranspose<float>(float *A, int r, int c)
   //         ; 
   //     std::cout << endl; 
   // } 
+  if(row_major_ordering){
+    mkl_simatcopy('R', 'T', r, c, (float)1.0, A, c, r);
+  }else{
+    mkl_simatcopy('C', 'T', r, c, (float)1.0, A, r, c);
+  }
 } 
 
 template <>
@@ -253,15 +334,18 @@ void cpu_axpby<double>(const int N, const double alpha, const double* X,
 
 template <typename Dtype>
 Dtype cpu_abs_max(long long int n, Dtype* X){
-  Dtype max_ = abs(X[0]);
+  Dtype max_ = std::abs(X[0]);
   for(long long int i = (long long int)1; i < n; i++){
-    Dtype temp = abs(X[i]);
-    if(temp > max_) max_ = temp;
+    Dtype temp = std::abs(X[i]);
+    if(temp > max_){
+      max_ = temp;
+    }
   }
   return max_;
 }
 
 template float cpu_abs_max<float>(long long int n, float* X);
+template int cpu_abs_max<int>(long long int n, int* X);
 
 template<>
 void cpu_gemm<float>(const bool TransA,
@@ -269,6 +353,17 @@ void cpu_gemm<float>(const bool TransA,
                      const float alpha, const float* A, const float* B, const float beta,
                      float* C) 
 {
+  // M, N, K
+  //M number of rows of matrix op(A) and C.
+  //N is number of columns of matrix op(B) and C.]
+  //K is number of rows of op(B) and columns of op(A).
+
+  // op(A) is M by K
+  // op(B) is K by N
+  // C is M by N
+  // cublasDgemm(handle, transa, transb, M, N, K, alpha, A, lda, B, ldb, beta, C, ldc) 
+  // performs C=alpha op ( B ) op ( A ) + beta C
+
   int lda = (TransA == false) ? K : M;
   int ldb = (TransB == false) ? N : K;
   cblas_sgemm(CblasRowMajor, (TransA == false) ? CblasNoTrans : CblasTrans, (TransB == false) ? CblasNoTrans : CblasTrans, M, N, K, alpha, A, lda, B,
@@ -282,10 +377,69 @@ void cpu_gemm<double>(const bool TransA,
                       const double alpha, const double* A, const double* B, const double beta,
                       double* C) 
 {
+  // M, N, K
+  //M number of rows of matrix op(A) and C.
+  //N is number of columns of matrix op(B) and C.]
+  //K is number of rows of op(B) and columns of op(A).
+
+  // op(A) is M by K
+  // op(B) is K by N
+  // C is M by N
+  // cublasDgemm(handle, transa, transb, M, N, K, alpha, A, lda, B, ldb, beta, C, ldc) 
+  // performs C=alpha op ( B ) op ( A ) + beta C
+
   int lda = (TransA == false) ? K : M;
   int ldb = (TransB == false) ? N : K;
   cblas_dgemm(CblasRowMajor, (TransA == false) ? CblasNoTrans : CblasTrans, (TransB == false) ? CblasNoTrans : CblasTrans, M, N, K, alpha, A, lda, B,
       ldb, beta, C, N);
+}
+
+template <>
+void cpu_swap_ordering<float>(const long long int rows, const long long int cols, float *A, const bool row_major_ordering)
+{
+  bool Debug = true;
+  if(Debug) LOG("cpu_swap_ordering called");
+  const long long int total = rows * cols;
+  float* A_copy = NULL;
+  A_copy  = (float *)malloc(total * sizeof(float));
+  checkErrors(A_copy);
+  
+  host_copy<float>(total, A, A_copy);
+
+  int nthreads = 1;
+  #ifdef _OPENMP
+    int nProcessors = omp_get_max_threads();
+    nthreads = (int)std::min((long long int)nProcessors, total);
+    omp_set_num_threads(nthreads);
+  #endif
+  #pragma omp parallel shared(nthreads)
+  {
+    int th_id = 0;
+    #ifdef _OPENMP
+      th_id = omp_get_thread_num();
+    #endif
+    for(long long int j = (long long int)th_id; j < total; j += (long long int)nthreads){
+      if(!row_major_ordering){
+          //starts in colum major ordering
+        long long int row = j % rows;
+        long long int col = j / rows;
+          //i = row + rows * col;
+        long long int new_i = cols * row + col;
+        A[new_i] = A_copy[j];
+
+      }else{
+          //starts in row major ordering
+        long long int row = j / cols;
+        long long int col = j % cols;
+          //i = cols * row + col;
+        long long int new_i = row + rows * col;
+        A[new_i] = A_copy[j];
+
+      }
+    }
+  }
+  free(A_copy);
+  if(Debug) LOG("cpu_swap_ordering done");
 }
 
 //============================================================================================
@@ -476,6 +630,7 @@ void getRandIntsBetween(int *A , int lower_bd , int upper_bd, int num)
 
     int* indicies = NULL;
     indicies  = (int *)malloc(nnz * sizeof(int));
+    checkErrors(indicies);
 
     gettimeofday(&time_start, NULL);
   //generate random numbers:
@@ -630,28 +785,77 @@ template void printPartialMtx<int>(int * A, int rows, int cols , int ld);
 template void printPartialMtx<float>(float * A, int rows, int cols , int ld);
 template void printPartialMtx<double>(double * A, int rows, int cols , int ld);
 
+
 template<typename Dtype>
-void print_host_array(const Dtype* host_pointer, int count, std::string title)
+void print_host_array(const Dtype* host_pointer, int count, std::string title, std::string file_line)
 {
-  LOG(title<<" : ");
+  if(file_line != ""){
+    LOG2(file_line, title<<" : ");
+  }else{
+    LOG(title<<" : ");
+  }
   std::string line;
   line="[ ";
-    for( int i = 0; i < count; i+= 1 ) {
-      if (i==count-1){
-        line = (line + ToString<Dtype>(host_pointer[i ])).c_str();
-      }else{
-        line = (line + ToString<Dtype>(host_pointer[i]) + " , ").c_str();
-      };
-    };     
+  for( int i = 0; i < count; i+= 1 ) {
+    if (i==count-1){
+      line = (line + ToString<Dtype>(host_pointer[i ])).c_str();
+    }else{
+      line = (line + ToString<Dtype>(host_pointer[i]) + " , ").c_str();
+    };
+  };     
 
-    line = line+ " ];\n";
-  LOG(line<<std::endl);
-
-  
+  line = line+ " ];\n";
+  if(file_line != ""){
+    LOG2(file_line, line<<std::endl);
+  }else{
+    LOG(line<<std::endl);
+  }
 }
 
-template void print_host_array<int>(const int* host_pointer, int count, std::string title);
-template void print_host_array<float>(const float* host_pointer, int count, std::string title);
+template void print_host_array<int>(const int* host_pointer, int count, std::string title, std::string file_line);
+template void print_host_array<float>(const float* host_pointer, int count, std::string title, std::string file_line);
+
+template<typename Dtype>
+void print_host_mtx(const Dtype* A_host, const int rows, const int cols, std::string title, bool row_major_order, std::string file_line)
+{
+  //assumes row major order
+  std::string line = (title + " : \r\n").c_str();
+  if(row_major_order){
+    for (int i = 0; i < rows; i++){
+      for (int j = 0; j < cols; j++){
+        //line = (line + ToString<Dtype>(A_host[i + j * rows])).c_str();
+        line = (line + ToString<Dtype>(A_host[i * cols + j])).c_str();
+        if(j < cols - 1){
+          line = (line + ", ").c_str();
+        }
+      }
+      line = (line + "\r\n").c_str();
+      //line = (line + "; ").c_str();
+    }
+  }else{
+    for (int i = 0; i < rows; i++){
+      for (int j = 0; j < cols; j++){
+        line = (line + ToString<Dtype>(A_host[i + j * rows])).c_str();
+        //line = (line + ToString<Dtype>(A_host[i * cols + j])).c_str();
+        if(j < cols - 1){
+          line = (line + ", ").c_str();
+        }
+      }
+      line = (line + "\r\n").c_str();
+      //line = (line + "; ").c_str();
+    }    
+  }
+  if(file_line != ""){
+    LOG2(file_line, line<<std::endl);
+  }else{
+    LOG(line<<std::endl);
+  }
+}
+
+template void print_host_mtx<int>(const int* A_host, const int rows, const int cols, std::string title, bool row_major_order, std::string file_line);
+//template void print_host_mtx<long long int>(const long long int* A_host, int rows, int cols, std::string title, bool row_major_order, std::string file_line);
+template void print_host_mtx<float>(const float* A_host, const int rows, const int cols, std::string title, bool row_major_order, std::string file_line);
+template void print_host_mtx<double>(const double* A_host, const int rows, const int cols, std::string title, bool row_major_order, std::string file_line);
 
 
 template<typename Dtype>
@@ -739,7 +943,7 @@ void save_host_arrays_side_by_side_to_file(const int* A_host, const int* B_host,
 
 
 template<typename Dtype>
-void save_host_mtx_to_file(const Dtype* A_host, const int rows, const int cols, std::string title)
+void save_host_mtx_to_file(const Dtype* A_host, const int rows, const int cols, std::string title, bool row_major_order)
 {
   //assumes row major order
 
@@ -747,20 +951,36 @@ void save_host_mtx_to_file(const Dtype* A_host, const int rows, const int cols, 
   filename << title<< ".txt";
   std::ofstream entries (filename.str().c_str());
   //entries<<"[ ";
-  for (int i = 0; i < rows; i++){
-    for (int j = 0; j < cols; j++){
-      //entries<<A_host[i + j * rows];
-      entries<<A_host[i * cols + j];
-      entries<<", ";
+  if(row_major_order){
+    for (int i = 0; i < rows; i++){
+      for (int j = 0; j < cols; j++){
+        //entries<<A_host[i + j * rows];
+        entries<<A_host[i * cols + j];
+        if(j < cols - 1){
+          entries<<", ";
+        }
+      }
+      entries<<"\r\n";
+      //entries<<"; ";
     }
-    entries<<"\r\n";
+  }else{
+    for (int i = 0; i < rows; i++){
+      for (int j = 0; j < cols; j++){
+        entries<<A_host[i + j * rows];
+        //entries<<A_host[i * cols + j];
+        if(j < cols - 1){
+          entries<<", ";
+        }
+      }
+      entries<<"\r\n";
+    }    
   }
 }
 
-template void save_host_mtx_to_file<int>(const int* A_host, const int rows, const int cols, std::string title);
-//template void save_host_mtx_to_file<long long int>(const long long int* A_host, int rows, int cols, std::string title);
-template void save_host_mtx_to_file<float>(const float* A_host, const int rows, const int cols, std::string title);
-template void save_host_mtx_to_file<double>(const double* A_host, const int rows, const int cols, std::string title);
+template void save_host_mtx_to_file<int>(const int* A_host, const int rows, const int cols, std::string title, bool row_major_order);
+//template void save_host_mtx_to_file<long long int>(const long long int* A_host, int rows, int cols, std::string title, bool row_major_order);
+template void save_host_mtx_to_file<float>(const float* A_host, const int rows, const int cols, std::string title, bool row_major_order);
+template void save_host_mtx_to_file<double>(const double* A_host, const int rows, const int cols, std::string title, bool row_major_order);
 
 void save_map(std::map<int, int>* items_dictionary, std::string title){
 
@@ -850,6 +1070,11 @@ void cpu_shuffle_mtx_rows_or_cols(cublasHandle_t dn_handle, const long long int 
   int * indicies_host = NULL;
   int * indicies_dev;
 
+  /*
+    A in row major ordering is equivalent to A^T in column major ordering
+    A in column major ordering is equivalent to A^T in row major ordering
+  */
+
   if(Debug) LOG("cpu_shuffle_mtx_rows_or_cols called") ;
   if(shuffle_rows){
     if(Debug) LOG("shuffle_rows is true") ;
@@ -861,11 +1086,11 @@ void cpu_shuffle_mtx_rows_or_cols(cublasHandle_t dn_handle, const long long int 
     CUDA_CHECK(cudaMemcpy(indicies_host, indicies_dev, M * sizeof(int), cudaMemcpyDeviceToHost));
     if(row_major_ordering){
       if(Debug) LOG("row_major_ordering is true") ;
-      cpu_permute<float>(x, indicies_host, N, M, !shuffle_rows); 
+      cpu_permute<float>(x, indicies_host, N, M, false); 
     }else{
-      cpu_permute<float>(x, indicies_host, M, N, shuffle_rows); 
+      cpu_permute<float>(x, indicies_host, M, N, true); 
     };
-    cudaFree(indicies_dev);
+    checkCudaErrors(cudaFree(indicies_dev));
     free(indicies_host);
   }else{
     // shuffle columns
@@ -876,11 +1101,11 @@ void cpu_shuffle_mtx_rows_or_cols(cublasHandle_t dn_handle, const long long int 
     gpu_shuffle_array<int>(dn_handle, N, indicies_dev);
     CUDA_CHECK(cudaMemcpy(indicies_host, indicies_dev, N * sizeof(int), cudaMemcpyDeviceToHost));
     if(row_major_ordering){
-      cpu_permute<float>(x, indicies_host, N, M, shuffle_rows); 
+      cpu_permute<float>(x, indicies_host, N, M, true); 
     }else{
-      cpu_permute<float>(x, indicies_host, M, N, !shuffle_rows); 
+      cpu_permute<float>(x, indicies_host, M, N, false); 
     };
-    cudaFree(indicies_dev);
+    checkCudaErrors(cudaFree(indicies_dev));
     free(indicies_host);
   }
 } 
@@ -900,7 +1125,7 @@ void cpu_shuffle_map_second(const long long int M, std::map<int, int>* items_dic
 
   gpu_set_as_index(indicies_dev, M);
   CUDA_CHECK(cudaMemcpy(indicies_host, indicies_dev, M * sizeof(int), cudaMemcpyDeviceToHost));
-  cudaFree(indicies_dev);
+  checkCudaErrors(cudaFree(indicies_dev));
 
   cpu_shuffle_array<int>(M, indicies_host);
 
@@ -1208,8 +1433,8 @@ void cpu_sort_index_by_max(const long long int dimension,  Dtype* x, int* indici
       }
 
       if(i == 0 && debug) {
-        print_host_array<Dtype>(temp_x + th_id * (dimension - 1), (int)dimension - 1, "temp_x");
-        print_host_array<int>(temp_indicies + th_id * (dimension - 1), (int)dimension - 1, "temp_indicies");
+        print_host_array((temp_x + th_id * (dimension - 1)), ((int)dimension - 1), ("temp_x"));
+        print_host_array((temp_indicies + th_id * (dimension - 1)), ((int)dimension - 1), ("temp_indicies"));
       }
       //LOG("Hello from thread "<<th_id) ;
       //thrust::sort_by_key sorts temp_indicies by temp_x smallest to temp_x largest
@@ -1217,9 +1442,9 @@ void cpu_sort_index_by_max(const long long int dimension,  Dtype* x, int* indici
       //quickSort_by_key<Dtype>(temp_x + th_id * (dimension - 1), 0, dimension - 1, temp_indicies + th_id * (dimension - 1));
       host_copy(top_N, temp_indicies + (th_id + 1) * (dimension - 1) - top_N, indicies + i * top_N);
       if(i == 0 && debug) {
-        print_host_array<Dtype>(temp_x + th_id * (dimension - 1), (int)dimension - 1, "temp_x");
-        print_host_array<int>(temp_indicies + th_id * (dimension - 1), (int)dimension - 1, "temp_indicies");
-        print_host_array<int>(indicies + i * top_N, top_N, "indicies");
+        print_host_array((temp_x + th_id * (dimension - 1)), ((int)dimension - 1), ("temp_x"));
+        print_host_array((temp_indicies + th_id * (dimension - 1)), ((int)dimension - 1), ("temp_indicies"));
+        print_host_array((indicies + i * top_N), (top_N), ("indicies"));
       }
 
       if(th_id == 0 && debug){
@@ -1587,80 +1812,237 @@ void cpu_get_num_latent_factors<float>(const long long int m, float* S_host,
 
 }
 
+template<typename Dtype>
+void cpu_div_US_in_SVD(const long long int m, const long long int num_latent_factors, Dtype* U, const Dtype* S, 
+  const bool right_divide_by_S) 
+{
+  //U is m by num_latent_factors in row major ordering
+  for(long long int l = 0; l < m * num_latent_factors; l++){
+    long long int k;
+    if(right_divide_by_S){
+        k = l % num_latent_factors; //get column
+      }else{
+        k = l / num_latent_factors; //get row
+      }
+
+      //U[l] = (int)k;
+      //U[l] = S[k];
+      U[l] = U[l] / S[k];
+  }
+
+}
+template void cpu_div_US_in_SVD<float>(const long long int m, const long long int num_latent_factors, float* U, const float* S, 
+  const bool right_divide_by_S);
+ 
+
+template<typename Dtype>
+void cpu_mult_US_in_SVD(const long long int m, const long long int num_latent_factors, Dtype* U, const Dtype* S, 
+  const bool right_multiply_by_S)  
+{
+  //U is m by num_latent_factors in row major ordering
+  for(long long int l = 0; l < m * num_latent_factors; l++){
+    long long int k;
+    if(right_multiply_by_S){
+      k = l % num_latent_factors; //get column
+    }else{
+      k = l / num_latent_factors; //get row
+    }
+
+    U[l] = U[l] * S[k];
+    //U[l] = S[k];
+  }
+}
+
+template void cpu_mult_US_in_SVD<float>(const long long int m, const long long int num_latent_factors, float* U, const float* S, 
+  const bool right_multiply_by_S);
+
 
 template<>
-void cpu_orthogonal_decomp<float>(const long long int m, const long long int n, 
+void cpu_orthogonal_decomp<float>(const long long int m, const long long int n, const bool row_major_ordering,
                                   long long int* num_latent_factors, const float percent,
-                                  float* A, float* U, float* V)
+                                  float* A, float* U, float* V, float* S)
 {
 
-  // Make sure the matrix A is in row major ordering!!!
-  bool Debug = true;
+  bool Debug = false;
   LOG("cpu_orthogonal_decomp called");
+  std::string blank = "";
 
   struct timeval program_start, program_end;
   double program_time;
   gettimeofday(&program_start, NULL);
 
-  long long int smaller_dim = std::min(m, n);
+  long long int lda, sda;
+  float *d_U  = NULL;
+  float *d_VT = NULL;
 
-  MatrixXf eigen_A = Map<MatrixXf>( A, m, n );
-  float* S  = NULL;
-  S = (float *)malloc(smaller_dim *  sizeof(float)); 
-  checkErrors(S);
-  //MatrixXf eigen_U(m, smaller_dim);
-  //MatrixXf eigen_V(smaller_dim, n);
+  /*
+    A in row major ordering is equivalent to A^T in column major ordering
+    A in column major ordering is equivalent to A^T in row major ordering
+  */
 
-  if(Debug) LOG("ComputeThinV...") ;
-  BDCSVD<MatrixXf> svd(eigen_A, ComputeThinV);
+  if(n > m){
+    //we have to solve the transpose problem
+    if(Debug) LOG("Solving the tranpose problem...");
+    d_U  = V;
+    d_VT = U;
+    lda  = n;
+    sda  = m;
+    if(!row_major_ordering){
+      if(Debug) LOG("A in row major ordering is equivalent to A^T in column major ordering...");
+      MatrixInplaceTranspose<float>(A, m, n, row_major_ordering);
+    }
+  }else{
+    d_U  = U;
+    d_VT = V;
+    lda  = m;
+    sda  = n;
+    if(row_major_ordering){
+      if(Debug) LOG("swap ordering of A");
+      cpu_swap_ordering<float>(m, n, A, row_major_ordering);
+    }
+  };
+
+  long long int smaller_dim = (int)std::min(m, n);
+  Eigen::MatrixXf eigen_A = Eigen::Map<Eigen::MatrixXf>( A, lda, sda);
+
+  if(1) {
+    LOG("eigen_A.rows() : "<<eigen_A.rows()) ;
+    LOG("eigen_A.cols() : "<<eigen_A.cols()) ;
+    LOG("eigen_A.size() : "<<eigen_A.size()) ;
+    //std::cout << "Here is the matrix A:" << std::endl << eigen_A << std::endl;
+  }
+
+  // float* A_copy = NULL;
+  // A_copy = (float *)malloc(m*n *  sizeof(float)); 
+  // checkErrors(A_copy);  
+  // cpu_set_all<float>(A_copy, m*n, (float)0.0);
+  // Eigen::Map<Eigen::MatrixXf>( A_copy, sda, lda ) = eigen_A;
+  // print_host_mtx<float>(A_copy, sda, lda, "A_copy", 1, strPreamble(blank));
+  // free(A_copy);
+
+  if(1) LOG("Compute svd...") ;
+  if(smaller_dim <= (long long int)16){
+    Eigen::JacobiSVD<Eigen::MatrixXf> svd(eigen_A, Eigen::ComputeThinU | Eigen::ComputeThinV);
+    if(Debug){
+      std::cout << "Its singular values are:" << std::endl << svd.singularValues() << std::endl;
+      std::cout << "Its left singular vectors are the columns of the thin U matrix:" << std::endl << svd.matrixU() << std::endl;
+      std::cout << "Its right singular vectors are the columns of the thin V matrix:" << std::endl << svd.matrixV() << std::endl;
+    }
+    eigen_A.resize(0,0);
+    Eigen::Map<Eigen::MatrixXf>( d_VT, sda, smaller_dim) = svd.matrixV();
+    Eigen::Map<Eigen::MatrixXf>( d_U, lda, smaller_dim ) =  svd.matrixU();
+    if(S != NULL){
+      LOG("saving singular values.");
+      Eigen::Map<Eigen::VectorXf>( S, smaller_dim ) = svd.singularValues();
+    }
+
+  }else{
+    //Eigen::JacobiSVD<Eigen::MatrixXf> svd(eigen_A, Eigen::ComputeFullV);
+    Eigen::BDCSVD<Eigen::MatrixXf> svd(eigen_A, Eigen::ComputeThinU | Eigen::ComputeThinV);
+    if(Debug){
+      std::cout << "Its singular values are:" << std::endl << svd.singularValues() << std::endl;
+      std::cout << "Its left singular vectors are the columns of the thin U matrix:" << std::endl << svd.matrixU() << std::endl;
+      std::cout << "Its right singular vectors are the columns of the thin V matrix:" << std::endl << svd.matrixV() << std::endl;
+    }
+    eigen_A.resize(0,0);
+    LOG("here");
+    Eigen::Map<Eigen::MatrixXf>( d_VT, sda, smaller_dim) = svd.matrixV();
+    LOG("here");
+    Eigen::Map<Eigen::MatrixXf>( d_U, lda, smaller_dim ) =  svd.matrixU();
+    
+    if(S != NULL){
+      LOG("saving singular values.");
+      Eigen::Map<Eigen::VectorXf>( S, smaller_dim ) = svd.singularValues();
+    }
+    LOG("here");
+  }
   //MatrixXf eigen_V(smaller_dim, n) = svd.matrixV();
-
+  if(1) LOG("svd computed...") ;
   
 
-  //Map<MatrixXf>( U, eigen_U.rows(), eigen_U.cols() ) = eigen_U;
-  Map<MatrixXf>( V, smaller_dim, n ) = svd.matrixV();
-  Map<VectorXf>( S, smaller_dim ) = svd.singularValues();
+  // M, N, K
+  //M number of rows of matrix op(A) and C.
+  //N is number of columns of matrix op(B) and C.]
+  //K is number of rows of op(B) and columns of op(A).
 
-  if(Debug) LOG("solving for U now...") ;
-  //C←αAB + βC
-  cpu_gemm<float>(false, false, m, smaller_dim, n,
-                  (float)1.0, A, V, (float)0.0, U);
+  // op(A) is M by K
+  // op(B) is K by N
+  // C is M by N
+  // cublasDgemm(handle, transa, transb, M, N, K, alpha, A, lda, B, ldb, beta, C, ldc) 
+  // performs C=alpha op ( B ) op ( A ) + beta C
 
+  if(n > m){
+    if(!row_major_ordering){
+      if(Debug) LOG("tranpose back...");
+      MatrixInplaceTranspose<float>(A, n, m);
+    }
+
+    // if(Debug) LOG("solving for V now...") ;
+    // C←αAB + βC
+    // cpu_gemm<float>(true, false, smaller_dim, n, m,
+    //                 (float)1.0, U, A, (float)0.0, V);
+    //cpu_mult_US_in_SVD<float>(m, smaller_dim, U, S, true);
+    //cpu_div_US_in_SVD<float>(n, smaller_dim, V, S, true);
+  }else{
+    
+    if(row_major_ordering){
+      if(Debug) LOG("swap ordering of A back...");
+      cpu_swap_ordering<float>(m, n, A, !row_major_ordering);
+    }
+    //if(Debug) LOG("solving for U now...") ;
+    //C←αAB + βC
+    // cpu_gemm<float>(false, false, m, smaller_dim, n,
+    //                 (float)1.0, A, V, (float)0.0, U);
+  };
+  LOG("here");
+
+  if(row_major_ordering){
+    //if(Debug) LOG("A in row major ordering is equivalent to A^T in column major ordering...");
+    cpu_swap_ordering<float>(n, smaller_dim, V, !row_major_ordering);
+    cpu_swap_ordering<float>(m, smaller_dim, U, !row_major_ordering);
+    cpu_mult_US_in_SVD<float>(m, smaller_dim, U, S, true);
+  }else{
+    /*
+      A in row major ordering is equivalent to A^T in column major ordering
+      A in column major ordering is equivalent to A^T in row major ordering
+    */
+    cpu_mult_US_in_SVD<float>(smaller_dim, m, U, S, false);
+  }
   cpu_get_num_latent_factors<float>(smaller_dim, S, num_latent_factors, percent);
-
+  LOG("here");
   if(Debug && 0){
 
     LOG("num_latent_factors : "<<num_latent_factors[0]) ;
     save_host_mtx_to_file<float>(U, m, m, "U_3");
     save_host_mtx_to_file<float>(V, n, m, "V_3");
     save_host_mtx_to_file<float>(A, m, n, "A");
-    
+
 
     // LOG("Press Enter to continue.") ;
     // std::cin.ignore();
   }    
   save_host_array_to_file<float>(S, std::min(m,n), "singular_values");
 
-  if(Debug){
+  if(0){
     float* R  = NULL;
     R = (float *)malloc(m * n *  sizeof(float)); 
     checkErrors(R);
 
     /*
-        A is m by n stored in col-maj ordering where m<<n
-        V is n by m stored in col-maj ordering
+        A is m by n stored in row-maj ordering where m<<n
+        V is n by m stored in row-maj ordering
         (V^T is m by n)
-        U is m by m stored in col-maj ordering
+        U is m by m stored in row-maj ordering
     */
     // M, N, K
-    //M number of columns of matrix op(A) and C.
-    //N is number of rows of matrix op(B) and C.]
-    //K is number of columns of op(B) and rows of op(A).
+    //M number of rows of matrix op(A) and C.
+    //N is number of columns of matrix op(B) and C.]
+    //K is number of rows of op(B) and columns of op(A).
 
-    // op(B) is N by K
-    // op(A) is K by M
-    // C is N by M
-    // cublasDgemm(handle, transb, transa, N, M, K, alpha, B, ldb, A, lda, beta, C, ldc) 
+    // op(A) is M by K
+    // op(B) is K by N
+    // C is M by N
+    // cublasDgemm(handle, transa, transb, M, N, K, alpha, A, lda, B, ldb, beta, C, ldc) 
     // performs C=alpha op ( B ) op ( A ) + beta C
 
     cpu_gemm<float>(false, true, m, m, smaller_dim /*num_latent_factors[0]*/,
@@ -1701,6 +2083,135 @@ void cpu_orthogonal_decomp<float>(const long long int m, const long long int n,
   program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
   //printf("program_time: %f\n", program_time);   
   if(1) LOG("cpu_orthogonal_decomp run time : "<<readable_time(program_time)<<std::endl);
+
+}
+
+
+void cpu_orthogonal_decomp_test() {
+
+  // MatrixXf M = MatrixXf::Random(3,2);
+  // std::cout << "Here is the matrix M:" << std::endl << M << std::endl;
+  // JacobiSVD<MatrixXf> svd(M, ComputeThinU | ComputeThinV);
+  // std::cout << "Its singular values are:" << std::endl << svd.singularValues() << std::endl;
+  // std::cout << "Its left singular vectors are the columns of the thin U matrix:" << std::endl << svd.matrixU() << std::endl;
+  // std::cout << "Its right singular vectors are the columns of the thin V matrix:" << std::endl << svd.matrixV() << std::endl;
+
+  const int m = 19;
+  const int n = 17;
+  const int min_dim = std::min(m,n);
+  const int max_dim = std::max(m,n);
+  std::string blank = "";
+
+  float* A = NULL;
+  float* U = NULL;
+  float* V = NULL;
+  float* S = NULL;
+  A = (float *)malloc(m*n *  sizeof(float)); 
+  U = (float *)malloc(m*min_dim *  sizeof(float)); 
+  V = (float *)malloc(n*min_dim *  sizeof(float)); 
+  S = (float *)malloc(min_dim *  sizeof(float)); 
+  checkErrors(A);
+  checkErrors(U);
+  checkErrors(V);
+  checkErrors(S);
+
+  cpu_set_all<float>(U, m*min_dim, (float)0.0);
+  cpu_set_all<float>(V, min_dim*n, (float)0.0);
+  cpu_set_all<float>(S, min_dim, (float)0.0);
+
+  host_rng_uniform<float>(m*n, (float)(-10.0), (float)10.0, A);
+
+  //save_host_mtx_to_file<float>(A, m, n, "A");
+
+  long long int num_latent_factors;
+  const float percent = (float)0.95;
+  bool row_major_ordering = false;
+  if(1){
+    print_host_mtx<float>(A, m, n, "A", row_major_ordering, strPreamble(blank));
+  }
+  cpu_orthogonal_decomp<float>(m, n, row_major_ordering, &num_latent_factors, percent,
+  A, U, V, S);
+
+
+  if(1){
+    print_host_mtx<float>(A, m, n, "A", row_major_ordering, strPreamble(blank));
+    print_host_mtx<float>(U, m, min_dim, "U", row_major_ordering, strPreamble(blank));
+    print_host_mtx<float>(V, n, min_dim, "V", row_major_ordering, strPreamble(blank));
+    print_host_array<float>(S, min_dim, "S", strPreamble(blank));
+  }
+
+  if(row_major_ordering){
+  float* R  = NULL;
+  R = (float *)malloc(max_dim * max_dim *  sizeof(float)); 
+  checkErrors(R);
+
+  /*
+      A is m by n stored in row-maj ordering where m<<n
+      V is n by m stored in row-maj ordering
+      (V^T is m by n)
+      U is m by m stored in row-maj ordering
+  */
+  // M, N, K
+  //M number of rows of matrix op(A) and C.
+  //N is number of columns of matrix op(B) and C.]
+  //K is number of rows of op(B) and columns of op(A).
+
+  // op(A) is M by K
+  // op(B) is K by N
+  // C is M by N
+  // cublasDgemm(handle, transa, transb, M, N, K, alpha, A, lda, B, ldb, beta, C, ldc) 
+  // performs C=alpha op ( B ) op ( A ) + beta C
+
+
+  cpu_gemm<float>(true, false, min_dim, min_dim, m /*num_latent_factors[0]*/,
+   (float)1.0, U, U, (float)0.0, R);
+  print_host_mtx<float>(R, min_dim, min_dim, "UTU", 1, strPreamble(blank));
+
+  if(min_dim == m){
+    cpu_gemm<float>(false, true, m, m, min_dim /*num_latent_factors[0]*/,
+     (float)1.0, U, U, (float)0.0, R);
+    print_host_mtx<float>(R, m, m, "UUT", 1, strPreamble(blank));
+  }
+
+  cpu_gemm<float>(true, false, min_dim, min_dim, n /*num_latent_factors[0]*/,
+   (float)1.0, V, V, (float)0.0, R);
+  print_host_mtx<float>(R, min_dim, min_dim, "VTV", 1, strPreamble(blank));
+
+  if(min_dim == n){
+    cpu_gemm<float>(false, true, n, n, min_dim /*num_latent_factors[0]*/,
+     (float)1.0, V, V, (float)0.0, R);
+    print_host_mtx<float>(R, n, n, "VVT", 1, strPreamble(blank));
+  }
+
+
+
+  cpu_gemm<float>(false, true, m, n, min_dim /*num_latent_factors[0]*/,
+   (float)1.0, U, V, (float)0.0,
+   R);
+
+  cpu_axpby<float>(m * n, (float)1.0, A,
+    (float)(-1.0), R);
+
+  print_host_mtx<float>(R, m, n, "svd_error", 1, strPreamble(blank));
+
+  //float range_A    = gpu_range<float>(m * n,  A);
+      float error      = cpu_abs_max<float>(m * n, R); 
+  //float error_expt = gpu_expected_abs_value<float>(m * n, R); 
+      free(R);
+  // LOG("A mtx range of values = "<<range_A) ;
+      LOG("SVD max error = "<<error) ;
+  // LOG("SVD max error over range of values = "<<error/range_A) ;
+  // LOG("SVD expected absolute error = "<<error_expt) ;
+  // LOG("SVD expected absolute error over range of values = "<<error_expt/range_A) ;
+      // LOG("Press Enter to continue.") ;
+      // std::cin.ignore();
+    }
+
+  free(A);
+  free(U);
+  free(V);
+  free(S);  
+
 }
 
 

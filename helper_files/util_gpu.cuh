@@ -55,40 +55,40 @@
 // cuBLAS API errors
 static const char *getCudaErrorEnum(cublasStatus_t error)
 {
-    switch (error)
-    {
-        case CUBLAS_STATUS_SUCCESS:
-            return "CUBLAS_STATUS_SUCCESS";
+  switch (error)
+  {
+    case CUBLAS_STATUS_SUCCESS:
+        return "CUBLAS_STATUS_SUCCESS";
 
-        case CUBLAS_STATUS_NOT_INITIALIZED:
-            return "CUBLAS_STATUS_NOT_INITIALIZED";
+    case CUBLAS_STATUS_NOT_INITIALIZED:
+        return "CUBLAS_STATUS_NOT_INITIALIZED";
 
-        case CUBLAS_STATUS_ALLOC_FAILED:
-            return "CUBLAS_STATUS_ALLOC_FAILED";
+    case CUBLAS_STATUS_ALLOC_FAILED:
+        return "CUBLAS_STATUS_ALLOC_FAILED";
 
-        case CUBLAS_STATUS_INVALID_VALUE:
-            return "CUBLAS_STATUS_INVALID_VALUE";
+    case CUBLAS_STATUS_INVALID_VALUE:
+        return "CUBLAS_STATUS_INVALID_VALUE";
 
-        case CUBLAS_STATUS_ARCH_MISMATCH:
-            return "CUBLAS_STATUS_ARCH_MISMATCH";
+    case CUBLAS_STATUS_ARCH_MISMATCH:
+        return "CUBLAS_STATUS_ARCH_MISMATCH";
 
-        case CUBLAS_STATUS_MAPPING_ERROR:
-            return "CUBLAS_STATUS_MAPPING_ERROR";
+    case CUBLAS_STATUS_MAPPING_ERROR:
+        return "CUBLAS_STATUS_MAPPING_ERROR";
 
-        case CUBLAS_STATUS_EXECUTION_FAILED:
-            return "CUBLAS_STATUS_EXECUTION_FAILED";
+    case CUBLAS_STATUS_EXECUTION_FAILED:
+        return "CUBLAS_STATUS_EXECUTION_FAILED";
 
-        case CUBLAS_STATUS_INTERNAL_ERROR:
-            return "CUBLAS_STATUS_INTERNAL_ERROR";
+    case CUBLAS_STATUS_INTERNAL_ERROR:
+        return "CUBLAS_STATUS_INTERNAL_ERROR";
 
-        case CUBLAS_STATUS_NOT_SUPPORTED:
-            return "CUBLAS_STATUS_NOT_SUPPORTED";
-            
-        case CUBLAS_STATUS_LICENSE_ERROR:
-            return "CUBLAS_STATUS_LICENSE_ERROR";
-    }
+    case CUBLAS_STATUS_NOT_SUPPORTED:
+        return "CUBLAS_STATUS_NOT_SUPPORTED";
+        
+    case CUBLAS_STATUS_LICENSE_ERROR:
+        return "CUBLAS_STATUS_LICENSE_ERROR";
+  }
 
-    return "<unknown>";
+  return "<unknown>";
 }
 #endif
 
@@ -96,49 +96,49 @@ static const char *getCudaErrorEnum(cublasStatus_t error)
 // cuRAND API errors
 static const char *curandGetErrorString(curandStatus_t error)
 {
-    switch (error)
-    {
-        case CURAND_STATUS_SUCCESS:
-            return "CURAND_STATUS_SUCCESS";
+  switch (error)
+  {
+    case CURAND_STATUS_SUCCESS:
+        return "CURAND_STATUS_SUCCESS";
 
-        case CURAND_STATUS_VERSION_MISMATCH:
-            return "CURAND_STATUS_VERSION_MISMATCH";
+    case CURAND_STATUS_VERSION_MISMATCH:
+        return "CURAND_STATUS_VERSION_MISMATCH";
 
-        case CURAND_STATUS_NOT_INITIALIZED:
-            return "CURAND_STATUS_NOT_INITIALIZED";
+    case CURAND_STATUS_NOT_INITIALIZED:
+        return "CURAND_STATUS_NOT_INITIALIZED";
 
-        case CURAND_STATUS_ALLOCATION_FAILED:
-            return "CURAND_STATUS_ALLOCATION_FAILED";
+    case CURAND_STATUS_ALLOCATION_FAILED:
+        return "CURAND_STATUS_ALLOCATION_FAILED";
 
-        case CURAND_STATUS_TYPE_ERROR:
-            return "CURAND_STATUS_TYPE_ERROR";
+    case CURAND_STATUS_TYPE_ERROR:
+        return "CURAND_STATUS_TYPE_ERROR";
 
-        case CURAND_STATUS_OUT_OF_RANGE:
-            return "CURAND_STATUS_OUT_OF_RANGE";
+    case CURAND_STATUS_OUT_OF_RANGE:
+        return "CURAND_STATUS_OUT_OF_RANGE";
 
-        case CURAND_STATUS_LENGTH_NOT_MULTIPLE:
-            return "CURAND_STATUS_LENGTH_NOT_MULTIPLE";
+    case CURAND_STATUS_LENGTH_NOT_MULTIPLE:
+        return "CURAND_STATUS_LENGTH_NOT_MULTIPLE";
 
-        case CURAND_STATUS_DOUBLE_PRECISION_REQUIRED:
-            return "CURAND_STATUS_DOUBLE_PRECISION_REQUIRED";
+    case CURAND_STATUS_DOUBLE_PRECISION_REQUIRED:
+        return "CURAND_STATUS_DOUBLE_PRECISION_REQUIRED";
 
-        case CURAND_STATUS_LAUNCH_FAILURE:
-            return "CURAND_STATUS_LAUNCH_FAILURE";
+    case CURAND_STATUS_LAUNCH_FAILURE:
+        return "CURAND_STATUS_LAUNCH_FAILURE";
 
-        case CURAND_STATUS_PREEXISTING_FAILURE:
-            return "CURAND_STATUS_PREEXISTING_FAILURE";
+    case CURAND_STATUS_PREEXISTING_FAILURE:
+        return "CURAND_STATUS_PREEXISTING_FAILURE";
 
-        case CURAND_STATUS_INITIALIZATION_FAILED:
-            return "CURAND_STATUS_INITIALIZATION_FAILED";
+    case CURAND_STATUS_INITIALIZATION_FAILED:
+        return "CURAND_STATUS_INITIALIZATION_FAILED";
 
-        case CURAND_STATUS_ARCH_MISMATCH:
-            return "CURAND_STATUS_ARCH_MISMATCH";
+    case CURAND_STATUS_ARCH_MISMATCH:
+        return "CURAND_STATUS_ARCH_MISMATCH";
 
-        case CURAND_STATUS_INTERNAL_ERROR:
-            return "CURAND_STATUS_INTERNAL_ERROR";
-    }
+    case CURAND_STATUS_INTERNAL_ERROR:
+        return "CURAND_STATUS_INTERNAL_ERROR";
+  }
 
-    return "<unknown>";
+  return "<unknown>";
 }
 #endif
 
@@ -146,35 +146,35 @@ static const char *curandGetErrorString(curandStatus_t error)
 //cuSOLVER API errors
 static const char *getCuSolverErrorEnum(cusolverStatus_t error)
 {
-   switch(error)
-   {
-       case CUSOLVER_STATUS_SUCCESS:
-           return "CUSOLVER_STATUS_SUCCESS";
-       case CUSOLVER_STATUS_NOT_INITIALIZED:
-           return "CUSOLVER_STATUS_NOT_INITIALIZED";
-       case CUSOLVER_STATUS_ALLOC_FAILED:
-           return "CUSOLVER_STATUS_ALLOC_FAILED";
-       case CUSOLVER_STATUS_INVALID_VALUE:
-           return "CUSOLVER_STATUS_INVALID_VALUE";
-       case CUSOLVER_STATUS_ARCH_MISMATCH:
-           return "CUSOLVER_STATUS_ARCH_MISMATCH";
-       case CUSOLVER_STATUS_MAPPING_ERROR:
-           return "CUSOLVER_STATUS_MAPPING_ERROR";
-       case CUSOLVER_STATUS_EXECUTION_FAILED:
-           return "CUSOLVER_STATUS_EXECUTION_FAILED";
-       case CUSOLVER_STATUS_INTERNAL_ERROR:
-           return "CUSOLVER_STATUS_INTERNAL_ERROR";
-       case CUSOLVER_STATUS_MATRIX_TYPE_NOT_SUPPORTED:
-           return "CUSOLVER_STATUS_MATRIX_TYPE_NOT_SUPPORTED";
-       case CUSOLVER_STATUS_NOT_SUPPORTED :
-           return "CUSOLVER_STATUS_NOT_SUPPORTED ";
-       case CUSOLVER_STATUS_ZERO_PIVOT:
-           return "CUSOLVER_STATUS_ZERO_PIVOT";
-       case CUSOLVER_STATUS_INVALID_LICENSE:
-           return "CUSOLVER_STATUS_INVALID_LICENSE";
-    }
+  switch(error)
+  {
+   case CUSOLVER_STATUS_SUCCESS:
+       return "CUSOLVER_STATUS_SUCCESS";
+   case CUSOLVER_STATUS_NOT_INITIALIZED:
+       return "CUSOLVER_STATUS_NOT_INITIALIZED";
+   case CUSOLVER_STATUS_ALLOC_FAILED:
+       return "CUSOLVER_STATUS_ALLOC_FAILED";
+   case CUSOLVER_STATUS_INVALID_VALUE:
+       return "CUSOLVER_STATUS_INVALID_VALUE";
+   case CUSOLVER_STATUS_ARCH_MISMATCH:
+       return "CUSOLVER_STATUS_ARCH_MISMATCH";
+   case CUSOLVER_STATUS_MAPPING_ERROR:
+       return "CUSOLVER_STATUS_MAPPING_ERROR";
+   case CUSOLVER_STATUS_EXECUTION_FAILED:
+       return "CUSOLVER_STATUS_EXECUTION_FAILED";
+   case CUSOLVER_STATUS_INTERNAL_ERROR:
+       return "CUSOLVER_STATUS_INTERNAL_ERROR";
+   case CUSOLVER_STATUS_MATRIX_TYPE_NOT_SUPPORTED:
+       return "CUSOLVER_STATUS_MATRIX_TYPE_NOT_SUPPORTED";
+   case CUSOLVER_STATUS_NOT_SUPPORTED :
+       return "CUSOLVER_STATUS_NOT_SUPPORTED ";
+   case CUSOLVER_STATUS_ZERO_PIVOT:
+       return "CUSOLVER_STATUS_ZERO_PIVOT";
+   case CUSOLVER_STATUS_INVALID_LICENSE:
+       return "CUSOLVER_STATUS_INVALID_LICENSE";
+  }
 
-    return "<unknown>";
+  return "<unknown>";
 
 }
 #endif
@@ -183,31 +183,31 @@ static const char *getCuSolverErrorEnum(cusolverStatus_t error)
 //cuSPARSE API errors
 static const char *getCuSparseErrorEnum(cusparseStatus_t error)
 {
-   switch(error)
-   {
-       case CUSPARSE_STATUS_SUCCESS:
-           return "CUSPARSE_STATUS_SUCCESS";
-       case CUSPARSE_STATUS_NOT_INITIALIZED:
-           return "CUSPARSE_STATUS_NOT_INITIALIZED";
-       case CUSPARSE_STATUS_ALLOC_FAILED:
-           return "CUSPARSE_STATUS_ALLOC_FAILED";
-       case CUSPARSE_STATUS_INVALID_VALUE:
-           return "CUSPARSE_STATUS_INVALID_VALUE";
-       case CUSPARSE_STATUS_ARCH_MISMATCH:
-           return "CUSPARSE_STATUS_ARCH_MISMATCH";
-       case CUSPARSE_STATUS_MAPPING_ERROR:
-           return "CUSPARSE_STATUS_MAPPING_ERROR";
-       case CUSPARSE_STATUS_EXECUTION_FAILED:
-           return "CUSPARSE_STATUS_EXECUTION_FAILED";
-       case CUSPARSE_STATUS_INTERNAL_ERROR:
-           return "CUSPARSE_STATUS_INTERNAL_ERROR";
-       case CUSPARSE_STATUS_MATRIX_TYPE_NOT_SUPPORTED:
-           return "CUSPARSE_STATUS_MATRIX_TYPE_NOT_SUPPORTED";
-       case CUSPARSE_STATUS_ZERO_PIVOT:
-           return "CUSPARSE_STATUS_ZERO_PIVOT";
-    }
+ switch(error)
+ {
+   case CUSPARSE_STATUS_SUCCESS:
+       return "CUSPARSE_STATUS_SUCCESS";
+   case CUSPARSE_STATUS_NOT_INITIALIZED:
+       return "CUSPARSE_STATUS_NOT_INITIALIZED";
+   case CUSPARSE_STATUS_ALLOC_FAILED:
+       return "CUSPARSE_STATUS_ALLOC_FAILED";
+   case CUSPARSE_STATUS_INVALID_VALUE:
+       return "CUSPARSE_STATUS_INVALID_VALUE";
+   case CUSPARSE_STATUS_ARCH_MISMATCH:
+       return "CUSPARSE_STATUS_ARCH_MISMATCH";
+   case CUSPARSE_STATUS_MAPPING_ERROR:
+       return "CUSPARSE_STATUS_MAPPING_ERROR";
+   case CUSPARSE_STATUS_EXECUTION_FAILED:
+       return "CUSPARSE_STATUS_EXECUTION_FAILED";
+   case CUSPARSE_STATUS_INTERNAL_ERROR:
+       return "CUSPARSE_STATUS_INTERNAL_ERROR";
+   case CUSPARSE_STATUS_MATRIX_TYPE_NOT_SUPPORTED:
+       return "CUSPARSE_STATUS_MATRIX_TYPE_NOT_SUPPORTED";
+   case CUSPARSE_STATUS_ZERO_PIVOT:
+       return "CUSPARSE_STATUS_ZERO_PIVOT";
+  }
 
-    return "<unknown>";
+  return "<unknown>";
 
 }
 //#endif
@@ -286,7 +286,7 @@ void checkCublasBatchedStatus(cublasStatus_t * batchStatus, int num_blocks);
 
 
 template < typename Dtype>
-void print_gpu_mtx_entries(const Dtype* array, int lda, int sda, bool transpose = 0);
+void print_gpu_mtx_entries(const Dtype* array, int lda, int sda, std::string title = "", bool transpose = 0, std::string file_line = "");
 
 template < typename Dtype>
 void print_gpu_array_entries(const Dtype* array, int count);
@@ -414,7 +414,7 @@ template <typename Dtype>
 void gpu_asum(cublasHandle_t dn_handle, const long long int n, const Dtype* x, Dtype* y);
 
 template <typename Dtype>
-void swap_ordering(const long long int rows, const long long int cols, Dtype *A, const bool row_major_ordering);
+void gpu_swap_ordering(const long long int rows, const long long int cols, Dtype *A, const bool row_major_ordering);
 
 
 template < typename Dtype>
@@ -628,7 +628,7 @@ template <typename Dtype>
 void gpu_orthogonal_decomp(cublasHandle_t handle, cusolverDnHandle_t dn_solver_handle,
                           const long long int m, const long long int n, 
                           long long int* num_latent_factors, const Dtype percent,
-                          Dtype* A, Dtype* U, Dtype* V, bool S_with_U);
+                          Dtype* A, Dtype* U, Dtype* V, bool S_with_U = false, Dtype* S = NULL);
 
 void gpu_orthogonal_decomp_test(cublasHandle_t handle, cusolverDnHandle_t dn_solver_handle);
 
@@ -636,7 +636,9 @@ template <typename Dtype>
 void gpu_block_orthogonal_decomp_from_host(cublasHandle_t handle, cusolverDnHandle_t dn_solver_handle,
                           const long long int m, const long long int n, 
                           long long int* num_latent_factors, const Dtype percent,
-                          Dtype* A, Dtype* U, Dtype* V); 
+                          Dtype* A, Dtype* U, Dtype* V, long long int block_rows = (long long int)1000, Dtype* S = NULL); 
+
+void gpu_block_orthogonal_decomp_from_host_test(cublasHandle_t handle, cusolverDnHandle_t dn_solver_handle);
 
 // solve A*x = b by LU with partial pivoting
 template <typename Dtype>

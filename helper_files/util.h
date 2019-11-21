@@ -85,6 +85,12 @@
 #define LOG(output_statement) \
     	std::cout<<__FILE__<<" line "<<__LINE__<<" at "<<currentDateTime()<<" : "<<output_statement<<std::endl;
 
+#define LOG2(preamble, output_statement) \
+      std::cout<<preamble<<" : "<<output_statement<<std::endl;
+
+#define strPreamble(blank)\
+    ((((blank + __FILE__) + " line ") + ToString(__LINE__)) + " at ") + currentDateTime()
+
 
 #define checkErrors(ans) { Hassert((ans), __FILE__, __LINE__); }
 template <typename Dtype>
@@ -97,7 +103,7 @@ inline void Hassert(const Dtype *ptr, const char *file, int line, bool abort=tru
    }
 }
 
-bool too_big(long long int li);
+bool too_big(const long long int li);
 
 const std::string currentDateTime();
 //============================================================================================
@@ -106,7 +112,10 @@ const std::string currentDateTime();
 
 
 template <typename Dtype>
-void host_copy(const int N, const Dtype* X, Dtype* Y);
+void host_copy(const long long int N, const Dtype* X, Dtype* Y);
+
+template <typename Dtype>
+void copy_device_mtx_into_host_submtx(const int M, const int N, const Dtype* X, Dtype* Y, const int inc_Y);
 //============================================================================================
 // math functions
 //============================================================================================
@@ -116,13 +125,16 @@ void host_copy(const int N, const Dtype* X, Dtype* Y);
 template <typename Dtype>
 Dtype cpu_asum(const int n, const Dtype* x);
 
+template <typename Dtype>
+void cpu_scal(const long long int N, const Dtype alpha, Dtype *X);
+
 int gcd(int a, int b);
 
 template < typename Dtype>
 void cpu_permute(Dtype* a, const int* pvt, const long long int rows, const long long int cols, bool direction);
 
 template < typename Dtype>
-void MatrixInplaceTranspose(Dtype *A, int r, int c);
+void MatrixInplaceTranspose(Dtype *A, int r, int c, bool row_major_ordering = true);
 
 template < typename Dtype>
 void cpu_axpby(const int N, const Dtype alpha, const Dtype* X,
@@ -136,6 +148,9 @@ void cpu_gemm(const bool TransA,
              const bool TransB, const int M, const int N, const int K,
              const Dtype alpha, const Dtype* A, const Dtype* B, const Dtype beta,
              Dtype* C);
+
+template <typename Dtype>
+void cpu_swap_ordering(const long long int rows, const long long int cols, Dtype *A, const bool row_major_ordering);
 
 //============================================================================================
 // random utilities
@@ -164,7 +179,11 @@ template < typename Dtype>
 void printPartialMtx(Dtype * A, int rows, int cols , int ld);
 
 template<typename Dtype>
-void print_host_array(const Dtype* host_pointer, int count, std::string title);
+void print_host_array(const Dtype* host_pointer, int count, std::string title, std::string file_line = "");
+
+template<typename Dtype>
+void print_host_mtx(const Dtype* A_host, const int rows, const int cols, std::string title, 
+                    bool row_major_order = true, std::string file_line = "");
 
 template <typename Dtype>
 void save_host_array_to_file(const Dtype* A_host, int count, std::string title);
@@ -180,7 +199,7 @@ void save_host_arrays_side_by_side_to_file(const int* A_host, const int* B_host,
                                            const float* C_host, int count, std::string title);
 
 template <typename Dtype>
-void save_host_mtx_to_file(const Dtype* A_host, const int rows, const int  cols, std::string title);
+void save_host_mtx_to_file(const Dtype* A_host, const int rows, const int  cols, std::string title, bool row_major_order = true);
 
 void save_map(std::map<int, int>* items_dictionary, std::string title);
 
@@ -241,9 +260,11 @@ void cpu_get_num_latent_factors(const long long int m, Dtype* S_host,
                                 long long int* num_latent_factors, const Dtype percent);
 
 template <typename Dtype>
-void cpu_orthogonal_decomp(const long long int m, const long long int n, 
+void cpu_orthogonal_decomp(const long long int m, const long long int n, const bool row_major_ordering,
                           long long int* num_latent_factors, const Dtype percent,
-                          Dtype* A, Dtype* U, Dtype* V);
+                          Dtype* A, Dtype* U, Dtype* V, Dtype* S = NULL);
+
+void cpu_orthogonal_decomp_test();
 
 
 
