@@ -126,6 +126,12 @@ template <typename Dtype>
 Dtype cpu_asum(const int n, const Dtype* x);
 
 template <typename Dtype>
+Dtype cpu_sum(const long long int n, const Dtype* x);
+
+template<typename Dtype>
+Dtype cpu_sum_of_squares(const long long int n, const Dtype* x);
+
+template <typename Dtype>
 void cpu_scal(const long long int N, const Dtype alpha, Dtype *X);
 
 int gcd(int a, int b);
@@ -151,6 +157,12 @@ void cpu_gemm(const bool TransA,
 
 template <typename Dtype>
 void cpu_swap_ordering(const long long int rows, const long long int cols, Dtype *A, const bool row_major_ordering);
+
+template <typename Dtype>
+Dtype cpu_abs_max(const long long int n,  const Dtype* x);
+
+template <typename Dtype>
+Dtype cpu_expected_abs_value(const long long int n,  const Dtype* x);
 
 //============================================================================================
 // random utilities
@@ -186,7 +198,7 @@ void print_host_mtx(const Dtype* A_host, const int rows, const int cols, std::st
                     bool row_major_order = true, std::string file_line = "");
 
 template <typename Dtype>
-void save_host_array_to_file(const Dtype* A_host, int count, std::string title);
+void save_host_array_to_file(const Dtype* A_host, int count, std::string title, std::string file_line = "");
 
 template <typename Dtype>
 void get_host_array_from_saved_txt(const Dtype* A_host, int count, std::string title);
@@ -199,7 +211,7 @@ void save_host_arrays_side_by_side_to_file(const int* A_host, const int* B_host,
                                            const float* C_host, int count, std::string title);
 
 template <typename Dtype>
-void save_host_mtx_to_file(const Dtype* A_host, const int rows, const int  cols, std::string title, bool row_major_order = true);
+void save_host_mtx_to_file(const Dtype* A_host, const int rows, const int  cols, std::string title, bool row_major_order = true, std::string file_line = "");
 
 void save_map(std::map<int, int>* items_dictionary, std::string title);
 
@@ -262,11 +274,27 @@ void cpu_get_num_latent_factors(const long long int m, Dtype* S_host,
 template <typename Dtype>
 void cpu_orthogonal_decomp(const long long int m, const long long int n, const bool row_major_ordering,
                           long long int* num_latent_factors, const Dtype percent,
-                          Dtype* A, Dtype* U, Dtype* V, Dtype* S = NULL);
+                          Dtype* A, Dtype* U, Dtype* V, bool SV_with_U = false, Dtype* S = NULL);
 
 void cpu_orthogonal_decomp_test();
 
+void cpu_center_rows(const long long int rows, const long long int cols, 
+                 float* X, const float val_when_var_is_zero, float* user_means,  float* user_var);
 
+template <typename Dtype>
+void cpu_sparse_nearest_row(const int rows_A, const int cols, const Dtype* dense_mtx_A, 
+ const int rows_B, const int num_sparse_entries, const int* csr_rows_B, const int* coo_cols_B,
+ const Dtype* coo_entries_B, int* selection,  
+ Dtype* error);
+
+template<typename Dtype>
+void cpu_dense_nearest_row(const int rows_A, const int cols, const Dtype* dense_mtx_A, 
+ const int rows_B, const Dtype* dense_mtx_B, int* selection,  
+ Dtype* error);
+
+template <typename Dtype>
+void cpu_calculate_KM_error_and_update(const int rows_A, const int cols, Dtype* dense_mtx_A, 
+    const int rows_B, const Dtype* dense_mtx_B, int* selection, Dtype alpha, Dtype lambda);
 
 #ifndef CPU_ONLY  // GPU
 

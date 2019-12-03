@@ -219,9 +219,9 @@ int main(int argc, char *argv[])
         exit(EXIT_FAILURE);
     };
 
-    //cpu_orthogonal_decomp_test();
+    cpu_orthogonal_decomp_test();
     //gpu_block_orthogonal_decomp_from_host_test(dn_handle, dn_solver_handle);
-    //return 0;
+    return 0;
 
     //============================================================================================
     // Get the ratings data from CSV File
@@ -996,6 +996,7 @@ int main(int argc, char *argv[])
 
     const float testing_fraction        = 0.25; //percent of known entries used for testing
     bool        compress                = true;
+    bool        SV_with_U               = false;
 
     const long long int batch_size_testing  = 100;//ratings_rows_testing / num_batches;
     const int num_batches    = ratings_rows_testing / batch_size_testing;//100;
@@ -1007,6 +1008,8 @@ int main(int argc, char *argv[])
     LOG("compress : "               <<compress);
     LOG("num_batches : "            <<num_batches);
     LOG("testing_rate : "           <<testing_rate);
+    LOG("SV_with_U : "              <<SV_with_U);
+
 
     float * testing_error = NULL;
     testing_error = (float *)malloc(num_batches * sizeof(float)); 
@@ -1085,8 +1088,8 @@ int main(int argc, char *argv[])
             save_host_array_to_file<float>  (coo_format_ratingsMtx_rating_host_testing,  num_entries_testing, "coo_format_ratingsMtx_rating_host_testing");
         }
 
-        U_CU = (float *)malloc(ratings_rows_CU     * ratings_rows_CU);
-        V_host = (float *)malloc(ratings_cols        * min_CU_dimension);
+        U_CU = (float *)malloc(ratings_rows_CU * ratings_rows_CU * sizeof(float));
+        V_host = (float *)malloc(ratings_cols * min_CU_dimension * sizeof(float));
         checkErrors(U_CU);
         checkErrors(V_host);
 
@@ -1127,8 +1130,10 @@ int main(int argc, char *argv[])
     //============================================================================================
     // Find U_CU, V such that U_CU * V^T ~ R_CU 
     //============================================================================================  
-
-
+    std::string blank = "";
+    float* SV = NULL;
+    SV = (float *)malloc(ratings_rows_CU *  sizeof(float)); 
+    checkErrors(SV);
     if(Conserve_GPU_Mem){
         /*
         cpu_orthogonal_decomp<float>(ratings_rows_CU, ratings_cols, row_major_ordering,
@@ -1139,7 +1144,7 @@ int main(int argc, char *argv[])
         gpu_block_orthogonal_decomp_from_host<float>(dn_handle, dn_solver_handle,
                                                      ratings_rows_CU, ratings_cols,
                                                      &num_latent_factors, percent,
-                                                     full_ratingsMtx_host_CU, U_CU, V_host, ratings_rows_CU / 20);
+                                                     full_ratingsMtx_host_CU, U_CU, V_host, ratings_rows_CU / 20, SV_with_U, SV);
         //num_latent_factors = 100;
         checkCudaErrors(cudaMalloc((void**)&V_dev, ratings_cols * num_latent_factors * sizeof(float)));
         update_Mem(ratings_cols * num_latent_factors * sizeof(float) );
@@ -1147,7 +1152,7 @@ int main(int argc, char *argv[])
         if(row_major_ordering){
             //gpu_swap_ordering<float>(ratings_cols, num_latent_factors, V_dev, true);
         }
-
+        save_host_array_to_file<float>(SV, ratings_rows_CU, "singular_values", strPreamble(blank));
         //save_host_mtx_to_file<float>(U_CU, ratings_rows_CU, num_latent_factors, "U_CU_compressed");
     }else{
         if(row_major_ordering){
@@ -1157,11 +1162,15 @@ int main(int argc, char *argv[])
         gpu_orthogonal_decomp<float>(dn_handle, dn_solver_handle,
                                 ratings_rows_CU, ratings_cols, 
                                 &num_latent_factors, percent,
-                                full_ratingsMtx_dev_CU, U_CU, V_dev, 1);
+                                full_ratingsMtx_dev_CU, U_CU, V_dev, SV_with_U);
 
         //save_device_mtx_to_file<float>(U_CU, ratings_rows_CU, num_latent_factors, "U_CU_compressed");
     }
-
+    float * SV_dev;
+    checkCudaErrors(cudaMalloc((void**)&SV_dev, ratings_rows_CU * sizeof(float)));
+    update_Mem(ratings_rows_CU * sizeof(float));
+    checkCudaErrors(cudaMemcpy(SV_dev, SV, ratings_rows_CU, cudaMemcpyHostToDevice));
+    free(SV);
     /*
         At this point U_CU is batch_size_CU by batch_size_CU in memory stored in column major
         ordering and V is ratings_cols by batch_size_CU stored in column major ordering
@@ -1305,7 +1314,7 @@ int main(int argc, char *argv[])
                                        coo_format_ratingsMtx_itemID_dev_testing_batch,
                                        V_dev, U_testing, R_testing, training_rate, regularization_constant,
                                        &testing_error_on_training_entries_temp, &testing_error_on_testing_entries_temp, 
-                                       &total_iterations);
+                                       &total_iterations, SV_with_U, SV_dev);
 
             //gpu_reverse_bools<float>(nnz_testing,  testing_entries);
             //gpu_hadamard<float>(nnz_testing, testing_entries, coo_testing_errors );
@@ -1373,7 +1382,7 @@ int main(int argc, char *argv[])
     free(V_host);
     cudaFree(R_testing);
     update_Mem((ratings_rows_CU * std::min(ratings_rows_CU, ratings_cols)  + ratings_cols * std::min(ratings_rows_CU, ratings_cols))* static_cast<long long int>(sizeof(float))* (-1));
-    
+    checkCudaErrors(cudaFree(SV_dev));
     
     
     if(!Conserve_GPU_Mem){

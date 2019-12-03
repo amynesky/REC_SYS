@@ -289,13 +289,13 @@ template < typename Dtype>
 void print_gpu_mtx_entries(const Dtype* array, int lda, int sda, std::string title = "", bool transpose = 0, std::string file_line = "");
 
 template < typename Dtype>
-void print_gpu_array_entries(const Dtype* array, int count);
+void print_gpu_array_entries(const Dtype* array, int count, std::string file_line = "");
 
 template <typename Dtype>
-void save_device_mtx_to_file(const Dtype* A_dev, int lda, int sda, std::string title, bool transpose = false);
+void save_device_mtx_to_file(const Dtype* A_dev, int lda, int sda, std::string title, bool transpose = false, std::string file_line = "");
 
 template <typename Dtype>
-void save_device_array_to_file(const Dtype* A_dev, int count, std::string title);
+void save_device_array_to_file(const Dtype* A_dev, int count, std::string title, std::string file_line = "");
 
 template <typename Dtype>
 void append_device_array_to_file(const Dtype* A_dev, int count, std::string title);
@@ -566,6 +566,16 @@ void sparse_nearest_row(const int rows_A, const int cols, const Dtype* dense_mtx
  const Dtype* coo_entries_B, int* selection,  
  Dtype* error);
 
+template <typename Dtype>
+void dense_nearest_row(const int rows_A, const int cols, const Dtype* dense_mtx_A, 
+ const int rows_B, const Dtype* dense_mtx_B, int* selection,  
+ Dtype* error);
+
+template <typename Dtype>
+void calculate_KM_error_and_update(const int rows_A, const int cols, Dtype* dense_mtx_A, 
+                                   const int rows_B, const Dtype* dense_mtx_B, int* selection, 
+                                   Dtype alpha, Dtype lambda);
+
 void center_ratings(const float* user_means, const float* user_var, 
                     const int ratings_rows, const int num_entries,
                     const int* csr_format_ratingsMtx_userID_dev,
@@ -634,9 +644,10 @@ void gpu_orthogonal_decomp_test(cublasHandle_t handle, cusolverDnHandle_t dn_sol
 
 template <typename Dtype>
 void gpu_block_orthogonal_decomp_from_host(cublasHandle_t handle, cusolverDnHandle_t dn_solver_handle,
-                          const long long int m, const long long int n, 
-                          long long int* num_latent_factors, const Dtype percent,
-                          Dtype* A, Dtype* U, Dtype* V, long long int block_rows = (long long int)1000, Dtype* S = NULL); 
+                                            const long long int m, const long long int n, 
+                                            long long int* num_latent_factors, const Dtype percent,
+                                            Dtype* A, Dtype* U, Dtype* V, 
+                                            long long int block_rows = (long long int)1000, bool S_with_U = false, Dtype* S = NULL); 
 
 void gpu_block_orthogonal_decomp_from_host_test(cublasHandle_t handle, cusolverDnHandle_t dn_solver_handle);
 
@@ -705,7 +716,7 @@ void gpu_R_error_training(const cublasHandle_t dn_handle, const cusparseHandle_t
                                 const int *csr_format_ratingsMtx_userID_dev_training_batch, 
                                 const int *coo_format_ratingsMtx_itemID_dev_training,
                                 const Dtype *V, Dtype *U_training, Dtype *R_training, 
-                                Dtype training_rate, Dtype regularization_constant);
+                                Dtype training_rate, Dtype regularization_constant, bool S_with_U = false, Dtype *SV = NULL);
 
 
 template <typename Dtype>
@@ -719,7 +730,7 @@ void gpu_R_error_testing(const cublasHandle_t dn_handle, const cusparseHandle_t 
                         const Dtype *V, Dtype *U_testing, Dtype *R_testing, 
                         float training_rate, float regularization_constant,
                         float* testing_error_on_training_entries, float* testing_error_on_testing_entries, 
-                        long long int* total_iterations);
+                        long long int* total_iterations, bool S_with_U = false, Dtype *SV = NULL);
 
 
 

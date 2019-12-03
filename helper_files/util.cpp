@@ -102,25 +102,74 @@ template void host_copy<double>(const long long int N, const double* X, double* 
 template <typename Dtype>
 void copy_device_mtx_into_host_submtx(const int M, const int N, const Dtype* X, Dtype* Y, const int inc_Y)
 {
-  int nthreads = 1;
-  #ifdef _OPENMP
-    int nProcessors = omp_get_max_threads();
-    nthreads = (int)std::min(nProcessors, N);
-    omp_set_num_threads(nthreads);
-  #endif
-  #pragma omp parallel shared(nthreads)
-  {
-    int th_id = 0;
-    #ifdef _OPENMP
-      th_id = omp_get_thread_num();
-    #endif
-    for(long long int j = (long long int)th_id; j < N; j += (long long int)nthreads){
-      Dtype* Y_temp = Y + j * (long long int)inc_Y;
-      const Dtype* X_temp = X + j * (long long int)M;
-      checkCudaErrors(cudaMemcpy(Y_temp,  X_temp,  M * sizeof(float), cudaMemcpyDeviceToHost));
-    }
+  bool Debug = false;
+  std::string blank = "";
+  if(Debug){
+    LOG("copy_device_mtx_into_host_submtx called");
+    LOG("X is on the device "<<M<<" by "<<N<<" in memory = "<<M * N);
+    LOG("Y is on host "<<inc_Y<<" by "<<N<<" in memory = "<<inc_Y * N);
+    LOG("M : "<< M);
+    LOG("N : "<< N);
+    LOG("inc_Y : "<< inc_Y);
+    print_gpu_mtx_entries<Dtype>(X, M, N, "X", 0, strPreamble(blank));
   }
 
+  if(inc_Y == M){
+    checkCudaErrors(cudaMemcpy(Y,  X,  M * N * sizeof(Dtype), cudaMemcpyDeviceToHost));
+    if(Debug){
+      checkCudaErrors(cudaDeviceSynchronize());
+      print_host_mtx<Dtype>(Y, inc_Y, N, "Y", 0, strPreamble(blank));
+      checkCudaErrors(cudaDeviceSynchronize());
+      print_gpu_mtx_entries<Dtype>(X, M, N, "X", 0, strPreamble(blank));
+      checkCudaErrors(cudaDeviceSynchronize());
+    }
+  }else{
+    int nthreads = 1;
+    #ifdef _OPENMP
+      int nProcessors = omp_get_max_threads();
+      nthreads = (int)std::min(nProcessors, N);
+      if(Debug){
+        LOG("copy_device_mtx_into_host_submtx done");
+        LOG("nthreads : "<< nthreads);
+      }
+      omp_set_num_threads(nthreads);
+      omp_lock_t printlock;
+      omp_init_lock(&printlock);
+    #endif
+    #pragma omp parallel shared(nthreads)
+    {
+      int th_id = 0;
+      #ifdef _OPENMP
+        th_id = omp_get_thread_num();
+      #endif
+      for(long long int j = (long long int)th_id; j < (long long int)N; j += (long long int)nthreads){
+      //for(long long int j = (long long int)0; j < (long long int)N; j+=(long long int)1){
+        long long int y_skip = j * (long long int)inc_Y;
+        long long int x_skip = j * (long long int)M;
+        if(Debug){
+          omp_set_lock(&printlock);
+          LOG("th_id : "<< th_id);
+          LOG("j : "<< j);
+          LOG("N : "<< N);
+          LOG("y_skip : "<< y_skip);
+          LOG("y_skip  + M: "<< y_skip + M <<" <= "<<inc_Y * N);
+          LOG("x_skip : "<< x_skip);
+          LOG("x_skip  + M: "<< x_skip + M <<" <= "<<M * N);
+        }
+        Dtype* Y_temp = Y + y_skip;
+        const Dtype* X_temp = X + x_skip;
+        checkCudaErrors(cudaMemcpy(Y_temp,  X_temp,  M * sizeof(Dtype), cudaMemcpyDeviceToHost));
+        if(Debug){
+          checkCudaErrors(cudaDeviceSynchronize());
+          print_host_mtx<Dtype>(Y, inc_Y, N, "Y", 0, strPreamble(blank));
+          omp_unset_lock(&printlock);
+        }
+      }
+    }
+  }
+  if(Debug){
+    LOG("copy_device_mtx_into_host_submtx done");
+  }
 }
 
 template void copy_device_mtx_into_host_submtx<float>(const int M, const int N, const float* X, float* Y, const int inc_Y);
@@ -147,6 +196,34 @@ float cpu_asum<float>(const int n, const float* x) {
 template <>
 double cpu_asum<double>(const int n, const double* x) {
   return cblas_dasum(n, x, 1);
+}
+
+template <>
+float cpu_sum<float>(const long long int n,  const float* x) 
+{
+  if(too_big(n) ) {ABORT_IF_EQ(0, 1,"Long long long int too big");}
+  float sum = thrust::reduce(thrust::host, x, x + n, (float)0., thrust::plus<float>());
+  return sum;
+}
+
+// square<Dtype> computes the square of a number f(x) -> x*x 
+template <typename Dtype> 
+struct square_ 
+{ 
+  Dtype operator()(const Dtype& x) const {
+   return x * x; 
+ } 
+};
+
+template <>
+float cpu_sum_of_squares<float>(const long long int n, const float* x) {
+  if(too_big(n) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
+  square_<float> unary_op; 
+  thrust::plus<float> binary_op; 
+  float init = 0; 
+  // compute norm 
+  float s = thrust::transform_reduce(thrust::host, x, x+n, unary_op, init, binary_op) ; 
+  return s/* /(float)n*/;
 }
 
 template <>
@@ -201,11 +278,11 @@ void cpu_permute(Dtype* A, const int* P, const long long int rows, const long lo
         th_id = omp_get_thread_num();
       #endif
       for(long long int j = (long long int)th_id; j < cols; j += (long long int)nthreads){
-      //for(long long int  j = 0; j <cols; j++) {
+      //for(long long int  j = 0; j <cols; j+=(long long int)1) {
         long long int  ind=(long long int)0;
         Dtype temp = (Dtype)0;
 
-        for(long long int i = 0; i < rows - (long long int)1; i++){
+        for(long long int i = (long long int)0; i < rows - (long long int)1; i+=(long long int)1){
           // get next index
           ind = P[i];
           while(ind<i)
@@ -234,11 +311,11 @@ void cpu_permute(Dtype* A, const int* P, const long long int rows, const long lo
         th_id = omp_get_thread_num();
       #endif
       for(long long int i = (long long int)th_id; i < rows; i += (long long int)nthreads){
-      //for(long long int i = 0; i<rows; i++) {
+      //for(long long int i = (long long int)0; i<rows; i+=(long long int)1) {
         long long int ind = (long long int)0;
         Dtype temp = (Dtype)0.0;
 
-        for(long long int j=0; j < cols - (long long int)1; j++){
+        for(long long int j=(long long int)0; j < cols - (long long int)1; j+=(long long int)1){
           // get next index
           ind = P[j];
           while(ind<j)
@@ -335,7 +412,7 @@ void cpu_axpby<double>(const int N, const double alpha, const double* X,
 template <typename Dtype>
 Dtype cpu_abs_max(long long int n, Dtype* X){
   Dtype max_ = std::abs(X[0]);
-  for(long long int i = (long long int)1; i < n; i++){
+  for(long long int i = (long long int)1; i < n; i+=(long long int)1){
     Dtype temp = std::abs(X[i]);
     if(temp > max_){
       max_ = temp;
@@ -397,20 +474,32 @@ void cpu_gemm<double>(const bool TransA,
 template <>
 void cpu_swap_ordering<float>(const long long int rows, const long long int cols, float *A, const bool row_major_ordering)
 {
-  bool Debug = true;
-  if(Debug) LOG("cpu_swap_ordering called");
+  bool Debug = false;
+  if(Debug) {
+    LOG("cpu_swap_ordering called");
+    LOG("rows : "<<rows);
+    LOG("cols : "<<cols);
+    LOG("row_major_ordering : "<<row_major_ordering);
+  }
   const long long int total = rows * cols;
   float* A_copy = NULL;
   A_copy  = (float *)malloc(total * sizeof(float));
   checkErrors(A_copy);
   
   host_copy<float>(total, A, A_copy);
-
+  if(Debug) {
+    LOG("Here");
+  }
   int nthreads = 1;
   #ifdef _OPENMP
     int nProcessors = omp_get_max_threads();
     nthreads = (int)std::min((long long int)nProcessors, total);
+    if(Debug) {
+      LOG("nthreads : "<<nthreads);
+    }
     omp_set_num_threads(nthreads);
+    omp_lock_t printlock;
+    omp_init_lock(&printlock);
   #endif
   #pragma omp parallel shared(nthreads)
   {
@@ -419,27 +508,106 @@ void cpu_swap_ordering<float>(const long long int rows, const long long int cols
       th_id = omp_get_thread_num();
     #endif
     for(long long int j = (long long int)th_id; j < total; j += (long long int)nthreads){
+    //for(long long int j = (long long int)0; j < total; j += (long long int)1){
       if(!row_major_ordering){
           //starts in colum major ordering
         long long int row = j % rows;
         long long int col = j / rows;
           //i = row + rows * col;
         long long int new_i = cols * row + col;
-        A[new_i] = A_copy[j];
+        if(Debug) {
+          omp_set_lock(&printlock);
+          LOG("th_id : "<<th_id);
+          LOG("j : "<<j);
+          LOG("new_i : "<<new_i);
 
+        }
+        A[new_i] = A_copy[j];
+        if(Debug){
+          omp_unset_lock(&printlock);
+        }
       }else{
           //starts in row major ordering
         long long int row = j / cols;
         long long int col = j % cols;
           //i = cols * row + col;
         long long int new_i = row + rows * col;
+        if(Debug) {
+          omp_set_lock(&printlock);
+          LOG("th_id : "<<th_id);
+          LOG("j : "<<j);
+          LOG("new_i : "<<new_i);
+        }
         A[new_i] = A_copy[j];
-
+        if(Debug){
+          omp_unset_lock(&printlock);
+        }
       }
     }
   }
   free(A_copy);
   if(Debug) LOG("cpu_swap_ordering done");
+}
+
+
+template<>
+float cpu_abs_max<float>(const long long int n,  const float* x) 
+{
+  if(too_big(n) ) {ABORT_IF_NEQ(0, 1, "Long long long int too big");}
+
+  thrust::pair<const float *, const float *> tuple = thrust::minmax_element(thrust::host, x, x + n);
+
+  // if int data[6] = {1, 0, 2, 2, 1, 3};
+  // thrust::pair<int *, int *> result = thrust::minmax_element(thrust::host, data, data + 6);
+  // result.first is data + 1
+  // result.second is data + 5
+  // *result.first is 0
+  // *result.second is 3
+
+  float max;
+
+  if(abs(*tuple.first) > abs(*tuple.second)){
+    max =  abs(*tuple.first);
+  }else{
+    max =  abs(*tuple.second);
+  };
+
+  // save_device_array_to_file<float>(x, n , "gradient");
+  // LOG(INFO) << "max : " <<max ;
+  // LOG(INFO) << "Press Enter to continue." ;
+  // std::cin.ignore();
+
+  return max;
+
+}
+
+// square<T> computes the square of a number f(x) -> x*x 
+template <typename Dtype> 
+struct abss 
+{ 
+  __host__ __device__ Dtype operator()(const Dtype& x) const {
+    if(x >= (Dtype)0.0){
+      return x; 
+    }else{
+      return -x; 
+    };
+  } 
+};
+
+template <>
+float cpu_expected_abs_value<float>(const long long int n,  const float* x) {
+  if(too_big(n) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
+  // setup arguments 
+  abss<float> unary_op; 
+  thrust::plus<float> binary_op; 
+  float init = 0; 
+  // compute norm 
+
+  float s =  thrust::transform_reduce(thrust::host, x, x+n, unary_op, init, binary_op) ; 
+
+
+  return (float)(s/(float)n);
+
 }
 
 //============================================================================================
@@ -527,7 +695,7 @@ void host_rng_uniform(const long long int n, const Dtype a, const Dtype b, Dtype
   // You can now retrieve random numbers from that distribution by means
   // of a STL Generator interface, i.e. calling the generator as a zero-
   // argument function.
-  for(long long int i = 0; i < n; i++)
+  for(long long int i = (long long int)0; i < n; i+=(long long int)1)
     r[i] = static_cast<Dtype>(uni()) ;
 
   if(Debug){
@@ -859,7 +1027,7 @@ template void print_host_mtx<double>(const double* A_host, const int rows, const
 
 
 template<typename Dtype>
-void save_host_array_to_file(const Dtype* A_host, int count, std::string title)
+void save_host_array_to_file(const Dtype* A_host, int count, std::string title, std::string file_line)
 {
   std::stringstream filename;
   filename << title<< ".txt";
@@ -872,11 +1040,14 @@ void save_host_array_to_file(const Dtype* A_host, int count, std::string title)
       entries<<"\r\n";
     };
   };
+  if(file_line != ""){
+    LOG2(file_line, "save_host_array_to_file "<< title);
+  }
 }
 
-template void save_host_array_to_file<int>(const int* A_host, int count, std::string title);
-template void save_host_array_to_file<float>(const float* A_host, int count, std::string title);
-template void save_host_array_to_file<double>(const double* A_host, int count, std::string title);
+template void save_host_array_to_file<int>(const int* A_host, int count, std::string title, std::string file_line);
+template void save_host_array_to_file<float>(const float* A_host, int count, std::string title, std::string file_line);
+template void save_host_array_to_file<double>(const double* A_host, int count, std::string title, std::string file_line);
 
 template<typename Dtype>
 void get_host_array_from_saved_txt(const Dtype* A_host, int count, std::string title)
@@ -943,7 +1114,7 @@ void save_host_arrays_side_by_side_to_file(const int* A_host, const int* B_host,
 
 
 template<typename Dtype>
-void save_host_mtx_to_file(const Dtype* A_host, const int rows, const int cols, std::string title, bool row_major_order)
+void save_host_mtx_to_file(const Dtype* A_host, const int rows, const int cols, std::string title, bool row_major_order, std::string file_line)
 {
   //assumes row major order
 
@@ -975,12 +1146,15 @@ void save_host_mtx_to_file(const Dtype* A_host, const int rows, const int cols, 
       entries<<"\r\n";
     }    
   }
+  if(file_line != ""){
+    LOG2(file_line, "save_host_mtx_to_file "<< title);
+  }
 }
 
-template void save_host_mtx_to_file<int>(const int* A_host, const int rows, const int cols, std::string title, bool row_major_order);
-//template void save_host_mtx_to_file<long long int>(const long long int* A_host, int rows, int cols, std::string title, bool row_major_order);
-template void save_host_mtx_to_file<float>(const float* A_host, const int rows, const int cols, std::string title, bool row_major_order);
-template void save_host_mtx_to_file<double>(const double* A_host, const int rows, const int cols, std::string title, bool row_major_order);
+template void save_host_mtx_to_file<int>(const int* A_host, const int rows, const int cols, std::string title, bool row_major_order, std::string file_line);
+//template void save_host_mtx_to_file<long long int>(const long long int* A_host, int rows, int cols, std::string title, bool row_major_order, std::string file_line);
+template void save_host_mtx_to_file<float>(const float* A_host, const int rows, const int cols, std::string title, bool row_major_order, std::string file_line);
+template void save_host_mtx_to_file<double>(const double* A_host, const int rows, const int cols, std::string title, bool row_major_order, std::string file_line);
 
 void save_map(std::map<int, int>* items_dictionary, std::string title){
 
@@ -1017,9 +1191,9 @@ void cpu_fill_training_mtx(const long long int ratings_rows_training, const long
   LOG("ratings_rows_training : "<< ratings_rows_training);
   LOG("ratings_cols_training : "<< ratings_cols_training);
   //row major ordering
-  for(long long int row = 0; row < ratings_rows_training; row ++){
-    for(long long int i = csr_format_ratingsMtx_userID_host_training[row]; i < csr_format_ratingsMtx_userID_host_training[row + 1]; i++){
-      long long int col = coo_format_ratingsMtx_itemID_host_training[i];
+  for(long long int row = (long long int)0; row < ratings_rows_training; row +=(long long int)1){
+    for(long long int i = (long long int)(csr_format_ratingsMtx_userID_host_training[row]); i < (long long int)(csr_format_ratingsMtx_userID_host_training[row + 1]); i+=(long long int)1){
+      long long int col = (long long int)(coo_format_ratingsMtx_itemID_host_training[i]);
       float val = coo_format_ratingsMtx_rating_host_training[i]; 
       if(row_major_ordering){
         if(Debug) {
@@ -1180,7 +1354,7 @@ void cpu_set_as_index<int>(int* x, const long long int rows, const long long int
       th_id = omp_get_thread_num();
     #endif
     for(long long int i = (long long int)th_id; i < rows * cols; i += (long long int)nthreads){
-    //for(long long int i = (long long int)0; i < rows * cols; i++) {
+    //for(long long int i = (long long int)0; i < rows * cols; i+=(long long int)1) {
       int row = (int)(i % rows);
       //int col = (int)(i / rows);
       x[i] = row;
@@ -1221,7 +1395,7 @@ void cpu_get_cosine_similarity(const long long int ratings_rows,
       th_id = omp_get_thread_num();
     #endif
     for(long long int entry = (long long int)th_id; entry < ratings_rows * ratings_rows; entry += (long long int)nthreads){
-    //for( long long int entry = (long long int)0; entry < ratings_rows * ratings_rows; entry++){
+    //for( long long int entry = (long long int)0; entry < ratings_rows * ratings_rows; entry+=(long long int)1){
       long long int whole_index = from_below_diag_to_whole_faster(entry, ratings_rows);
       int user_i = (int)(whole_index % ratings_rows);
       int user_j = (int)(whole_index / ratings_rows);
@@ -1358,7 +1532,7 @@ void cpu_sort_index_by_max(const long long int rows, const long long int cols,  
       th_id = omp_get_thread_num();
     #endif
     for(long long int i = (long long int)th_id; i < rows; i += (long long int)nthreads){
-    //for(long long int i = (long long int)0; i < rows; i++){
+    //for(long long int i = (long long int)0; i < rows; i+=(long long int)1){
       //thrust::sort_by_key sorts indicies by x smallest to x largest
       thrust::sort_by_key(thrust::host, x + i * cols, x + (i + 1) * cols , indicies + i * cols);
       //quickSort_by_key<Dtype>(x + i * cols, 0, cols, indicies + i * cols);
@@ -1410,13 +1584,13 @@ void cpu_sort_index_by_max(const long long int dimension,  Dtype* x, int* indici
       th_id = omp_get_thread_num();
     #endif
     for(long long int i = (long long int)th_id; i < dimension; i += (long long int)nthreads){
-    //for(long long int i = (long long int)0; i < dimension; i++){
+    //for(long long int i = (long long int)0; i < dimension; i+=(long long int)1){
 
       long long int num_below_diag = (long long int)0;
       long long int left_off = (long long int)0;
       long long int num_in_col = dimension - (long long int)1;
 
-      for(long long int j = (long long int)0; j < i; j++){
+      for(long long int j = (long long int)0; j < i; j+=(long long int)1){
         left_off = num_below_diag + i - (dimension - num_in_col);
 
         temp_x[th_id * (dimension - 1) + j] = x[left_off];
@@ -1426,7 +1600,7 @@ void cpu_sort_index_by_max(const long long int dimension,  Dtype* x, int* indici
         num_in_col -= (long long int)(1);
       }
       left_off = num_below_diag + (i + (long long int)(1)) - (dimension - num_in_col);
-      for(long long int j = i + 1; j < dimension; j++){
+      for(long long int j = i + (long long int)1; j < dimension; j+=(long long int)1){
         temp_x[th_id * (dimension - 1) + j - 1] = x[left_off];
         temp_indicies[th_id * (dimension - 1) + j - 1] = j;
         left_off += (long long int)(1);
@@ -1438,13 +1612,13 @@ void cpu_sort_index_by_max(const long long int dimension,  Dtype* x, int* indici
       }
       //LOG("Hello from thread "<<th_id) ;
       //thrust::sort_by_key sorts temp_indicies by temp_x smallest to temp_x largest
-      thrust::sort_by_key(thrust::host, temp_x + th_id * (dimension - 1), temp_x + (th_id + 1) * (dimension - 1) , temp_indicies + th_id * (dimension - 1));
+      thrust::sort_by_key(thrust::host, temp_x + (long long int)th_id * (dimension - (long long int)1), temp_x + (long long int)(th_id + 1) * (dimension - (long long int)1) , temp_indicies + (long long int)th_id * (dimension - (long long int)1));
       //quickSort_by_key<Dtype>(temp_x + th_id * (dimension - 1), 0, dimension - 1, temp_indicies + th_id * (dimension - 1));
-      host_copy(top_N, temp_indicies + (th_id + 1) * (dimension - 1) - top_N, indicies + i * top_N);
+      host_copy(top_N, temp_indicies + (long long int)(th_id + 1) * (dimension - (long long int)1) - (long long int)top_N, indicies + i * (long long int)top_N);
       if(i == 0 && debug) {
-        print_host_array((temp_x + th_id * (dimension - 1)), ((int)dimension - 1), ("temp_x"));
-        print_host_array((temp_indicies + th_id * (dimension - 1)), ((int)dimension - 1), ("temp_indicies"));
-        print_host_array((indicies + i * top_N), (top_N), ("indicies"));
+        print_host_array((temp_x + (long long int)th_id * (dimension - (long long int)1)), ((int)dimension - 1), ("temp_x"));
+        print_host_array((temp_indicies + (long long int)th_id * (dimension - (long long int)1)), ((int)dimension - 1), ("temp_indicies"));
+        print_host_array((indicies + i * (long long int)top_N), (top_N), ("indicies"));
       }
 
       if(th_id == 0 && debug){
@@ -1510,7 +1684,7 @@ void cpu_count_appearances(const int top_N, const long long int dimension,
       th_id = omp_get_thread_num();
     #endif
     for(long long int j = (long long int)th_id; j < dimension; j += (long long int)nthreads){
-      for(long long int i = (long long int)0; i < top_N; i++){
+      for(long long int i = (long long int)0; i < top_N; i+=(long long int)1){
         int temp = indicies[i + top_N * j];
         omp_set_lock(locks + temp);
         count[temp] += 1;
@@ -1552,7 +1726,7 @@ void cpu_mark_CU_users(const int ratings_rows_CU, const int ratings_rows, const 
       th_id = omp_get_thread_num();
     #endif
     for(long long int j = (long long int)th_id; j < ratings_rows_CU; j += (long long int)nthreads){
-    //for(int j = ratings_rows - 1; j > ratings_rows - 1 - ratings_rows_CU; j--){
+    //for(long long int j = (long long int)(ratings_rows - 1); j > (long long int)(ratings_rows - 1 - ratings_rows_CU); j-=(long long int)1){
       y[x[ratings_rows - 1 - j]] = 0;
     }
   }
@@ -1694,63 +1868,63 @@ long long int from_below_diag_to_whole_faster(long long int below_diag_index, lo
 
 
 /*
-long long int from_below_diag_to_whole_faster(long long int below_diag_index, int dimension){
-  bool debug = false;
-  const long long int num_below_diag = (dimension * (dimension - (long long int)1)) / (long long int)2;
-  if( below_diag_index < (long long int)0 || below_diag_index > num_below_diag - (long long int)(1)) return (long long int)(-1);
+  long long int from_below_diag_to_whole_faster(long long int below_diag_index, int dimension){
+    bool debug = false;
+    const long long int num_below_diag = (dimension * (dimension - (long long int)1)) / (long long int)2;
+    if( below_diag_index < (long long int)0 || below_diag_index > num_below_diag - (long long int)(1)) return (long long int)(-1);
 
-  if (below_diag_index < num_below_diag / 2){
-    long long int num_so_far = (long long int)0; // number to the left
-    int col = 0;
-    long long int num_in_col = (long long int)(dimension - 1);
-    while(num_so_far < below_diag_index + (long long int)(1)){
-      if(debug){
-        LOG("num_so_far : "<<num_so_far);
-        LOG("num_in_col : "<<num_in_col);
-        LOG("col : "<<col);
-        LOG("col * dimension + (dimension - num_in_col) + below_diag_index - num_so_far = "<<col<<" * "<<dimension<<" + ("<<dimension<<" - "<<num_in_col<<") + "<<below_diag_index<<" - "<<num_so_far<<" = "<<(long long int)col * dimension + (dimension - num_in_col) + below_diag_index - num_so_far);
+    if (below_diag_index < num_below_diag / 2){
+      long long int num_so_far = (long long int)0; // number to the left
+      int col = 0;
+      long long int num_in_col = (long long int)(dimension - 1);
+      while(num_so_far < below_diag_index + (long long int)(1)){
+        if(debug){
+          LOG("num_so_far : "<<num_so_far);
+          LOG("num_in_col : "<<num_in_col);
+          LOG("col : "<<col);
+          LOG("col * dimension + (dimension - num_in_col) + below_diag_index - num_so_far = "<<col<<" * "<<dimension<<" + ("<<dimension<<" - "<<num_in_col<<") + "<<below_diag_index<<" - "<<num_so_far<<" = "<<(long long int)col * dimension + (dimension - num_in_col) + below_diag_index - num_so_far);
+        }
+        
+        if(num_so_far + num_in_col == below_diag_index + (long long int)(1)){
+          return (long long int)(col + 1) * dimension - (long long int)(1);
+        }
+        if(num_so_far + num_in_col > below_diag_index + (long long int)(1)){ 
+          break;
+        }else{
+          num_so_far += num_in_col;
+          num_in_col -= (long long int)(1);
+          col += 1;
+        }
       }
-      
-      if(num_so_far + num_in_col == below_diag_index + (long long int)(1)){
-        return (long long int)(col + 1) * dimension - (long long int)(1);
+      return (long long int)col * dimension + (dimension - num_in_col) + below_diag_index - num_so_far;
+    }else{
+      long long int num_so_far = num_below_diag; // number to the left
+      int col = dimension - 2;
+      long long int num_in_col = (long long int)1;
+      while(num_so_far >= below_diag_index + (long long int)(1)){
+        if(false){
+          LOG("num_so_far : "<<num_so_far - num_in_col);
+          LOG("num_in_col : "<<num_in_col);
+          LOG("col : "<<col);
+          LOG("col * dimension + (dimension - num_in_col) + below_diag_index - num_so_far = "<<col<<" * "<<dimension<<" + ("<<dimension<<" - "<<num_in_col<<") + "<<below_diag_index<<" - "<<num_so_far- num_in_col<<" = "<<(long long int)col * dimension + (dimension - num_in_col) + below_diag_index - (num_so_far-num_in_col));
+        }
+        
+        if(num_so_far - num_in_col == below_diag_index + (long long int)(1)){
+          return (long long int)(col) * dimension - (long long int)(1);
+        }
+        if(num_so_far - num_in_col < below_diag_index + (long long int)(1)){ 
+          num_so_far -= num_in_col;
+          break;
+        }else{
+          num_so_far -= num_in_col;
+          num_in_col += (long long int)(1);
+          col -= 1;
+        }
       }
-      if(num_so_far + num_in_col > below_diag_index + (long long int)(1)){ 
-        break;
-      }else{
-        num_so_far += num_in_col;
-        num_in_col -= (long long int)(1);
-        col += 1;
-      }
+      LOG("col * dimension + (dimension - num_in_col) + below_diag_index - num_so_far = "<<col<<" * "<<dimension<<" + ("<<dimension<<" - "<<num_in_col<<") + "<<below_diag_index<<" - "<<num_so_far<<" = "<<(long long int)col * dimension + (dimension - num_in_col) + below_diag_index - num_so_far);
+      return (long long int)col * dimension + (dimension - num_in_col) + below_diag_index - num_so_far;    
     }
-    return (long long int)col * dimension + (dimension - num_in_col) + below_diag_index - num_so_far;
-  }else{
-    long long int num_so_far = num_below_diag; // number to the left
-    int col = dimension - 2;
-    long long int num_in_col = (long long int)1;
-    while(num_so_far >= below_diag_index + (long long int)(1)){
-      if(false){
-        LOG("num_so_far : "<<num_so_far - num_in_col);
-        LOG("num_in_col : "<<num_in_col);
-        LOG("col : "<<col);
-        LOG("col * dimension + (dimension - num_in_col) + below_diag_index - num_so_far = "<<col<<" * "<<dimension<<" + ("<<dimension<<" - "<<num_in_col<<") + "<<below_diag_index<<" - "<<num_so_far- num_in_col<<" = "<<(long long int)col * dimension + (dimension - num_in_col) + below_diag_index - (num_so_far-num_in_col));
-      }
-      
-      if(num_so_far - num_in_col == below_diag_index + (long long int)(1)){
-        return (long long int)(col) * dimension - (long long int)(1);
-      }
-      if(num_so_far - num_in_col < below_diag_index + (long long int)(1)){ 
-        num_so_far -= num_in_col;
-        break;
-      }else{
-        num_so_far -= num_in_col;
-        num_in_col += (long long int)(1);
-        col -= 1;
-      }
-    }
-    LOG("col * dimension + (dimension - num_in_col) + below_diag_index - num_so_far = "<<col<<" * "<<dimension<<" + ("<<dimension<<" - "<<num_in_col<<") + "<<below_diag_index<<" - "<<num_so_far<<" = "<<(long long int)col * dimension + (dimension - num_in_col) + below_diag_index - num_so_far);
-    return (long long int)col * dimension + (dimension - num_in_col) + below_diag_index - num_so_far;    
   }
-}
 */
 
 long long int from_whole_to_below_diag(long long int whole_index, long long int dimension){
@@ -1817,7 +1991,7 @@ void cpu_div_US_in_SVD(const long long int m, const long long int num_latent_fac
   const bool right_divide_by_S) 
 {
   //U is m by num_latent_factors in row major ordering
-  for(long long int l = 0; l < m * num_latent_factors; l++){
+  for(long long int l = (long long int)0; l < m * num_latent_factors; l+=(long long int)1){
     long long int k;
     if(right_divide_by_S){
         k = l % num_latent_factors; //get column
@@ -1840,7 +2014,7 @@ void cpu_mult_US_in_SVD(const long long int m, const long long int num_latent_fa
   const bool right_multiply_by_S)  
 {
   //U is m by num_latent_factors in row major ordering
-  for(long long int l = 0; l < m * num_latent_factors; l++){
+  for(long long int l = (long long int)0; l < m * num_latent_factors; l+=(long long int)1){
     long long int k;
     if(right_multiply_by_S){
       k = l % num_latent_factors; //get column
@@ -1860,7 +2034,7 @@ template void cpu_mult_US_in_SVD<float>(const long long int m, const long long i
 template<>
 void cpu_orthogonal_decomp<float>(const long long int m, const long long int n, const bool row_major_ordering,
                                   long long int* num_latent_factors, const float percent,
-                                  float* A, float* U, float* V, float* S)
+                                  float* A, float* U, float* V, bool SV_with_U, float* S)
 {
 
   bool Debug = false;
@@ -1905,7 +2079,7 @@ void cpu_orthogonal_decomp<float>(const long long int m, const long long int n, 
   long long int smaller_dim = (int)std::min(m, n);
   Eigen::MatrixXf eigen_A = Eigen::Map<Eigen::MatrixXf>( A, lda, sda);
 
-  if(1) {
+  if(Debug) {
     LOG("eigen_A.rows() : "<<eigen_A.rows()) ;
     LOG("eigen_A.cols() : "<<eigen_A.cols()) ;
     LOG("eigen_A.size() : "<<eigen_A.size()) ;
@@ -1920,7 +2094,7 @@ void cpu_orthogonal_decomp<float>(const long long int m, const long long int n, 
   // print_host_mtx<float>(A_copy, sda, lda, "A_copy", 1, strPreamble(blank));
   // free(A_copy);
 
-  if(1) LOG("Compute svd...") ;
+  if(Debug) LOG("Compute svd...") ;
   if(smaller_dim <= (long long int)16){
     Eigen::JacobiSVD<Eigen::MatrixXf> svd(eigen_A, Eigen::ComputeThinU | Eigen::ComputeThinV);
     if(Debug){
@@ -1932,7 +2106,7 @@ void cpu_orthogonal_decomp<float>(const long long int m, const long long int n, 
     Eigen::Map<Eigen::MatrixXf>( d_VT, sda, smaller_dim) = svd.matrixV();
     Eigen::Map<Eigen::MatrixXf>( d_U, lda, smaller_dim ) =  svd.matrixU();
     if(S != NULL){
-      LOG("saving singular values.");
+      if(Debug) LOG("saving singular values.");
       Eigen::Map<Eigen::VectorXf>( S, smaller_dim ) = svd.singularValues();
     }
 
@@ -1945,19 +2119,16 @@ void cpu_orthogonal_decomp<float>(const long long int m, const long long int n, 
       std::cout << "Its right singular vectors are the columns of the thin V matrix:" << std::endl << svd.matrixV() << std::endl;
     }
     eigen_A.resize(0,0);
-    LOG("here");
     Eigen::Map<Eigen::MatrixXf>( d_VT, sda, smaller_dim) = svd.matrixV();
-    LOG("here");
     Eigen::Map<Eigen::MatrixXf>( d_U, lda, smaller_dim ) =  svd.matrixU();
     
     if(S != NULL){
-      LOG("saving singular values.");
+      if(Debug) LOG("saving singular values.");
       Eigen::Map<Eigen::VectorXf>( S, smaller_dim ) = svd.singularValues();
     }
-    LOG("here");
   }
   //MatrixXf eigen_V(smaller_dim, n) = svd.matrixV();
-  if(1) LOG("svd computed...") ;
+  if(Debug) LOG("svd computed...") ;
   
 
   // M, N, K
@@ -1994,22 +2165,30 @@ void cpu_orthogonal_decomp<float>(const long long int m, const long long int n, 
     // cpu_gemm<float>(false, false, m, smaller_dim, n,
     //                 (float)1.0, A, V, (float)0.0, U);
   };
-  LOG("here");
+
 
   if(row_major_ordering){
     //if(Debug) LOG("A in row major ordering is equivalent to A^T in column major ordering...");
-    cpu_swap_ordering<float>(n, smaller_dim, V, !row_major_ordering);
+    //cpu_swap_ordering<float>(n, smaller_dim, V, !row_major_ordering);
     cpu_swap_ordering<float>(m, smaller_dim, U, !row_major_ordering);
-    cpu_mult_US_in_SVD<float>(m, smaller_dim, U, S, true);
+    if(SV_with_U){
+      cpu_mult_US_in_SVD<float>(m, smaller_dim, U, S, true);
+    }else{
+      cpu_mult_US_in_SVD<float>(smaller_dim, n, V, S, false);
+    }
   }else{
     /*
       A in row major ordering is equivalent to A^T in column major ordering
       A in column major ordering is equivalent to A^T in row major ordering
     */
-    cpu_mult_US_in_SVD<float>(smaller_dim, m, U, S, false);
+    if(SV_with_U){
+      cpu_mult_US_in_SVD<float>(smaller_dim, m, U, S, false);
+    }else{
+      cpu_mult_US_in_SVD<float>(smaller_dim, n, V, S, false);
+    }
   }
   cpu_get_num_latent_factors<float>(smaller_dim, S, num_latent_factors, percent);
-  LOG("here");
+
   if(Debug && 0){
 
     LOG("num_latent_factors : "<<num_latent_factors[0]) ;
@@ -2130,82 +2309,82 @@ void cpu_orthogonal_decomp_test() {
     print_host_mtx<float>(A, m, n, "A", row_major_ordering, strPreamble(blank));
   }
   cpu_orthogonal_decomp<float>(m, n, row_major_ordering, &num_latent_factors, percent,
-  A, U, V, S);
+  A, U, V, false, S);
 
 
   if(1){
     print_host_mtx<float>(A, m, n, "A", row_major_ordering, strPreamble(blank));
     print_host_mtx<float>(U, m, min_dim, "U", row_major_ordering, strPreamble(blank));
-    print_host_mtx<float>(V, n, min_dim, "V", row_major_ordering, strPreamble(blank));
+    print_host_mtx<float>(V, n, min_dim, "V", false, strPreamble(blank));
     print_host_array<float>(S, min_dim, "S", strPreamble(blank));
   }
 
   if(row_major_ordering){
-  float* R  = NULL;
-  R = (float *)malloc(max_dim * max_dim *  sizeof(float)); 
-  checkErrors(R);
+    float* R  = NULL;
+    R = (float *)malloc(max_dim * max_dim *  sizeof(float)); 
+    checkErrors(R);
 
-  /*
-      A is m by n stored in row-maj ordering where m<<n
-      V is n by m stored in row-maj ordering
-      (V^T is m by n)
-      U is m by m stored in row-maj ordering
-  */
-  // M, N, K
-  //M number of rows of matrix op(A) and C.
-  //N is number of columns of matrix op(B) and C.]
-  //K is number of rows of op(B) and columns of op(A).
+    /*
+        A is m by n stored in row-maj ordering where m<<n
+        V is n by m stored in row-maj ordering
+        (V^T is m by n)
+        U is m by m stored in row-maj ordering
+    */
+    // M, N, K
+    //M number of rows of matrix op(A) and C.
+    //N is number of columns of matrix op(B) and C.]
+    //K is number of rows of op(B) and columns of op(A).
 
-  // op(A) is M by K
-  // op(B) is K by N
-  // C is M by N
-  // cublasDgemm(handle, transa, transb, M, N, K, alpha, A, lda, B, ldb, beta, C, ldc) 
-  // performs C=alpha op ( B ) op ( A ) + beta C
+    // op(A) is M by K
+    // op(B) is K by N
+    // C is M by N
+    // cublasDgemm(handle, transa, transb, M, N, K, alpha, A, lda, B, ldb, beta, C, ldc) 
+    // performs C=alpha op ( B ) op ( A ) + beta C
 
 
-  cpu_gemm<float>(true, false, min_dim, min_dim, m /*num_latent_factors[0]*/,
-   (float)1.0, U, U, (float)0.0, R);
-  print_host_mtx<float>(R, min_dim, min_dim, "UTU", 1, strPreamble(blank));
-
-  if(min_dim == m){
-    cpu_gemm<float>(false, true, m, m, min_dim /*num_latent_factors[0]*/,
+    cpu_gemm<float>(true, false, min_dim, min_dim, m /*num_latent_factors[0]*/,
      (float)1.0, U, U, (float)0.0, R);
-    print_host_mtx<float>(R, m, m, "UUT", 1, strPreamble(blank));
-  }
+    print_host_mtx<float>(R, min_dim, min_dim, "UTU", 1, strPreamble(blank));
 
-  cpu_gemm<float>(true, false, min_dim, min_dim, n /*num_latent_factors[0]*/,
-   (float)1.0, V, V, (float)0.0, R);
-  print_host_mtx<float>(R, min_dim, min_dim, "VTV", 1, strPreamble(blank));
-
-  if(min_dim == n){
-    cpu_gemm<float>(false, true, n, n, min_dim /*num_latent_factors[0]*/,
-     (float)1.0, V, V, (float)0.0, R);
-    print_host_mtx<float>(R, n, n, "VVT", 1, strPreamble(blank));
-  }
-
-
-
-  cpu_gemm<float>(false, true, m, n, min_dim /*num_latent_factors[0]*/,
-   (float)1.0, U, V, (float)0.0,
-   R);
-
-  cpu_axpby<float>(m * n, (float)1.0, A,
-    (float)(-1.0), R);
-
-  print_host_mtx<float>(R, m, n, "svd_error", 1, strPreamble(blank));
-
-  //float range_A    = gpu_range<float>(m * n,  A);
-      float error      = cpu_abs_max<float>(m * n, R); 
-  //float error_expt = gpu_expected_abs_value<float>(m * n, R); 
-      free(R);
-  // LOG("A mtx range of values = "<<range_A) ;
-      LOG("SVD max error = "<<error) ;
-  // LOG("SVD max error over range of values = "<<error/range_A) ;
-  // LOG("SVD expected absolute error = "<<error_expt) ;
-  // LOG("SVD expected absolute error over range of values = "<<error_expt/range_A) ;
-      // LOG("Press Enter to continue.") ;
-      // std::cin.ignore();
+    if(min_dim == m){
+      cpu_gemm<float>(false, true, m, m, min_dim /*num_latent_factors[0]*/,
+       (float)1.0, U, U, (float)0.0, R);
+      print_host_mtx<float>(R, m, m, "UUT", 1, strPreamble(blank));
     }
+
+    cpu_gemm<float>(true, false, min_dim, min_dim, n /*num_latent_factors[0]*/,
+     (float)1.0, V, V, (float)0.0, R);
+    print_host_mtx<float>(R, min_dim, min_dim, "VTV", 1, strPreamble(blank));
+
+    if(min_dim == n){
+      cpu_gemm<float>(false, true, n, n, min_dim /*num_latent_factors[0]*/,
+       (float)1.0, V, V, (float)0.0, R);
+      print_host_mtx<float>(R, n, n, "VVT", 1, strPreamble(blank));
+    }
+
+
+
+    cpu_gemm<float>(false, true, m, n, min_dim /*num_latent_factors[0]*/,
+     (float)1.0, U, V, (float)0.0,
+     R);
+
+    cpu_axpby<float>(m * n, (float)1.0, A,
+      (float)(-1.0), R);
+
+    print_host_mtx<float>(R, m, n, "svd_error", 1, strPreamble(blank));
+
+    //float range_A    = gpu_range<float>(m * n,  A);
+    float error      = cpu_abs_max<float>(m * n, R); 
+    //float error_expt = gpu_expected_abs_value<float>(m * n, R); 
+    free(R);
+    // LOG("A mtx range of values = "<<range_A) ;
+    LOG("SVD max error = "<<error) ;
+    // LOG("SVD max error over range of values = "<<error/range_A) ;
+    // LOG("SVD expected absolute error = "<<error_expt) ;
+    // LOG("SVD expected absolute error over range of values = "<<error_expt/range_A) ;
+    // LOG("Press Enter to continue.") ;
+    // std::cin.ignore();
+  }
 
   free(A);
   free(U);
@@ -2214,4 +2393,229 @@ void cpu_orthogonal_decomp_test() {
 
 }
 
+
+
+void cpu_center_rows(const long long int rows, const long long int cols, 
+                 float* X, const float val_when_var_is_zero, float* user_means,  float* user_var) 
+{
+  int nthreads = 1;
+  #ifdef _OPENMP
+    int nProcessors = omp_get_max_threads();
+    nthreads = (int)std::min((long long int)nProcessors, rows);
+    omp_set_num_threads(nthreads);
+  #endif
+
+  #pragma omp parallel shared(nthreads)
+  {
+    int th_id = 0;
+    #ifdef _OPENMP
+      th_id = omp_get_thread_num();
+    #endif
+    for(long long int row = (long long int)th_id; row < rows; row += (long long int)nthreads){
+    //for(long long int row = (long long int)0; row < rows; row+=(long long int)1){
+      float mean = (float)0.0;
+      float std_dev = (float)0.0;
+      for(long long int i = (long long int)0; i < cols; i+=(long long int)1){
+        mean += X[row * cols + i];
+        std_dev += pow(X[row * cols + i], (float)2.0);
+      }
+      mean /= (float)cols;
+      std_dev /= (float)cols;
+      std_dev = std_dev - pow(mean, (float)2.0);
+      user_var[row] = std_dev;
+      std_dev = sqrt(std_dev);
+      user_means[row] = mean;
+
+      if(std_dev == (float)0.0 ){
+        for(long long int i = (long long int)0; i < cols; i+=(long long int)1){
+          X[row * cols + i] = val_when_var_is_zero;
+        } 
+      }else{
+        for(long long int i = (long long int)0; i < cols; i+=(long long int)1){
+          X[row * cols + i] = (X[row * cols + i] - mean) / std_dev;
+          if (::isinf(X[row * cols + i]) || ::isnan(X[row * cols + i])){
+            ABORT_IF_NEQ(0, 1, "isBad");
+          };
+        } 
+      }       
+    }
+  }
+}
+
+template <typename Dtype>
+void cpu_sparse_nearest_row(const int rows_A, const int cols, const Dtype* dense_mtx_A, 
+ const int rows_B, const int num_sparse_entries, const int* csr_rows_B, const int* coo_cols_B,
+ const Dtype* coo_entries_B, int* selection, Dtype* error)
+{
+  bool Debug = false;
+  LOG("cpu_sparse_nearest_row called");
+
+  struct timeval program_start, program_end;
+  double program_time;
+  gettimeofday(&program_start, NULL);
+  /*
+    subtract dense_mtx_A from sparse mtx B and put the sparse results in coo_errors
+    dense_mtx_A must be in column major ordering
+  */
+  const int row_skip = csr_rows_B[0];
+  int nthreads = 1;
+  #ifdef _OPENMP
+    int nProcessors = omp_get_max_threads();
+    nthreads = (int)std::min(nProcessors, rows_B);
+    omp_set_num_threads(nthreads);
+  #endif
+  #pragma omp parallel shared(nthreads)
+  {
+    int th_id = 0;
+    #ifdef _OPENMP
+      th_id = omp_get_thread_num();
+    #endif
+    for(long long int row_B = (long long int)th_id; row_B < (long long int)rows_B; row_B += (long long int)nthreads){
+    //CUDA_KERNEL_LOOP(row_B,rows_B) {
+      Dtype closest_A_row_dist = (Dtype)10000.0;
+      int   closest_A_row      = 0;
+      for(long long int row_A = (long long int)0; row_A < (long long int)rows_A; row_A+=(long long int)1){
+        Dtype temp = (Dtype)0.0;
+        for(long long int coo_index = (long long int)(csr_rows_B[row_B]); coo_index < (long long int)(csr_rows_B[row_B + 1]); coo_index+=(long long int)1){
+          int col = coo_cols_B[coo_index];
+          temp += pow(dense_mtx_A[row_A  * cols + col] - coo_entries_B[coo_index], (Dtype)2.0);
+        }
+        if(temp < closest_A_row_dist || row_A == 0){
+          closest_A_row_dist = temp;
+          closest_A_row      = row_A;
+        }
+      }
+      selection[row_B] = closest_A_row;
+      error[row_B] = closest_A_row_dist;
+
+      if (::isinf(error[row_B]) || ::isnan(error[row_B])){
+        ABORT_IF_NEQ(0, 1, "isBad");
+      };
+    }
+  }
+  program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
+  //printf("program_time: %f\n", program_time);   
+  if(1) LOG("cpu_sparse_nearest_row run time : "<<readable_time(program_time)<<std::endl);
+}
+
+template void cpu_sparse_nearest_row<float>(const int rows_A, const int cols, const float* dense_mtx_A, 
+ const int rows_B, const int num_sparse_entries, const int* csr_rows_B, const int* coo_cols_B,
+ const float* coo_entries_B, int* selection, float* error);
+
+
+template<typename Dtype>
+void cpu_dense_nearest_row(const int rows_A, const int cols, const Dtype* dense_mtx_A, 
+ const int rows_B, const Dtype* dense_mtx_B, int* selection, Dtype* error)
+{
+  bool Debug = false;
+  LOG("cpu_dense_nearest_row called");
+
+  struct timeval program_start, program_end;
+  double program_time;
+  gettimeofday(&program_start, NULL);
+  /*
+    subtract dense_mtx_A from sparse mtx B and put the sparse results in coo_errors
+    dense_mtx_A must be in column major ordering
+  */
+
+  int nthreads = 1;
+  #ifdef _OPENMP
+    int nProcessors = omp_get_max_threads();
+    nthreads = (int)std::min(nProcessors, rows_B);
+    omp_set_num_threads(nthreads);
+  #endif
+  #pragma omp parallel shared(nthreads)
+  {
+    int th_id = 0;
+    #ifdef _OPENMP
+      th_id = omp_get_thread_num();
+    #endif
+    for(long long int row_B = (long long int)th_id; row_B < (long long int)rows_B; row_B += (long long int)nthreads){
+      //CUDA_KERNEL_LOOP(row_B,rows_B) {
+        Dtype closest_A_row_dist = (Dtype)1000000.0;
+        int   closest_A_row      = 0;
+        for(long long int row_A = (long long int)0; row_A < (long long int)rows_A; row_A+=(long long int)1){
+          Dtype temp = (Dtype)0.0;
+          for(long long int col = (long long int)0; col < (long long int)cols; col+=(long long int)1){
+            temp += pow(dense_mtx_A[row_A * cols + col] - dense_mtx_B[row_B * cols+ col],(Dtype)2.0);
+          }
+          if(temp < closest_A_row_dist || row_A == 0){
+            closest_A_row_dist = temp;
+            closest_A_row      = (int)row_A;
+          }
+        }
+        selection[row_B] = closest_A_row;
+        error[row_B] = closest_A_row_dist;
+
+        if (::isinf(error[row_B]) || ::isnan(error[row_B])){
+          ABORT_IF_EQ(0, 0, "isBad");
+        };
+      };
+    }
+  program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
+  //printf("program_time: %f\n", program_time);   
+  if(1) LOG("cpu_dense_nearest_row run time : "<<readable_time(program_time)<<std::endl);
+}
+
+
+template void cpu_dense_nearest_row<float>(const int rows_A, const int cols, const float* dense_mtx_A, 
+ const int rows_B, const float* dense_mtx_B, int* selection, float* error);
+
+
+
+
+template<typename Dtype>
+void cpu_calculate_KM_error_and_update(const int rows_A, const int cols, Dtype* dense_mtx_A, 
+                                                    const int rows_B, const Dtype* dense_mtx_B, int* selection,  
+                                                    Dtype alpha, Dtype lambda)
+{
+  bool Debug = false;
+  LOG("cpu_calculate_KM_error_and_update called");
+
+  struct timeval program_start, program_end;
+  double program_time;
+  gettimeofday(&program_start, NULL);
+  /*
+    subtract dense_mtx_A from sparse mtx B and put the sparse results in coo_errors
+    dense_mtx_A must be in column major ordering
+  */
+
+  int nthreads = 1;
+  #ifdef _OPENMP
+    int nProcessors = omp_get_max_threads();
+    nthreads = (int)std::min((long long int)nProcessors, (long long int)rows_A * (long long int)cols);
+    omp_set_num_threads(nthreads);
+  #endif
+  #pragma omp parallel shared(nthreads)
+  {
+    int th_id = 0;
+    #ifdef _OPENMP
+      th_id = omp_get_thread_num();
+    #endif
+    for(long long int index = (long long int)th_id; index < (long long int)rows_A * (long long int)cols; index += (long long int)nthreads){
+        //CUDA_KERNEL_LOOP(index, num) {
+        long long int row_A = index / ((long long int) cols);
+        long long int col = index % ((long long int) cols);
+        Dtype temp = (Dtype)0.0;
+        int count = 0;
+        for(long long int row_B = (long long int)0; row_B < (long long int)rows_B; row_B +=(long long int)1){
+          if(selection[row_B] == (int)row_A){
+            temp += dense_mtx_B[row_B * (long long int)cols + col];
+            count++;
+          }
+        }
+        dense_mtx_A[row_A  * (long long int)cols + col] = ((float)1.0 - alpha * lambda) * dense_mtx_A[row_A  * (long long int)cols + col] + alpha * (temp / ((float)count));
+
+        if (::isinf(dense_mtx_A[row_A  * (long long int)cols + col]) || ::isnan(dense_mtx_A[row_A  * (long long int)cols + col])){
+          ABORT_IF_EQ(0, 0, "isBad");
+        };
+      };
+  }
+  program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
+  //printf("program_time: %f\n", program_time);   
+  if(1) LOG("cpu_calculate_KM_error_and_update run time : "<<readable_time(program_time)<<std::endl);
+}
+
+template void cpu_calculate_KM_error_and_update<float>(const int rows_A, const int cols, float* dense_mtx_A, 
+    const int rows_B, const float* dense_mtx_B, int* selection, float alpha, float lambda);
 

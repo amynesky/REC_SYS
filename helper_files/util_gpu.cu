@@ -319,10 +319,10 @@ void print_gpu_mtx_entries(const Dtype* array, int lda, int sda, std::string tit
             if (j==sda-1){
               line = (line + ToString<Dtype>(host_pointer[i  + j* lda])).c_str();
             }else{
-              line = (line + ToString<Dtype>(host_pointer[i  + j* lda]) + " \r\n ").c_str();
+              line = (line + ToString<Dtype>(host_pointer[i  + j* lda]) + "\r\n").c_str();
             };
           }else{
-            line = (line + ToString<Dtype>(host_pointer[i  + j* lda]) + " , ").c_str();
+            line = (line + ToString<Dtype>(host_pointer[i  + j* lda]) + ", ").c_str();
           };
         };
       };
@@ -333,10 +333,10 @@ void print_gpu_mtx_entries(const Dtype* array, int lda, int sda, std::string tit
           if (i==lda-1){
             line = (line + ToString<Dtype>(host_pointer[i  + j* lda])).c_str();
           }else{
-            line = (line + ToString<Dtype>(host_pointer[i  + j* lda]) + " \r\n ").c_str();
+            line = (line + ToString<Dtype>(host_pointer[i  + j* lda]) + "\r\n").c_str();
           };
         }else{
-          line = (line + ToString<Dtype>(host_pointer[i  + j* lda]) + " , ").c_str();
+          line = (line + ToString<Dtype>(host_pointer[i  + j* lda]) + ", ").c_str();
         };
       };
     };     
@@ -359,7 +359,7 @@ template void print_gpu_mtx_entries<float>(const float* array, int lda, int sda,
 
 
 template<typename Dtype>
-void print_gpu_array_entries(const Dtype* array, int count)
+void print_gpu_array_entries(const Dtype* array, int count, std::string file_line)
 {
   const Dtype *host_pointer;
   
@@ -369,26 +369,28 @@ void print_gpu_array_entries(const Dtype* array, int count)
 
   std::string line;
   line="[ ";
-    for( int i = 0; i < count; i+= 1 ) {
-      if (i==count-1){
-        line = (line + ToString<Dtype>(host_pointer[i ])).c_str();
-      }else{
-        line = (line + ToString<Dtype>(host_pointer[i]) + " , ").c_str();
-      };
-    };     
+  for( int i = 0; i < count; i+= 1 ) {
+    if (i==count-1){
+      line = (line + ToString<Dtype>(host_pointer[i ])).c_str();
+    }else{
+      line = (line + ToString<Dtype>(host_pointer[i]) + ", ").c_str();
+    };
+  };     
 
-    line = line+ " ];\n";
-  LOG(line);
-
-  free((void*)host_pointer);
-  
+  line = line+ " ];\n";
+  if(file_line != ""){
+    LOG2(file_line, line<<std::endl);
+  }else{
+    LOG(line<<std::endl);
+  }
+  free((void*)host_pointer); 
 }
 
-template void print_gpu_array_entries<int>(const int* array, int count);
-template void print_gpu_array_entries<float>(const float* array, int count);
+template void print_gpu_array_entries<int>(const int* array, int count, std::string file_line);
+template void print_gpu_array_entries<float>(const float* array, int count, std::string file_line);
 
 template<typename Dtype>
-void save_device_array_to_file(const Dtype* A_dev, int count, std::string title)
+void save_device_array_to_file(const Dtype* A_dev, int count, std::string title, std::string file_line)
 {
   Dtype* A_host  = NULL;
   A_host = (Dtype *)malloc(count *  sizeof(Dtype)); 
@@ -406,12 +408,15 @@ void save_device_array_to_file(const Dtype* A_dev, int count, std::string title)
       entries<<"\r\n";
     };   
   };
+  if(file_line != ""){
+    LOG2(file_line, "save_device_array_to_file "<< title << " "<< count <<" dimensional array");
+  } 
   free(A_host);
 }
 
-template void save_device_array_to_file<int>(const int* A_dev, int count, std::string title);
-template void save_device_array_to_file<float>(const float* A_dev, int count, std::string title);
-template void save_device_array_to_file<double>(const double* A_dev, int count, std::string title);
+template void save_device_array_to_file<int>(const int* A_dev, int count, std::string title, std::string file_line);
+template void save_device_array_to_file<float>(const float* A_dev, int count, std::string title, std::string file_line);
+template void save_device_array_to_file<double>(const double* A_dev, int count, std::string title, std::string file_line);
 
 template<typename Dtype>
 void append_device_array_to_file(const Dtype* A_dev, int count, std::string title)
@@ -617,7 +622,7 @@ void save_device_arrays_side_by_side_to_file<float>(const float* A_dev, const fl
 }
 
 template<typename Dtype>
-void save_device_mtx_to_file(const Dtype* A_dev, int lda, int sda, std::string title, bool transpose)
+void save_device_mtx_to_file(const Dtype* A_dev, int lda, int sda, std::string title, bool transpose, std::string file_line)
 {
 
   Dtype* A_host = NULL;
@@ -641,10 +646,13 @@ void save_device_mtx_to_file(const Dtype* A_dev, int lda, int sda, std::string t
         }
       };
       if(i < lda - 1){
-        entries<<"; ";
+        //entries<<"; ";
+        entries<<"\r\n";
       };
-
     }; 
+    if(file_line != ""){
+      LOG2(file_line, "save_device_mtx_to_file "<< title<< " "<<lda<<" by "<<sda);
+    }  
   }else{
     for (int j = 0; j < sda; j++){
       //entries<<"***"<<j<<"***";
@@ -658,16 +666,18 @@ void save_device_mtx_to_file(const Dtype* A_dev, int lda, int sda, std::string t
       if(j < sda - 1){
         entries<<"; ";
       };
-    };    
+    }; 
+    if(file_line != ""){
+      LOG2(file_line, "save_device_mtx_to_file "<< title<<  " "<<sda<<" by "<<lda<< " after transposition");
+    }    
   }
-
   //entries<<"];";
   free(A_host);
 }
 
-template void save_device_mtx_to_file<int>(const int* A_dev, int lda, int sda, std::string title, bool transpose);
-template void save_device_mtx_to_file<float>(const float* A_dev, int lda, int sda, std::string title, bool transpose);
-template void save_device_mtx_to_file<double>(const double* A_dev, int lda, int sda, std::string title, bool transpose);
+template void save_device_mtx_to_file<int>(const int* A_dev, int lda, int sda, std::string title, bool transpose, std::string file_line);
+template void save_device_mtx_to_file<float>(const float* A_dev, int lda, int sda, std::string title, bool transpose, std::string file_line);
+template void save_device_mtx_to_file<double>(const double* A_dev, int lda, int sda, std::string title, bool transpose, std::string file_line);
 
 //============================================================================================
 // Add and Scale
@@ -1487,11 +1497,11 @@ float gpu_expected_abs_value<float>(const long long int n,  const float* x) {
 
 }
 
-// square<T> computes the square of a number f(x) -> x*x 
-template <typename T> 
+// square<Dtype> computes the square of a number f(x) -> x*x 
+template <typename Dtype> 
 struct square 
 { 
-  __host__ __device__ T operator()(const T& x) const {
+  __host__ __device__ Dtype operator()(const Dtype& x) const {
    return x * x; 
  } 
 };
@@ -2321,7 +2331,7 @@ void cublasCSCSparseXgemm<float>(cusparseHandle_t handle,int m, int n, int k, in
       coo_format_ratingsMtx_itemID_dev_testing,
       coo_format_ratingsMtx_rating_dev_testing,
       ratings_rows_testing);
-    cudaDeviceSynchronize();
+    checkCudaErrors(cudaDeviceSynchronize());
     gettimeofday(&program_end, NULL);
     program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
   //printf("getData runtime: %f\n", program_time); 
@@ -2407,7 +2417,7 @@ void cublasCSCSparseXgemm<float>(cusparseHandle_t handle,int m, int n, int k, in
       coo_format_ratingsMtx_itemID_dev_by_group,
       coo_format_ratingsMtx_rating_dev_by_group,
       ratings_rows_by_group);
-    cudaDeviceSynchronize();
+    checkCudaErrors(cudaDeviceSynchronize());
     gettimeofday(&program_end, NULL);
     program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
   //printf("getData runtime: %f\n", program_time); 
@@ -2832,7 +2842,7 @@ void gpu_supplement_training_mtx_with_content_based(const long long int ratings_
     };
 
     if(Debug) LOG("finished supplmenting ratings mtx with content based information") ;
-    cudaDeviceSynchronize();
+    checkCudaErrors(cudaDeviceSynchronize());
     gettimeofday(&program_end, NULL);
     program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
   //printf("program_time: %f\n", program_time);   
@@ -2856,15 +2866,15 @@ __global__ void sparse_nearest_row_kernel(const int rows_A, const int cols, cons
   CUDA_KERNEL_LOOP(row_B,rows_B) {
     Dtype closest_A_row_dist = (Dtype)10000.0;
     int   closest_A_row      = 0;
-    for(int row_A = 0; row_A < rows_A; row_A++){
+    for(long long int row_A = (long long int)0; row_A < (long long int)rows_A; row_A++){
       Dtype temp = (Dtype)0.0;
-      for(int coo_index = csr_rows_B[row_B]; coo_index < csr_rows_B[row_B + 1]; coo_index++){
-        int col = coo_cols_B[coo_index];
+      for(long long int coo_index = (long long int)(csr_rows_B[row_B]); coo_index < (long long int)(csr_rows_B[row_B + 1]); coo_index++){
+        long long int col = (long long int)(coo_cols_B[coo_index]);
         temp += pow(dense_mtx_A[row_A + col * rows_A] - coo_entries_B[coo_index],(Dtype)2.0);
       }
       if(temp < closest_A_row_dist || row_A == 0){
         closest_A_row_dist = temp;
-        closest_A_row      = row_A;
+        closest_A_row      = (int)row_A;
       }
     }
     selection[row_B] = closest_A_row;
@@ -2879,8 +2889,7 @@ __global__ void sparse_nearest_row_kernel(const int rows_A, const int cols, cons
 template <typename Dtype>
 void sparse_nearest_row(const int rows_A, const int cols, const Dtype* dense_mtx_A, 
  const int rows_B, const int num_sparse_entries, const int* csr_rows_B, const int* coo_cols_B,
- const Dtype* coo_entries_B, int* selection,  
- Dtype* error) 
+ const Dtype* coo_entries_B, int* selection, Dtype* error) 
 {
   /*
     subtract dense_mtx_A from sparse mtx B and put the sparse results in coo_errors
@@ -2941,13 +2950,208 @@ void sparse_nearest_row(const int rows_A, const int cols, const Dtype* dense_mtx
     if(Debug) LOG("sparse_nearest_row call finished");
   }
 
-template void sparse_nearest_row(const int rows_A, const int cols, const float* dense_mtx_A, 
+template void sparse_nearest_row<float>(const int rows_A, const int cols, const float* dense_mtx_A, 
  const int rows_B, const int num_sparse_entries, const int* csr_rows_B, const int* coo_cols_B,
  const float* coo_entries_B, int* selection,  
  float* error);
 
+template<typename Dtype>
+__global__ void dense_nearest_row_kernel(const int rows_A, const int cols, const Dtype* dense_mtx_A, 
+ const int rows_B, const Dtype* dense_mtx_B, int* selection,  
+ Dtype* error, bool* isBad)
+{
+  /*
+    subtract dense_mtx_A from sparse mtx B and put the sparse results in coo_errors
+    dense_mtx_A must be in column major ordering
+  */
 
-  __global__ void center_ratings_kernel(const float* user_means, const float* user_var, const int ratings_rows,
+  CUDA_KERNEL_LOOP(row_B,rows_B) {
+    Dtype closest_A_row_dist = (Dtype)10000.0;
+    int   closest_A_row      = 0;
+    for(long long int row_A = (long long int)0; row_A < (long long int)rows_A; row_A++){
+      Dtype temp = (Dtype)0.0;
+      for(long long int col = (long long int)0; col < (long long int)cols; col++){
+        temp += pow(dense_mtx_A[row_A + col * rows_A] - dense_mtx_B[row_B + col * rows_B],(Dtype)2.0);
+      }
+      if(temp < closest_A_row_dist || row_A == 0){
+        closest_A_row_dist = temp;
+        closest_A_row      = (int)row_A;
+      }
+    }
+    selection[row_B] = closest_A_row;
+    error[row_B] = closest_A_row_dist;
+
+    if (::isinf(error[row_B]) || ::isnan(error[row_B])){
+      isBad[0] = true;
+    };
+  };
+}
+
+template <typename Dtype>
+void dense_nearest_row(const int rows_A, const int cols, const Dtype* dense_mtx_A, 
+ const int rows_B, const Dtype* dense_mtx_B, int* selection, Dtype* error) 
+{
+  /*
+    subtract dense_mtx_A from sparse mtx B and put the sparse results in coo_errors
+    dense_mtx_A must be in column major ordering
+  */
+
+
+    bool Debug = false;
+    bool isBad_host = false;
+    bool* isBad;
+    CUDA_CHECK(cudaMalloc((void**)&isBad, sizeof(bool)));
+    CUDA_CHECK(cudaMemcpy(isBad, &isBad_host, sizeof(bool), cudaMemcpyHostToDevice));
+
+    // if(coo_A == NULL){
+    //   Debug = false;
+    // }else{
+    //   Debug = true;
+    // }
+
+    if(Debug) LOG("dense_nearest_row called");
+
+
+    const long long int num_gpu_blocks= GET_BLOCKS(rows_B);
+
+    if (num_gpu_blocks > CUDA_NUM_BLOCKS){
+      ABORT_IF_NEQ(0, 1, "Max Blocks Exceeded");
+    };
+
+
+    if(Debug) {
+      LOG("rows_A : "<< rows_A);
+      LOG("cols : "<< cols);
+      LOG("sparse_error called");
+      save_device_mtx_to_file<Dtype>(dense_mtx_A, rows_A, cols, "dense_mtx_A");
+      save_device_mtx_to_file<Dtype>(dense_mtx_B, rows_B, cols, "dense_mtx_B");
+        // LOG("Press Enter to continue.") ;
+        // std::cin.ignore();
+    };
+
+    dense_nearest_row_kernel<Dtype><<<num_gpu_blocks, CUDA_NUM_THREADS>>>(rows_A, cols, dense_mtx_A, 
+                              rows_B, dense_mtx_B, selection, error, isBad);
+    if(Debug) {
+      save_device_array_to_file<Dtype>(error, rows_B, "row_errors");
+      save_device_array_to_file<int>(selection, rows_B, "nearest_row");
+      LOG("Press Enter to continue.") ;
+      std::cin.ignore();
+    };    
+    if(Debug && 0)LOG("Here!");
+    CUDA_CHECK(cudaMemcpy(&isBad_host, isBad, sizeof(bool), cudaMemcpyDeviceToHost));
+    checkCudaErrors(cudaFree(isBad));
+    if(isBad_host){
+      ABORT_IF_NEQ(0, 1, "isBad");
+    };
+    if(Debug) LOG("dense_nearest_row call finished");
+}
+
+template void dense_nearest_row<float>(const int rows_A, const int cols, const float* dense_mtx_A, 
+ const int rows_B, const float* dense_mtx_B, int* selection,  
+ float* error);
+
+
+
+
+template<typename Dtype>
+__global__ void calculate_KM_error_and_update_kernel(const long long int start, const int num, 
+                                                    const int rows_A, const int cols, Dtype* dense_mtx_A, 
+                                                    const int rows_B, const Dtype* dense_mtx_B, int* selection,  
+                                                    Dtype alpha, Dtype lambda, bool* isBad)
+{
+  /*
+    subtract dense_mtx_A from sparse mtx B and put the sparse results in coo_errors
+    dense_mtx_A must be in column major ordering
+  */
+
+  CUDA_KERNEL_LOOP(index, num) {
+    long long int row_A = ((long long int)index + start) % ((long long int) rows_A);
+    long long int col = ((long long int)index + start) / ((long long int) rows_A);
+    Dtype temp = (Dtype)0.0;
+    int count = 0;
+    for(long long int row_B = (long long int)0; row_B < (long long int)rows_B; row_A++){
+      if(selection[row_B] == (int)row_A){
+        temp += dense_mtx_B[row_B + col * (long long int)rows_B];
+        count++;
+      }
+    }
+    dense_mtx_A[row_A + col * (long long int)rows_A] = ((float)1.0 - alpha * lambda) * dense_mtx_A[row_A + col * (long long int)rows_A] + alpha * (temp / ((float)count));
+
+    if (::isinf(dense_mtx_A[row_A + col * (long long int)rows_A]) || ::isnan(dense_mtx_A[row_A + col * (long long int)rows_A])){
+      isBad[0] = true;
+    };
+  };
+}
+
+template <typename Dtype>
+void calculate_KM_error_and_update(const int rows_A, const int cols, Dtype* dense_mtx_A, 
+                                   const int rows_B, const Dtype* dense_mtx_B, int* selection, 
+                                   Dtype alpha, Dtype lambda) 
+{
+    // The rows in dense_mtx_B are closest to selection row in dense_mtx_A
+    // Update  A = A * (1 -alpha * lambda) + alpha * (average row in dense_mtx_B in your row group)
+
+
+    bool Debug = false;
+    bool isBad_host = false;
+    bool* isBad;
+    CUDA_CHECK(cudaMalloc((void**)&isBad, sizeof(bool)));
+    CUDA_CHECK(cudaMemcpy(isBad, &isBad_host, sizeof(bool), cudaMemcpyHostToDevice));
+
+    if(Debug) LOG("calculate_KM_error_and_update called");
+
+
+    long long int num_gpu_blocks = GET_BLOCKS(rows_A * cols);
+
+    if(Debug) {
+      LOG("rows_A : "<< rows_A);
+      LOG("cols : "<< cols);
+      LOG("sparse_error called");
+      save_device_mtx_to_file<Dtype>(dense_mtx_A, rows_A, cols, "dense_mtx_A");
+      save_device_mtx_to_file<Dtype>(dense_mtx_B, rows_B, cols, "dense_mtx_B");
+        // LOG("Press Enter to continue.") ;
+        // std::cin.ignore();
+    };
+    if (num_gpu_blocks > CUDA_NUM_BLOCKS){
+    int num_loops = 0;
+    int num_entries = CUDA_NUM_BLOCKS*512;
+    int spot = 0;
+    while (num_gpu_blocks > CUDA_NUM_BLOCKS){
+        calculate_KM_error_and_update_kernel<Dtype><<<CUDA_NUM_BLOCKS, CUDA_NUM_THREADS>>>(spot, num_entries, rows_A, cols, dense_mtx_A, 
+                              rows_B, dense_mtx_B, selection, alpha, lambda, isBad);
+      num_gpu_blocks = num_gpu_blocks - CUDA_NUM_BLOCKS;
+      num_loops += 1;
+      spot = num_loops * num_entries;
+    };
+        // spot is the number of entries done so far
+        // total - (done) = left to go 
+        calculate_KM_error_and_update_kernel<Dtype><<<num_gpu_blocks, CUDA_NUM_THREADS>>>(spot, rows_A * cols - spot, rows_A, cols, dense_mtx_A, 
+                              rows_B, dense_mtx_B, selection, alpha, lambda, isBad);
+    }else{
+        calculate_KM_error_and_update_kernel<Dtype><<<num_gpu_blocks, CUDA_NUM_THREADS>>>((long long int)0, rows_A * cols, rows_A, cols, dense_mtx_A, 
+                              rows_B, dense_mtx_B, selection, alpha, lambda, isBad);
+    };
+
+    if(Debug) {
+      save_device_array_to_file<int>(selection, rows_B, "nearest_row");
+      LOG("Press Enter to continue.") ;
+      std::cin.ignore();
+    };    
+    if(Debug && 0)LOG("Here!");
+    CUDA_CHECK(cudaMemcpy(&isBad_host, isBad, sizeof(bool), cudaMemcpyDeviceToHost));
+    checkCudaErrors(cudaFree(isBad));
+    if(isBad_host){
+      ABORT_IF_NEQ(0, 1, "isBad");
+    };
+    if(Debug) LOG("calculate_KM_error_and_update call finished");
+}
+
+template void calculate_KM_error_and_update<float>(const int rows_A, const int cols, float* dense_mtx_A, 
+                                                  const int rows_B, const float* dense_mtx_B, int* selection, 
+                                                  float alpha, float lambda);
+
+
+__global__ void center_ratings_kernel(const float* user_means, const float* user_var, const int ratings_rows,
     const int* csr_format_ratingsMtx_userID_dev,
     const float* coo_format_ratingsMtx_rating_dev,
     float* coo_format_ratingsMtx_row_centered_rating_dev,
@@ -2970,7 +3174,6 @@ template void sparse_nearest_row(const int rows_A, const int cols, const float* 
       }
     }
   }
-
 
 void center_ratings(const float* user_means, const float* user_var, 
   const int ratings_rows, const int num_entries,
@@ -3514,7 +3717,7 @@ void get_cosine_similarity_host_kernel_debug(const long long int start,
         //save_host_array_to_file<float>(cosine_similarity_host + spot, (int)num_entries, "cosine_similarity_host");
       }
       //checkCudaErrors(cudaMemcpy(cosine_similarity_dev, cosine_similarity_host + spot,  num_entries *  sizeof(float), cudaMemcpyHostToDevice));
-      //CUDA_CHECK(cudaDeviceSynchronize());
+      //checkCudaErrors(cudaDeviceSynchronize());
 
       get_cosine_similarity_host_kernel<<<CUDA_NUM_BLOCKS, CUDA_NUM_THREADS>>>(spot, num_entries, ratings_rows, 
         csr_format_ratingsMtx_userID_dev,
@@ -3527,9 +3730,9 @@ void get_cosine_similarity_host_kernel_debug(const long long int start,
       //   coo_format_ratingsMtx_itemID_dev,
       //   coo_format_ratingsMtx_rating_dev,
       //   cosine_similarity_dev, isBad);
-      //CUDA_CHECK(cudaDeviceSynchronize());
+      //checkCudaErrors(cudaDeviceSynchronize());
       checkCudaErrors(cudaMemcpy(cosine_similarity_host + spot, cosine_similarity_dev,  num_entries *  sizeof(float), cudaMemcpyDeviceToHost));
-      //CUDA_CHECK(cudaDeviceSynchronize());
+      //checkCudaErrors(cudaDeviceSynchronize());
       if(Debug && 0) {
         //LOG("Here") ;
         //save_host_array_to_file<float>(cosine_similarity_host + spot, (int)num_entries, "cosine_similarity_host");
@@ -3889,26 +4092,34 @@ void gpu_shuffle_mtx_rows_or_cols(cublasHandle_t dn_handle, const long long int 
 } 
 
 __global__ void gpu_normalize_mtx_rows_or_cols_kernel(const long long int M, const long long int N,  
-                                  bool row_major_ordering, float* x, bool normalize_rows)
+                                  bool row_major_ordering, float* x, bool normalize_rows, bool* isBad)
 {
+  float temp;
   if(normalize_rows){
     CUDA_KERNEL_LOOP(i, M ) {
       float norm = (float)0.0;
       if(row_major_ordering){
-        for(int j = 0; j < N; j++){
-          norm += pow(x[i * N + j], (float)2.0);
+        for( long long int j = 0; j < N; j++){
+          norm += pow(x[(long long int)i * N + j], (float)2.0);
         }
         norm = sqrt(norm);
-        for(int j = 0; j < N; j++){
-          x[i * N + j] = x[i * N + j] / norm;
+        for(long long int j = 0; j < N; j++){
+          x[(long long int)i * N + j] = x[(long long int)i * N + j] / norm;
+          if (::isinf(x[(long long int)i * N + j]) || ::isnan(x[(long long int)i * N + j])){
+            isBad[0] = true;
+          };
         }
+
       }else{
-        for(int j = 0; j < N; j++){
-          norm += pow(x[i + M * j], (float)2.0);
+        for(long long int j = 0; j < N; j++){
+          norm += pow(x[(long long int)i + M * j], (float)2.0);
         }
         norm = sqrt(norm);
-        for(int j = 0; j < N; j++){
-          x[i + M * j] = x[i + M * j] / norm;
+        for(long long int j = 0; j < N; j++){
+          x[(long long int)i + M * j] = x[(long long int)i + M * j] / norm;
+          if (::isinf(x[(long long int)i + M * j]) || ::isnan(x[(long long int)i + M * j])){
+            isBad[0] = true;
+          };
         }
       };
     }
@@ -3916,20 +4127,26 @@ __global__ void gpu_normalize_mtx_rows_or_cols_kernel(const long long int M, con
     CUDA_KERNEL_LOOP(j, N ) {
       float norm = (float)0.0;
       if(row_major_ordering){
-        for(int i = 0; i < M; i++){
-          norm += pow(x[i * N + j], (float)2.0);
+        for(long long int i = 0; i < M; i++){
+          norm += pow(x[i * N + (long long int)j], (float)2.0);
         }
         norm = sqrt(norm);
-        for(int i = 0; i < M; i++){
-          x[i * N + j] = x[i * N + j] / norm;
+        for(long long int i = 0; i < M; i++){
+          x[i * N + (long long int)j] = x[i * N + (long long int)j] / norm;
+          if (::isinf(x[i * N + (long long int)j]) || ::isnan(x[i * N + (long long int)j])){
+            isBad[0] = true;
+          };
         }
       }else{
-        for(int i = 0; i < M; i++){
-          norm += pow(x[i + M * j], (float)2.0);
+        for(long long int i = 0; i < M; i++){
+          norm += pow(x[i + M * (long long int)j], (float)2.0);
         }
         norm = sqrt(norm);
-        for(int i = 0; i < M; i++){
-          x[i + M * j] = x[i + M * j] / norm;
+        for(long long int i = 0; i < M; i++){
+          x[i + M * (long long int)j] = x[i + M * (long long int)j] / norm;
+          if (::isinf(x[i + M * (long long int)j]) || ::isnan(x[i + M * (long long int)j])){
+            isBad[0] = true;
+          };
         }
       };
     }
@@ -3949,7 +4166,16 @@ void gpu_normalize_mtx_rows_or_cols(const long long int M, const long long int N
   if (num_gpu_blocks > CUDA_NUM_BLOCKS){
     ABORT_IF_NEQ(0, 1, "Max Blocks Exceeded");
   }; 
-  gpu_normalize_mtx_rows_or_cols_kernel<<<num_gpu_blocks, CUDA_NUM_THREADS>>>(M, N, row_major_ordering, x, normalize_rows);
+  bool isBad_host = false;
+  bool* isBad;
+  CUDA_CHECK(cudaMalloc((void**)&isBad, sizeof(bool)));
+  CUDA_CHECK(cudaMemcpy(isBad, &isBad_host, sizeof(bool), cudaMemcpyHostToDevice));
+  gpu_normalize_mtx_rows_or_cols_kernel<<<num_gpu_blocks, CUDA_NUM_THREADS>>>(M, N, row_major_ordering, x, normalize_rows, isBad);
+  CUDA_CHECK(cudaMemcpy(&isBad_host, isBad, sizeof(bool), cudaMemcpyDeviceToHost));
+  checkCudaErrors(cudaFree(isBad));
+  if(isBad_host){
+    ABORT_IF_NEQ(0, 1, "isBad");
+  };
 } 
 
 template<typename Dtype>
@@ -4162,6 +4388,23 @@ void preserve_first_m_rows<float>(const long long int old_lda, const long long i
 }
 
 
+int first_tiny_sv(const long long int n, float* SV, float epsilon) 
+{
+  float* SV_copy = NULL;
+  SV_copy = (float *)malloc(sizeof(float) * n); 
+  checkErrors(SV_copy);
+  CUDA_CHECK(cudaMemcpy(SV_copy, SV, n * sizeof(float), cudaMemcpyDeviceToHost));
+
+  for(long long int i = (long long int)0; i < n; i++){
+    if(SV_copy[i] < epsilon) {
+      free(SV_copy);
+      return i + 1;
+    }
+  }
+  free(SV_copy);
+  return n + 1;
+
+}
 
 
 
@@ -4230,6 +4473,8 @@ void gpu_orthogonal_decomp<float>(cublasHandle_t handle, cusolverDnHandle_t dn_s
   CUDA_CHECK(cudaMalloc ((void**)&devInfo, sizeof(int)));
   CUDA_CHECK(cudaMalloc ((void**)&d_rwork, sizeof(float)*(std::min(lda,sda) - 1)));
 
+
+
   // query working space of SVD
   cusolver_status = cusolverDnSgesvd_bufferSize(
               dn_solver_handle,
@@ -4241,13 +4486,17 @@ void gpu_orthogonal_decomp<float>(cublasHandle_t handle, cusolverDnHandle_t dn_s
 
   CUDA_CHECK(cudaMalloc((void**)&d_work , sizeof(float)*lwork));
 
+  
+
   // compute SVD
   signed char jobu  = 'N'; // min(m,n) columns of U
   signed char jobvt = 'A'; // min(m,n) rows of VT
   if(Debug && 0){
+    LOG("gpu_orthogonal_decomp requires " <<(std::min(lda,sda) + std::min(lda,sda) - 1 + lwork ) * sizeof(float) + sizeof(int)<< " bytes of memory");
     LOG("cusolverDnSgesvd ("<<dn_solver_handle<<","<<jobu<<","<<jobvt<<", lda = "<<lda<<", sda = "<<sda<<","<<A<<", lda = "<<lda<<","
           <<d_S<<","<<d_U<<", ldu = "<<lda<<","<<d_VT<<", ldvt = "<<sda/*std::min(m,n)*/<<","<<d_work<<", lwork = "<<lwork<<","<<d_rwork<<","<<
       devInfo<<")");
+
       //typeid(a).name()
     LOG("cusolverDnSgesvd ("<<typeid(dn_solver_handle).name()<<","<<typeid(jobu).name()<<","<<typeid(jobvt).name()<<", lda = "<<typeid(lda).name()<<", sda = "<<typeid(sda).name()<<","<<typeid(A).name()<<", lda = "<<typeid(lda).name()<<","
           <<typeid(d_S).name()<<","<<typeid(d_U).name()<<", ldu = "<<typeid(lda).name()<<","<<typeid(d_VT).name()<<", ldvt = "<<typeid(sda).name()/*std::min(m,n)*/<<","<<typeid(d_work).name()<<", lwork = "<<typeid(lwork).name()<<","<<typeid(d_rwork).name()<<","<<
@@ -4270,18 +4519,44 @@ void gpu_orthogonal_decomp<float>(cublasHandle_t handle, cusolverDnHandle_t dn_s
       lwork,
       d_rwork,
       devInfo);
+  CUDA_CHECK(cudaMemcpy(A, A_host_copy, m*n * sizeof(float), cudaMemcpyHostToDevice));
+  free(A_host_copy);
+  if(cusolver_status != CUSOLVER_STATUS_SUCCESS){
+    if(n > m){
+      //we have to solve the transpose problem
+      if(Debug) LOG("Solving the tranpose problem...");
+    }
+    LOG("buffersize = "<<lwork);
+    LOG("cusolverDnSgesvd ("<<dn_solver_handle<<","<<jobu<<","<<jobvt<<", lda = "<<lda<<", sda = "<<sda<<","<<A<<", lda = "<<lda<<","
+          <<d_S<<","<<d_U<<", ldu = "<<lda<<","<<d_VT<<", ldvt = "<<sda/*std::min(m,n)*/<<","<<d_work<<", lwork = "<<lwork<<","<<d_rwork<<","<<
+      devInfo<<")");
+      //typeid(a).name()
+    LOG("cusolverDnSgesvd ("<<typeid(dn_solver_handle).name()<<","<<typeid(jobu).name()<<","<<typeid(jobvt).name()<<", lda = "<<typeid(lda).name()<<", sda = "<<typeid(sda).name()<<","<<typeid(A).name()<<", lda = "<<typeid(lda).name()<<","
+          <<typeid(d_S).name()<<","<<typeid(d_U).name()<<", ldu = "<<typeid(lda).name()<<","<<typeid(d_VT).name()<<", ldvt = "<<typeid(sda).name()/*std::min(m,n)*/<<","<<typeid(d_work).name()<<", lwork = "<<typeid(lwork).name()<<","<<typeid(d_rwork).name()<<","<<
+      typeid(devInfo).name()<<")");  
+
+    save_device_mtx_to_file<float>(A, m, n, "A"); 
+    save_device_mtx_to_file<float>(d_U, lda, min_dim, "d_U");
+    save_device_mtx_to_file<float>(d_VT, sda, min_dim, "d_VT");
+    save_device_array_to_file<float>(d_S, min_dim, "singular_values"); 
+  }
+
   CUSOLVER_CHECK(cusolver_status);
-  CUDA_CHECK(cudaDeviceSynchronize());
+  checkCudaErrors(cudaDeviceSynchronize());
+
   if(Debug && 0){
-    CUDA_CHECK(cudaDeviceSynchronize());
+    checkCudaErrors(cudaDeviceSynchronize());
     save_device_mtx_to_file<float>(U, m, min_dim, "U");
     save_device_mtx_to_file<float>(V, n, min_dim, "V");
     save_device_array_to_file<float>(d_S, min_dim, "singular_values");
       // LOG("Press Enter to continue.") ;
       // std::cin.ignore();
   }
-  CUDA_CHECK(cudaMemcpy(A, A_host_copy, m*n * sizeof(float), cudaMemcpyHostToDevice));
-  free(A_host_copy);
+  int first_tiny_sv_ = first_tiny_sv(min_dim, d_S, (float)0.0001);
+  if(first_tiny_sv_ < min_dim){
+    LOG("WARNING WILL DIVIDE BY ~ZERO");
+    LOG("first_tiny_sv_ : " << first_tiny_sv_<< " < "<<min_dim);
+  }
 
   if(n > m){
       //the tranpose problem was solved
@@ -4291,7 +4566,7 @@ void gpu_orthogonal_decomp<float>(cublasHandle_t handle, cusolverDnHandle_t dn_s
     // A^T * U
     gpu_gemm<float>(handle, false, true, m, n, m, (float)1.0, U, A, (float)0.0, V);
     if(Debug && 0){
-      CUDA_CHECK(cudaDeviceSynchronize());
+      checkCudaErrors(cudaDeviceSynchronize());
       save_device_mtx_to_file<float>(U, m, min_dim, "U_2");
       save_device_mtx_to_file<float>(V, n, min_dim, "V_2");\
         // LOG("Press Enter to continue.") ;
@@ -4318,22 +4593,24 @@ void gpu_orthogonal_decomp<float>(cublasHandle_t handle, cusolverDnHandle_t dn_s
   }
 
 
-  float max_S = (float)0.0;
-  CUDA_CHECK(cudaMemcpy(&max_S, d_S, sizeof(float), cudaMemcpyDeviceToHost));
+
+
   
 
   gpu_get_num_latent_factors<float>(handle, min_dim, d_S, num_latent_factors, percent);
 
   if(Debug){
+    float max_S = (float)0.0;
+    CUDA_CHECK(cudaMemcpy(&max_S, d_S, sizeof(float), cudaMemcpyDeviceToHost));
     LOG("Largest Singular Value : "<<max_S);
-    //CUDA_CHECK(cudaDeviceSynchronize());
+    //checkCudaErrors(cudaDeviceSynchronize());
     //LOG("num_latent_factors : "<<num_latent_factors[0]) ;
     print_gpu_mtx_entries<float>(A, m, n);
     print_gpu_array_entries<float>(S, std::min(m,n));
     print_gpu_mtx_entries<float>(U, m, min_dim);
     print_gpu_mtx_entries<float>(V, n, min_dim);
     save_device_array_to_file<float>(d_S, min_dim, "singular_values");
-
+    save_device_array_to_file<float>(d_S, min_dim, "singular_values");
     // LOG("Press Enter to continue.") ;
     // std::cin.ignore();
   }    
@@ -4403,7 +4680,7 @@ void gpu_orthogonal_decomp<float>(cublasHandle_t handle, cusolverDnHandle_t dn_s
   }
 
   if(Debug) LOG("finished call to gpu_orthogonal_decomp") ;
-  cudaDeviceSynchronize();
+  checkCudaErrors(cudaDeviceSynchronize());
   gettimeofday(&program_end, NULL);
   program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
   //printf("program_time: %f\n", program_time);   
@@ -4441,7 +4718,7 @@ template <>
 void gpu_block_orthogonal_decomp_from_host<float>(cublasHandle_t handle, cusolverDnHandle_t dn_solver_handle,
                                                   const long long int m, const long long int n, 
                                                   long long int* num_latent_factors, const float percent,
-                                                  float* A, float* U, float* V, long long int block_rows, float* S)
+                                                  float* A, float* U, float* V, long long int block_rows, bool S_with_U, float* S)
 {
   /*
     A is m by n stored in col-maj ordering
@@ -4455,14 +4732,6 @@ void gpu_block_orthogonal_decomp_from_host<float>(cublasHandle_t handle, cusolve
               m by n          m by n           n by n
 
   */
-  float* S_temp = NULL;
-  if(S == NULL){
-    S_temp = (float *)malloc(m *  sizeof(float)); 
-    checkErrors(S_temp);
-    S = S_temp;
-    cpu_set_all(S, m, (float)0.0);
-  }
-
   bool Debug = false;
   LOG("gpu_block_orthogonal_decomp_from_host called...");
   LOG("We assume A exists on host in row major order");
@@ -4474,6 +4743,19 @@ void gpu_block_orthogonal_decomp_from_host<float>(cublasHandle_t handle, cusolve
   double program_time;
   gettimeofday(&program_start, NULL);
 
+  float* S_temp = NULL;
+  if(S == NULL){
+    if(Debug){ 
+      LOG("S == NULL");
+    }
+    S_temp = (float *)malloc(m *  sizeof(float)); 
+    checkErrors(S_temp);
+    S = S_temp;
+    cpu_set_all(S, m, (float)0.0);
+  }
+
+
+
   bool divides_evenly = true;
 
   int num_blocks = (int)(m / block_rows);
@@ -4484,12 +4766,13 @@ void gpu_block_orthogonal_decomp_from_host<float>(cublasHandle_t handle, cusolve
   }
 
   const long long int min_dim = std::min(block_rows,n);
-  if(1){ 
+  if(Debug){ 
     LOG("min_dim : "<< min_dim);
     LOG("rows : "<< m);
     LOG("cols : "<< n);
     LOG("block_rows : "<< block_rows);
     LOG("num_blocks : "<< num_blocks);
+    LOG("divides_evenly : "<< divides_evenly);
   }
 
 
@@ -4509,124 +4792,200 @@ void gpu_block_orthogonal_decomp_from_host<float>(cublasHandle_t handle, cusolve
   // #endif
   // #pragma omp parallel shared(nthreads)
   // {
-    float* A_dev;
-    float* U_dev; 
-    float* V_dev;
-    float* S_dev;
-    checkCudaErrors(cudaMalloc((void**)&A_dev,  block_rows * n * sizeof(float)));
-    checkCudaErrors(cudaMalloc((void**)&U_dev,  block_rows * min_dim * sizeof(float)));
-    checkCudaErrors(cudaMalloc((void**)&V_dev,  n * min_dim * sizeof(float)));
-    checkCudaErrors(cudaMalloc((void**)&S_dev,  min_dim * sizeof(float)));
+    float* A_dev_;
+    float* U_dev_; 
+    float* V_dev_;
+    float* S_dev_;
+    checkCudaErrors(cudaMalloc((void**)&A_dev_,  block_rows * n * sizeof(float)));
+    checkCudaErrors(cudaMalloc((void**)&U_dev_,  block_rows * min_dim * sizeof(float)));
+    checkCudaErrors(cudaMalloc((void**)&V_dev_,  n * min_dim * sizeof(float)));
+    checkCudaErrors(cudaMalloc((void**)&S_dev_,  min_dim * sizeof(float)));
+
+    LOG("gpu_block_orthogonal_decomp_from_host requires " <<(block_rows * n + block_rows * min_dim + n * min_dim + min_dim)  * sizeof(float)<< " bytes of memory");    
 
     // int th_id = 0;
     // #ifdef _OPENMP
     //   th_id = omp_get_thread_num();
     // #endif
     // for(long long int block = (long long int)th_id; block < (long long int)num_blocks; block += (long long int)nthreads){
-    for(int block = 0; block < num_blocks; block ++){
-      if(Debug) LOG(std::endl<<"block : "<<block);
+    for(long long int block = (long long int)0; block < (long long int)num_blocks; block++){
+      
       long long int start = block * (block_rows * m + min_dim);
-      if(block < num_blocks - 1 || divides_evenly){
-        checkCudaErrors(cudaMemcpy(A_dev,  A + block * block_rows * n,  block_rows * n * sizeof(float), cudaMemcpyHostToDevice));
+
+      if(block < (long long int)(num_blocks - 1) || divides_evenly || num_blocks == 1){
+        checkCudaErrors(cudaMemcpy(A_dev_,  A + block * block_rows * n,  block_rows * n * sizeof(float), cudaMemcpyHostToDevice));
+        if(Debug) {checkCudaErrors(cudaDeviceSynchronize()); LOG("Here");}
         gpu_orthogonal_decomp<float>(handle, dn_solver_handle,
-          n, block_rows, num_latent_factors, percent, 
-          A_dev, V_dev, U_dev, 0, S_dev); 
-        //gpu_swap_ordering(n, min_dim, V_dev, false);
-        //gpu_swap_ordering(block_rows, min_dim, U_dev, false);
+                                    n, block_rows, num_latent_factors, percent, 
+                                    A_dev_, V_dev_, U_dev_, !S_with_U, S_dev_); 
 
-        // gpu_scale(handle, n * min_dim, (float)1.0 / (float)num_blocks, V_dev);
-        // gpu_scale(handle, block_rows * min_dim, (float)num_blocks, U_dev);
-        // gpu_scale(handle, min_dim, pow((float)num_blocks, (float)2.0), S_dev);
+        //gpu_swap_ordering(n, min_dim, V_dev_, false);
+        //gpu_swap_ordering(block_rows, min_dim, U_dev_, false);
 
-        checkCudaErrors(cudaMemcpy(V + block * n * min_dim,  V_dev,  n * min_dim * sizeof(float), cudaMemcpyDeviceToHost));
-        //checkCudaErrors(cudaMemcpy(U + block * block_rows * min_dim,  U_dev,  block_rows * min_dim * sizeof(float), cudaMemcpyDeviceToHost));
-        copy_device_mtx_into_host_submtx<float>(block_rows, min_dim, U_dev, U + start, m);
-        checkCudaErrors(cudaMemcpy(S + block * min_dim,  S_dev,  min_dim * sizeof(float), cudaMemcpyDeviceToHost));
+        // gpu_scale(handle, n * min_dim, (float)1.0 / (float)num_blocks, V_dev_);
+        // gpu_scale(handle, block_rows * min_dim, (float)num_blocks, U_dev_);
+        // gpu_scale(handle, min_dim, pow((float)num_blocks, (float)2.0), S_dev_);
+        if(Debug){ 
+          LOG("block : "<<block);
+          LOG("start : "<<start);
+          LOG("m : "<<m);
+          LOG("n : "<<n);
+          LOG("min_dim : "<< min_dim);
+          LOG("num_latent_factors : "<<num_latent_factors[0]);
+          LOG("percent : "<<percent);
+          LOG("block_rows : "<< block_rows);
+          LOG("S_with_U : "<< S_with_U);
+          LOG("num_blocks : "<< num_blocks);
+          LOG("divides_evenly : "<< divides_evenly);
+          print_host_array(S, m, "S_before", strPreamble(blank));
+          //print_host_mtx<float>(A, m, n, "A", 1, strPreamble(blank));
+          //print_host_mtx<float>(V, n, m, "V", 0, strPreamble(blank)); 
+          //print_host_mtx<float>(U, m, m, "U", 0, strPreamble(blank));  
+          save_host_mtx_to_file<float>(A, m, n, "A_before", 1, strPreamble(blank));
+          save_host_mtx_to_file<float>(V, n, m, "V_before", 0, strPreamble(blank)); 
+          save_host_mtx_to_file<float>(U, m, m, "U_before", 0, strPreamble(blank)); 
+          std::string tit = "S_dev_before";
+          print_gpu_array_entries(S_dev_, min_dim, strPreamble(tit));
+          //print_gpu_mtx_entries<float>(A_dev_, n, block_rows, "AT_dev", 0, strPreamble(blank));
+          //print_gpu_mtx_entries<float>(V_dev_, n, m, "V_dev", 0, strPreamble(blank)); 
+          //print_gpu_mtx_entries<float>(U_dev_, m, m, "U_dev", 0, strPreamble(blank));  
+          save_device_mtx_to_file<float>(A_dev_, n, block_rows, "AT_dev_before", 0, strPreamble(blank));
+          save_device_mtx_to_file<float>(V_dev_, n, min_dim, "V_dev_before", 0, strPreamble(blank)); 
+          save_device_mtx_to_file<float>(U_dev_, block_rows, min_dim, "U_dev_before", 0, strPreamble(blank));  
+          checkCudaErrors(cudaDeviceSynchronize());
+          // LOG("Press Enter to continue.") ;
+          // std::cin.ignore();
+        }
+        checkCudaErrors(cudaMemcpy(S + block * min_dim,  S_dev_,  min_dim * sizeof(float), cudaMemcpyDeviceToHost));
+        checkCudaErrors(cudaMemcpy(V + block * n * min_dim,  V_dev_,  n * min_dim * sizeof(float), cudaMemcpyDeviceToHost));
+        //checkCudaErrors(cudaMemcpy(U + block * block_rows * min_dim,  U_dev_,  block_rows * min_dim * sizeof(float), cudaMemcpyDeviceToHost));
+        copy_device_mtx_into_host_submtx<float>((int)block_rows, (int)min_dim, U_dev_, U + start, (int)m);
+        if(Debug){ 
+          print_host_array(S, m, "S_after", strPreamble(blank));
+          //print_host_mtx<float>(A, m, n, "A", 1, strPreamble(blank));
+          //print_host_mtx<float>(V, n, m, "V", 0, strPreamble(blank)); 
+          //print_host_mtx<float>(U, m, m, "U", 0, strPreamble(blank));  
+          save_host_mtx_to_file<float>(A, m, n, "A_after", 1, strPreamble(blank));
+          save_host_mtx_to_file<float>(V, n, m, "V_after", 0, strPreamble(blank)); 
+          save_host_mtx_to_file<float>(U, m, m, "U_after", 0, strPreamble(blank)); 
+          LOG("S_dev_after : ");
+          print_gpu_array_entries(S_dev_, min_dim, strPreamble(blank));
+          //print_gpu_mtx_entries<float>(A_dev_, n, block_rows, "AT_dev", 0, strPreamble(blank));
+          //print_gpu_mtx_entries<float>(V_dev_, n, m, "V_dev", 0, strPreamble(blank)); 
+          //print_gpu_mtx_entries<float>(U_dev_, m, m, "U_dev", 0, strPreamble(blank));  
+          save_device_mtx_to_file<float>(A_dev_, n, block_rows, "AT_dev_after", 0, strPreamble(blank));
+          save_device_mtx_to_file<float>(V_dev_, n, min_dim, "V_dev_after", 0, strPreamble(blank)); 
+          save_device_mtx_to_file<float>(U_dev_, block_rows, min_dim, "U_dev_after", 0, strPreamble(blank));  
+          checkCudaErrors(cudaDeviceSynchronize());
+          LOG("Press Enter to continue.") ;
+          std::cin.ignore();
+        }
       }else{
         if(Debug) LOG("Doing Left over Block");
         const long long int min_dim_left_over = std::min(left_over,n);
         if (min_dim_left_over <(long long int)2) LOG("WARNING SMALL DIM LEFT OVER");
-        checkCudaErrors(cudaMemcpy(A_dev,  A + block * block_rows * n,  left_over * n * sizeof(float), cudaMemcpyHostToDevice));
+        checkCudaErrors(cudaMemcpy(A_dev_,  A + block * block_rows * n,  left_over * n * sizeof(float), cudaMemcpyHostToDevice));
         gpu_orthogonal_decomp<float>(handle, dn_solver_handle,
           n, left_over, num_latent_factors, percent, 
-          A_dev, V_dev, U_dev, 0, S_dev); 
-        //gpu_swap_ordering(n, min_dim_left_over, V_dev, false);
-        //gpu_swap_ordering(left_over, min_dim_left_over, U_dev, false);
+          A_dev_, V_dev_, U_dev_, !S_with_U, S_dev_); 
+        //gpu_swap_ordering(n, min_dim_left_over, V_dev_, false);
+        //gpu_swap_ordering(left_over, min_dim_left_over, U_dev_, false);
 
-        // gpu_scale(handle, n * min_dim_left_over, (float)1.0 / (float)num_blocks, V_dev);
-        // gpu_scale(handle, block_rows * min_dim_left_over, (float)num_blocks, U_dev);
-        // gpu_scale(handle, min_dim_left_over, pow((float)num_blocks, (float)2.0), S_dev);
+        // gpu_scale(handle, n * min_dim_left_over, (float)1.0 / (float)num_blocks, V_dev_);
+        // gpu_scale(handle, block_rows * min_dim_left_over, (float)num_blocks, U_dev_);
+        // gpu_scale(handle, min_dim_left_over, pow((float)num_blocks, (float)2.0), S_dev_);
 
-        checkCudaErrors(cudaMemcpy(V + block * n * min_dim,  V_dev,  n * min_dim_left_over * sizeof(float), cudaMemcpyDeviceToHost));
-        //checkCudaErrors(cudaMemcpy(U + block * block_rows * min_dim,  U_dev,  left_over * min_dim_left_over * sizeof(float), cudaMemcpyDeviceToHost));
-        copy_device_mtx_into_host_submtx<float>(block_rows, min_dim, U_dev, U + start, m);
-        checkCudaErrors(cudaMemcpy(S + block * min_dim,  S_dev,  left_over * sizeof(float), cudaMemcpyDeviceToHost));
+        checkCudaErrors(cudaMemcpy(V + block * n * min_dim,  V_dev_,  n * min_dim_left_over * sizeof(float), cudaMemcpyDeviceToHost));
+        //checkCudaErrors(cudaMemcpy(U + block * block_rows * min_dim,  U_dev_,  left_over * min_dim_left_over * sizeof(float), cudaMemcpyDeviceToHost));
+        copy_device_mtx_into_host_submtx<float>((int)block_rows, (int)min_dim, U_dev_, U + start, (int)m);
+        checkCudaErrors(cudaMemcpy(S + block * min_dim,  S_dev_,  left_over * sizeof(float), cudaMemcpyDeviceToHost));
       }
-      if(Debug && 0){
+      if(Debug){
+        checkCudaErrors(cudaDeviceSynchronize()); LOG("Here");
         //omp_set_lock(&printlock);
-        LOG(std::endl<<"block : "<<block);
+        //LOG(std::endl<<"block : "<<block);
         //print_host_mtx<float>(A, m, n, "A", 1, strPreamble(blank));
-        print_host_array(S, m, "S", strPreamble(blank));
+        print_host_array(S, (int)m, "S", strPreamble(blank));
         //print_host_mtx<float>(U, m, m, "U", 0, strPreamble(blank));
         //print_host_mtx<float>(V, n, m, "V", 0, strPreamble(blank));
-        //print_gpu_mtx_entries<float>(U_dev, block_rows, min_dim, "U", 0, strPreamble(blank));
-        //print_gpu_mtx_entries<float>(V_dev, n, min_dim, "V", 0, strPreamble(blank));
+        //print_gpu_mtx_entries<float>(U_dev_, block_rows, min_dim, "U", 0, strPreamble(blank));
+        //print_gpu_mtx_entries<float>(V_dev_, n, min_dim, "V", 0, strPreamble(blank));
         //omp_unset_lock(&printlock);
       } 
     }
-    checkCudaErrors(cudaFree(A_dev));
-    checkCudaErrors(cudaFree(U_dev)); 
-    checkCudaErrors(cudaFree(V_dev));
-    checkCudaErrors(cudaFree(S_dev));
-  //}
 
+    if(Debug) {checkCudaErrors(cudaDeviceSynchronize()); LOG("Here");}
+    checkCudaErrors(cudaFree(A_dev_));
+    if(Debug) {checkCudaErrors(cudaDeviceSynchronize()); LOG("Here");}
+    checkCudaErrors(cudaFree(U_dev_)); 
+    if(Debug) {checkCudaErrors(cudaDeviceSynchronize()); LOG("Here");}
+    checkCudaErrors(cudaFree(V_dev_));
+    if(Debug) {checkCudaErrors(cudaDeviceSynchronize()); LOG("Here");}
+    checkCudaErrors(cudaFree(S_dev_));
+  //}
+    if(Debug) {checkCudaErrors(cudaDeviceSynchronize()); LOG("Here");}
 
 
   int* order  = NULL;
   order = (int *)malloc(m *  sizeof(int)); 
   checkErrors(order);
+  if(Debug) {
+    LOG("Here");
+    checkCudaErrors(cudaDeviceSynchronize()); LOG("Here");
+  }
   //gpu_set_as_index<int>(std::min(m,n), order);
   cpu_set_as_index<int>(order, m, 1);
-  if(Debug && 0){
+  if(Debug){
     print_host_array(order, m, "order", strPreamble(blank));
     print_host_array(S, m, "S", strPreamble(blank));
   }
-  //print_host_array<float>(S, m, "S", strPreamble(blank));
   cpu_scal<float>(m, (float)(-1.0), S);
-  //print_host_array<float>(S, m, "S", strPreamble(blank));
+  if(Debug) {
+    print_host_array<float>(S, m, "S", strPreamble(blank));
+    checkCudaErrors(cudaDeviceSynchronize()); LOG("Here");
+  }
   thrust::sort_by_key(thrust::host, S, S + m, order);
-  //print_host_array<float>(S, m, "S", strPreamble(blank));
+  if(Debug) {
+    print_host_array<float>(S, m, "S", strPreamble(blank));
+    checkCudaErrors(cudaDeviceSynchronize()); LOG("Here");
+  }
   cpu_scal<float>(m, (float)(-1.0), S);
-  //print_host_array<float>(S, m, "S", strPreamble(blank));
+  if(Debug) {
+    print_host_array<float>(S, m, "S", strPreamble(blank));
+    checkCudaErrors(cudaDeviceSynchronize()); LOG("Here");
+  }
   cpu_get_num_latent_factors<float>(m, S, num_latent_factors, percent);
   LOG("num_latent_factors : "<<num_latent_factors[0]);
 
   //print_host_array<float>(S, m, "S", strPreamble(blank));
   if(Debug && 0){
-
     print_host_array(order, m, ("order"), strPreamble(blank));
     print_host_array<float>(S, m, "S", strPreamble(blank));
-    print_host_mtx<float>(U, m, m, "U", 0, strPreamble(blank));
-    print_host_mtx<float>(V, n, m, "V", 0, strPreamble(blank));
+    //print_host_mtx<float>(U, m, m, "U", 0, strPreamble(blank));
+    //print_host_mtx<float>(V, n, m, "V", 0, strPreamble(blank));
+    checkCudaErrors(cudaDeviceSynchronize()); LOG("Here");
   }
   //gpu_permute<float>(V, indicies, n, std::min(m,n), 0); 
   cpu_permute(V, order, n, m, false);
   cpu_permute(U, order, m, m, false);
 
-  if(Debug && 0){
-    print_host_mtx<float>(U, m, m, "U", 0, strPreamble(blank));
-    print_host_mtx<float>(V, n, m, "V", 0, strPreamble(blank));
+  if(Debug){
+    //print_host_mtx<float>(U, m, m, "U", 0, strPreamble(blank));
+    //print_host_mtx<float>(V, n, m, "V", 0, strPreamble(blank));
+    save_host_mtx_to_file<float>(U, m, m, "U", 0, strPreamble(blank));
+    save_host_mtx_to_file<float>(V, n, m, "V", 0, strPreamble(blank));
+    checkCudaErrors(cudaDeviceSynchronize()); LOG("Here");
   }
   cpu_swap_ordering(m, m, U, 0);
   //cpu_swap_ordering(n, m, V, 0);
 
   free(order);
 
-  if(0){
-    CUDA_CHECK(cudaDeviceSynchronize());
+  if(Debug){
+    checkCudaErrors(cudaDeviceSynchronize());
     LOG("num_latent_factors : "<<num_latent_factors[0]) ;
-    save_host_mtx_to_file<float>(U, m, m, "U", 0);
-    save_host_mtx_to_file<float>(V, n, m, "V", 0);
+    save_host_mtx_to_file<float>(U, m, m, "U", 1, strPreamble(blank));
+    save_host_mtx_to_file<float>(V, n, m, "V", 0, strPreamble(blank));
     save_host_array_to_file<float>(S, m, "S");
     //save_device_mtx_to_file<float>(U, m, m, "U_3");
     //save_device_mtx_to_file<float>(V, n, m, "V_3");
@@ -4634,6 +4993,7 @@ void gpu_block_orthogonal_decomp_from_host<float>(cublasHandle_t handle, cusolve
 
     // LOG("Press Enter to continue.") ;
     // std::cin.ignore();
+    checkCudaErrors(cudaDeviceSynchronize()); LOG("Here");
   } 
   //save_host_array_to_file<float>(S, m, "S");
   if(S == NULL){
@@ -4641,7 +5001,7 @@ void gpu_block_orthogonal_decomp_from_host<float>(cublasHandle_t handle, cusolve
   }
 
   if(Debug) LOG("finished call to gpu_block_orthogonal_decomp_from_host") ;
-  cudaDeviceSynchronize();
+  checkCudaErrors(cudaDeviceSynchronize());
   gettimeofday(&program_end, NULL);
   program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
   //printf("program_time: %f\n", program_time);   
@@ -4650,8 +5010,10 @@ void gpu_block_orthogonal_decomp_from_host<float>(cublasHandle_t handle, cusolve
 
 
 void gpu_block_orthogonal_decomp_from_host_test(cublasHandle_t handle, cusolverDnHandle_t dn_solver_handle) {
-  const long long int m = 9;
-  const long long int n = 16;
+  const long long int m = 18;
+  const long long int n = 20;
+  const long long int block_rows = m;
+  bool S_with_U = false;
   const long long int min_dim = std::min(m,n);
   const long long int max_dim = std::max(m,n);
   std::string blank = "";
@@ -4681,10 +5043,10 @@ void gpu_block_orthogonal_decomp_from_host_test(cublasHandle_t handle, cusolverD
   const float percent = (float)0.95;
 
   gpu_block_orthogonal_decomp_from_host<float>(handle, dn_solver_handle, m, n, &num_latent_factors, percent,
-  A, U, V, 3, S);
+  A, U, V, block_rows, S_with_U, S);
 
   //cpu_swap_ordering(m, m, U, 0);
-  //cpu_swap_ordering(n, m, V, 0);
+  cpu_swap_ordering(n, m, V, 0);
 
   if(1){
     print_host_mtx<float>(U, m, m, "U", 1, strPreamble(blank));
@@ -4764,120 +5126,120 @@ void gpu_block_orthogonal_decomp_from_host_test(cublasHandle_t handle, cusolverD
 
 // solve A*x = b by LU with partial pivoting
 template <>
-        int linearSolverLU<float>(
-          cusolverDnHandle_t handle,
+int linearSolverLU<float>(
+    cusolverDnHandle_t handle,
     int n, //columns of A
     const float *Acopy,
     int lda, //rows of A
     const float *b,
     float *x)
-        {
-    // solves  A*x = b  where b = ones(m,1)
-    // A is m by n
-    // x is n by 1
-          int bufferSize = 0;
-          int *info = NULL;
-          float *buffer = NULL;
-          float *A = NULL;
-    int *ipiv = NULL; // pivoting sequence
-    int h_info = 0;
-    float start, stop;
-    float time_solve;
+{
+  // solves  A*x = b  where b = ones(m,1)
+  // A is m by n
+  // x is n by 1
+        int bufferSize = 0;
+        int *info = NULL;
+        float *buffer = NULL;
+        float *A = NULL;
+  int *ipiv = NULL; // pivoting sequence
+  int h_info = 0;
+  float start, stop;
+  float time_solve;
 
-    CUSOLVER_CHECK(cusolverDnSgetrf_bufferSize(handle, n, n, (float*)Acopy, lda, &bufferSize));
+  CUSOLVER_CHECK(cusolverDnSgetrf_bufferSize(handle, n, n, (float*)Acopy, lda, &bufferSize));
 
-    checkCudaErrors(cudaMalloc(&info, sizeof(int)));
-    checkCudaErrors(cudaMalloc(&buffer, sizeof(float)*bufferSize));
-    checkCudaErrors(cudaMalloc(&A, sizeof(float)*lda*n));
-    checkCudaErrors(cudaMalloc(&ipiv, sizeof(int)*n));
+  checkCudaErrors(cudaMalloc(&info, sizeof(int)));
+  checkCudaErrors(cudaMalloc(&buffer, sizeof(float)*bufferSize));
+  checkCudaErrors(cudaMalloc(&A, sizeof(float)*lda*n));
+  checkCudaErrors(cudaMalloc(&ipiv, sizeof(int)*n));
 
 
-    // prepare a copy of A because getrf will overwrite A with L
-    checkCudaErrors(cudaMemcpy(A, Acopy, sizeof(float)*lda*n, cudaMemcpyDeviceToDevice));
-    checkCudaErrors(cudaMemset(info, 0, sizeof(int)));
+  // prepare a copy of A because getrf will overwrite A with L
+  checkCudaErrors(cudaMemcpy(A, Acopy, sizeof(float)*lda*n, cudaMemcpyDeviceToDevice));
+  checkCudaErrors(cudaMemset(info, 0, sizeof(int)));
 
-    // start = second();
-    // start = second();
+  // start = second();
+  // start = second();
 
-    CUSOLVER_CHECK(cusolverDnSgetrf(handle, n, n, A, lda, buffer, ipiv, info));
-    checkCudaErrors(cudaMemcpy(&h_info, info, sizeof(int), cudaMemcpyDeviceToHost));
+  CUSOLVER_CHECK(cusolverDnSgetrf(handle, n, n, A, lda, buffer, ipiv, info));
+  checkCudaErrors(cudaMemcpy(&h_info, info, sizeof(int), cudaMemcpyDeviceToHost));
 
-    if ( 0 != h_info ){
-      fprintf(stderr, "Error: LU factorization failed\n");
-    }
-
-    checkCudaErrors(cudaMemcpy(x, b, sizeof(float)*n, cudaMemcpyDeviceToDevice));
-    CUSOLVER_CHECK(cusolverDnSgetrs(handle, CUBLAS_OP_N, n, 1, A, lda, ipiv, x, n, info));
-    checkCudaErrors(cudaDeviceSynchronize());
-
-    // stop = second();
-    // time_solve = stop - start;
-    // fprintf (stdout, "timing: LU = %10.6f sec\n", time_solve);
-
-    if (info  ) { checkCudaErrors(cudaFree(info  )); }
-    if (buffer) { checkCudaErrors(cudaFree(buffer)); }
-    if (A     ) { checkCudaErrors(cudaFree(A)); }
-    if (ipiv  ) { checkCudaErrors(cudaFree(ipiv)); }
-
-    return 0;
+  if ( 0 != h_info ){
+    fprintf(stderr, "Error: LU factorization failed\n");
   }
+
+  checkCudaErrors(cudaMemcpy(x, b, sizeof(float)*n, cudaMemcpyDeviceToDevice));
+  CUSOLVER_CHECK(cusolverDnSgetrs(handle, CUBLAS_OP_N, n, 1, A, lda, ipiv, x, n, info));
+  checkCudaErrors(cudaDeviceSynchronize());
+
+  // stop = second();
+  // time_solve = stop - start;
+  // fprintf (stdout, "timing: LU = %10.6f sec\n", time_solve);
+
+  if (info  ) { checkCudaErrors(cudaFree(info  )); }
+  if (buffer) { checkCudaErrors(cudaFree(buffer)); }
+  if (A     ) { checkCudaErrors(cudaFree(A)); }
+  if (ipiv  ) { checkCudaErrors(cudaFree(ipiv)); }
+
+  return 0;
+}
 
 // solve A*x = b by LU with partial pivoting
 template <>
-  int linearSolverLU<double>(
+int linearSolverLU<double>(
     cusolverDnHandle_t handle,
     int n, //columns of A
     const double *Acopy,
     int lda, //rows of A
     const double *b,
     double *x)
-  {
-    int bufferSize = 0;
-    int *info = NULL;
-    double *buffer = NULL;
-    double *A = NULL;
-    int *ipiv = NULL; // pivoting sequence
-    int h_info = 0;
-    double start, stop;
-    double time_solve;
+{
+  int bufferSize = 0;
+  int *info = NULL;
+  double *buffer = NULL;
+  double *A = NULL;
+  int *ipiv = NULL; // pivoting sequence
+  int h_info = 0;
+  double start, stop;
+  double time_solve;
 
-    CUSOLVER_CHECK(cusolverDnDgetrf_bufferSize(handle, n, n, (double*)Acopy, lda, &bufferSize));
+  CUSOLVER_CHECK(cusolverDnDgetrf_bufferSize(handle, n, n, (double*)Acopy, lda, &bufferSize));
 
-    checkCudaErrors(cudaMalloc(&info, sizeof(int)));
-    checkCudaErrors(cudaMalloc(&buffer, sizeof(double)*bufferSize));
-    checkCudaErrors(cudaMalloc(&A, sizeof(double)*lda*n));
-    checkCudaErrors(cudaMalloc(&ipiv, sizeof(int)*n));
+  checkCudaErrors(cudaMalloc(&info, sizeof(int)));
+  checkCudaErrors(cudaMalloc(&buffer, sizeof(double)*bufferSize));
+  checkCudaErrors(cudaMalloc(&A, sizeof(double)*lda*n));
+  checkCudaErrors(cudaMalloc(&ipiv, sizeof(int)*n));
 
 
-    // prepare a copy of A because getrf will overwrite A with L
-    checkCudaErrors(cudaMemcpy(A, Acopy, sizeof(double)*lda*n, cudaMemcpyDeviceToDevice));
-    checkCudaErrors(cudaMemset(info, 0, sizeof(int)));
+  // prepare a copy of A because getrf will overwrite A with L
+  checkCudaErrors(cudaMemcpy(A, Acopy, sizeof(double)*lda*n, cudaMemcpyDeviceToDevice));
+  checkCudaErrors(cudaMemset(info, 0, sizeof(int)));
 
-    // start = second();
-    // start = second();
+  // start = second();
+  // start = second();
 
-    CUSOLVER_CHECK(cusolverDnDgetrf(handle, n, n, A, lda, buffer, ipiv, info));
-    checkCudaErrors(cudaMemcpy(&h_info, info, sizeof(int), cudaMemcpyDeviceToHost));
+  CUSOLVER_CHECK(cusolverDnDgetrf(handle, n, n, A, lda, buffer, ipiv, info));
+  checkCudaErrors(cudaMemcpy(&h_info, info, sizeof(int), cudaMemcpyDeviceToHost));
 
-    if ( 0 != h_info ){
-      fprintf(stderr, "Error: LU factorization failed\n");
-    }
-
-    checkCudaErrors(cudaMemcpy(x, b, sizeof(double)*n, cudaMemcpyDeviceToDevice));
-    CUSOLVER_CHECK(cusolverDnDgetrs(handle, CUBLAS_OP_N, n, 1, A, lda, ipiv, x, n, info));
-    checkCudaErrors(cudaDeviceSynchronize());
-    // stop = second();
-
-    // time_solve = stop - start;
-    // fprintf (stdout, "timing: LU = %10.6f sec\n", time_solve);
-
-    if (info  ) { checkCudaErrors(cudaFree(info  )); }
-    if (buffer) { checkCudaErrors(cudaFree(buffer)); }
-    if (A     ) { checkCudaErrors(cudaFree(A)); }
-    if (ipiv  ) { checkCudaErrors(cudaFree(ipiv)); }
-
-    return 0;
+  if ( 0 != h_info ){
+    fprintf(stderr, "Error: LU factorization failed\n");
   }
+
+  checkCudaErrors(cudaMemcpy(x, b, sizeof(double)*n, cudaMemcpyDeviceToDevice));
+  CUSOLVER_CHECK(cusolverDnDgetrs(handle, CUBLAS_OP_N, n, 1, A, lda, ipiv, x, n, info));
+  checkCudaErrors(cudaDeviceSynchronize());
+  // stop = second();
+
+  // time_solve = stop - start;
+  // fprintf (stdout, "timing: LU = %10.6f sec\n", time_solve);
+
+  if (info  ) { checkCudaErrors(cudaFree(info  )); }
+  if (buffer) { checkCudaErrors(cudaFree(buffer)); }
+  if (A     ) { checkCudaErrors(cudaFree(A)); }
+  if (ipiv  ) { checkCudaErrors(cudaFree(ipiv)); }
+
+  return 0;
+}
 
 
 
@@ -5233,26 +5595,26 @@ void sparse_error(const int rows, const int cols, const float* dense_mtx_A,
   } 
 
 template <>
-  void gpu_spXdense_MMM_check<float>(const cublasHandle_t dn_handle, const bool TransA, const bool TransB, 
-    const int m, const int n, const int k, const int first_ind,
-    const float alpha,
-    const float *csrValA, const int *csrRowPtrA, const int *csrColIndA,
-    const float *B, const float beta, float *C)
-  {
+void gpu_spXdense_MMM_check<float>(const cublasHandle_t dn_handle, const bool TransA, const bool TransB, 
+  const int m, const int n, const int k, const int first_ind,
+  const float alpha,
+  const float *csrValA, const int *csrRowPtrA, const int *csrColIndA,
+  const float *B, const float beta, float *C)
+{
 
-    int * csrRowPtrA_temp;
-    CUDA_CHECK(cudaMalloc((void**)&csrRowPtrA_temp, (m+1) * sizeof(float)));
-    checkCudaErrors(cudaMemcpy(csrRowPtrA_temp, csrRowPtrA, (m+1)  *  sizeof(float), cudaMemcpyDeviceToDevice));
-    gpu_add_scalar<int>(m + 1, (int)(-1) * (int)first_ind, csrRowPtrA_temp);
+  int * csrRowPtrA_temp;
+  CUDA_CHECK(cudaMalloc((void**)&csrRowPtrA_temp, (m+1) * sizeof(float)));
+  checkCudaErrors(cudaMemcpy(csrRowPtrA_temp, csrRowPtrA, (m+1)  *  sizeof(float), cudaMemcpyDeviceToDevice));
+  gpu_add_scalar<int>(m + 1, (int)(-1) * (int)first_ind, csrRowPtrA_temp);
 
-    float* full_A;
-    CUDA_CHECK(cudaMalloc((void**)&full_A, (long long int)m * (long long int)k * sizeof(float)));
-    gpu_fill_training_mtx((long long int)m, (long long int)k, false, csrRowPtrA_temp, csrColIndA, csrValA, full_A);
+  float* full_A;
+  CUDA_CHECK(cudaMalloc((void**)&full_A, (long long int)m * (long long int)k * sizeof(float)));
+  gpu_fill_training_mtx((long long int)m, (long long int)k, false, csrRowPtrA_temp, csrColIndA, csrValA, full_A);
 
-    cublasOperation_t cuTransA =
-    (TransA == false) ? CUBLAS_OP_N : CUBLAS_OP_T;
-    cublasOperation_t cuTransB =
-    (TransB == false) ? CUBLAS_OP_N : CUBLAS_OP_T;
+  cublasOperation_t cuTransA =
+  (TransA == false) ? CUBLAS_OP_N : CUBLAS_OP_T;
+  cublasOperation_t cuTransB =
+  (TransB == false) ? CUBLAS_OP_N : CUBLAS_OP_T;
 
   // CUSPARSE_CHECK( cusparseScsrmm2(handle, cuTransA, cuTransB, 
   //                                 m, n, k, nnz, alpha, descrA, 
@@ -5269,15 +5631,15 @@ template <>
   // C is N by M
   // cublasDgemm(handle, transb, transa, N, M, K, alpha, B, ldb, A, lda, beta, C, ldc) 
   // performs C=alpha op ( B ) op ( A ) + beta C
-    gpu_gemm<float>(dn_handle, cuTransB, cuTransA, 
-      n, 
-      (TransA == true) ? k : m, 
-      (TransA == true) ? m : k,
-      alpha, B, full_A, beta, C);
+  gpu_gemm<float>(dn_handle, cuTransB, cuTransA, 
+    n, 
+    (TransA == true) ? k : m, 
+    (TransA == true) ? m : k,
+    alpha, B, full_A, beta, C);
 
-    checkCudaErrors(cudaFree(full_A));
-    checkCudaErrors(cudaFree(csrRowPtrA_temp));
-  }
+  checkCudaErrors(cudaFree(full_A));
+  checkCudaErrors(cudaFree(csrRowPtrA_temp));
+}
 
 template <>
 void gpu_spXdense_MMM<float>(const cusparseHandle_t handle, const bool TransA, const bool TransB, 
@@ -5288,6 +5650,7 @@ void gpu_spXdense_MMM<float>(const cusparseHandle_t handle, const bool TransA, c
 {
   //bool Debug = true;
   if(Debug) LOG("gpu_spXdense_MMM called");
+  std::string blank = "";
   /*
     This function performs one of the following matrix-matrix operations:
 
@@ -5319,33 +5682,31 @@ void gpu_spXdense_MMM<float>(const cusparseHandle_t handle, const bool TransA, c
       LOG("A is "<<m<<" by "<< k<<" in CSR format but it will be transposed");
       if(TransB){
         LOG("B is "<<n<<" by "<< m <<" in dense format but it will be tranposed");
-        save_device_mtx_to_file<float>(B, n, m, "B");
+        save_device_mtx_to_file<float>(B, n, m, "B", false, strPreamble(blank));
       }else{
         LOG("B is "<<m<<" by "<< n);
-        save_device_mtx_to_file<float>(B, m, n, "B");
+        save_device_mtx_to_file<float>(B, m, n, "B", false, strPreamble(blank));
       };
       LOG("C is "<<k<<" by "<< n);
     }else{
       LOG("A is "<<m<<" by "<< k<<" in CSR format");
       if(TransB){
         LOG("B is "<<n<<" by "<< k <<" in dense format but it will be tranposed");
-        save_device_mtx_to_file<float>(B, n, m, "B");
+        save_device_mtx_to_file<float>(B, n, m, "B", false, strPreamble(blank));
       }else{
         LOG("B is "<<k<<" by "<< n);
-        save_device_mtx_to_file<float>(B, m, n, "B");
+        save_device_mtx_to_file<float>(B, m, n, "B", false, strPreamble(blank));
       };
       LOG("C is "<<m<<" by "<< n);
     };
-    LOG("Here!");
-    cudaDeviceSynchronize();
-    save_device_array_to_file<int>(csrRowPtrA, m + 1, "csrRowPtrA");
-    save_device_array_to_file<int>(csrColIndA, nnz, "csrColIndA");
-    save_device_array_to_file<float>(csrValA, nnz, "csrValA");
+    checkCudaErrors(cudaDeviceSynchronize());
+    save_device_array_to_file<int>(csrRowPtrA, m + 1, "csrRowPtrA", strPreamble(blank));
+    save_device_array_to_file<int>(csrColIndA, nnz, "csrColIndA", strPreamble(blank));
+    save_device_array_to_file<float>(csrValA, nnz, "csrValA", strPreamble(blank));
     
     //save_device_mtx_to_file<float>(C, k, n, "C");
 
-    LOG("Here!");
-    cudaDeviceSynchronize();
+    checkCudaErrors(cudaDeviceSynchronize());
   // LOG("Press Enter to continue.") ;
   // std::cin.ignore();
   }
@@ -5650,7 +6011,7 @@ void gpu_R_error<float>(const cublasHandle_t dn_handle, const cusparseHandle_t s
   }
 
   //if(Debug) checkCudaErrors(cudaFree(U_testing_check));
-  cudaDeviceSynchronize();
+  checkCudaErrors(cudaDeviceSynchronize());
   gettimeofday(&program_end, NULL);
   program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
   //printf("program_time: %f\n", program_time);   
@@ -5669,7 +6030,7 @@ void gpu_R_error_training<float>(const cublasHandle_t dn_handle, const cusparseH
   const int *csr_format_ratingsMtx_userID_dev_training_batch, 
   const int *coo_format_ratingsMtx_itemID_dev_training,
   const float *V, float *U_training, float *R_training, 
-  float training_rate, float regularization_constant)
+  float training_rate, float regularization_constant, bool S_with_U, float *SV)
 {
   bool Debug = false;
   LOG("gpu_R_error_training called");
@@ -5716,7 +6077,7 @@ void gpu_R_error_training<float>(const cublasHandle_t dn_handle, const cusparseH
     CUDA_CHECK( cudaMalloc( (void**)&U_training_check, batch_size_training * batch_size_CU  * sizeof(float) ) );  
   }
 
-  if(Debug && 0 ){
+  if(Debug){
 
 
     if(compress){
@@ -5749,14 +6110,16 @@ void gpu_R_error_training<float>(const cublasHandle_t dn_handle, const cusparseH
     //                              V, beta, U_training_check);
   }
 
-  gpu_spXdense_MMM<float>(sp_handle, false, false, batch_size_training,
-   (compress == false) ? batch_size_CU : num_latent_factors, 
-   ratings_cols, nnz, first_coo_ind, &alpha, sp_descr, 
-   coo_format_ratingsMtx_rating_dev_training, 
-   csr_format_ratingsMtx_userID_dev_training_batch, 
-   coo_format_ratingsMtx_itemID_dev_training,
-   V, ratings_cols, &beta, U_training, batch_size_training, Debug);
+  // gpu_spXdense_MMM<float>(sp_handle, false, false, batch_size_training,
+  //  (compress == false) ? batch_size_CU : num_latent_factors, 
+  //  ratings_cols, nnz, first_coo_ind, &alpha, sp_descr, 
+  //  coo_format_ratingsMtx_rating_dev_training, 
+  //  csr_format_ratingsMtx_userID_dev_training_batch, 
+  //  coo_format_ratingsMtx_itemID_dev_training,
+  //  V, ratings_cols, &beta, U_training, batch_size_training, Debug);
+  gpu_rng_gaussian<float>(batch_size_training * ( (compress == false) ? batch_size_CU : num_latent_factors), (float)0.0, (float)1.0, U_training);
 
+  float largest_sv = gpu_norm(dn_handle, batch_size_training, U_training);
 
   // V^T * V
   // gpu_gemm<float>(dn_handle, false, true, (compress == false) ? batch_size_CU : num_latent_factors,
@@ -5772,7 +6135,8 @@ void gpu_R_error_training<float>(const cublasHandle_t dn_handle, const cusparseH
       that were predicted in the previous step
   */
 
-  if(Debug && 0){
+  if(Debug){
+    LOG("largest_sv : "<< largest_sv);
     if(compress){
       save_device_mtx_to_file<float>(U_training, batch_size_training, num_latent_factors, "U_training");
       save_device_mtx_to_file<float>(V, ratings_cols, num_latent_factors, "V");
@@ -5803,6 +6167,37 @@ void gpu_R_error_training<float>(const cublasHandle_t dn_handle, const cusparseH
     // C is N by M
     // cublasDgemm(handle, transb, transa, N, M, K, alpha, B, ldb, A, lda, beta, C, ldc) 
     // performs C=alpha op ( B ) op ( A ) + beta C
+    if(S_with_U){
+      if(SV != NULL){
+        int first_tiny_sv_ = first_tiny_sv((compress == false) ? batch_size_CU : num_latent_factors, SV, (float)0.0001);
+        if(first_tiny_sv_ < (compress == false) ? batch_size_CU : num_latent_factors){
+          LOG("WARNING WILL DIVIDE BY ~ZERO");
+          long long int temp = (compress == false) ? batch_size_CU : num_latent_factors;
+          LOG("first_tiny_sv_ : " << first_tiny_sv_<< " < "<<temp);
+        }
+        gpu_div_US_in_SVD<float>(batch_size_training, (compress == false) ? batch_size_CU : num_latent_factors, U_training, SV, true /*right div*/);
+
+        //void gpu_normalize_mtx_rows_or_cols(const long long int M, const long long int N,  
+        //                              bool row_major_ordering, float* x, bool normalize_rows);
+        gpu_normalize_mtx_rows_or_cols(batch_size_training, (compress == false) ? batch_size_CU : num_latent_factors,  
+                                          false, U_training, false);
+
+        gpu_mult_US_in_SVD<float>(batch_size_training, (compress == false) ? batch_size_CU : num_latent_factors, U_training, SV, true /*right mult*/);
+      }else{
+        //more thinking here:force order
+        float current_largest_sv = gpu_norm(dn_handle, batch_size_training, U_training);
+        gpu_scale(dn_handle, batch_size_training * ( (compress == false) ? batch_size_CU : num_latent_factors), largest_sv/current_largest_sv, U_training);
+      }
+    }else{
+      if(Debug){
+        LOG("calling gpu_normalize_mtx_rows_or_cols");
+      }
+      //void gpu_normalize_mtx_rows_or_cols(const long long int M, const long long int N,  
+      //                              bool row_major_ordering, float* x, bool normalize_rows);
+      gpu_normalize_mtx_rows_or_cols(batch_size_training, (compress == false) ? batch_size_CU : num_latent_factors,  
+                                        false, U_training, false);      
+    }  
+
     gpu_gemm<float>(dn_handle, true, false, ratings_cols, batch_size_training, 
       (compress == false) ? batch_size_CU : num_latent_factors,
       (float)1.0, V, U_training, (float)0.0, R_training);
@@ -5915,9 +6310,19 @@ void gpu_R_error_training<float>(const cublasHandle_t dn_handle, const cusparseH
     LOG("gpu_R_error_training total iterations : "<<i);
     LOG("gpu_R_error_training error : "<<error);     
   }
-
+  if(Debug){
+    if(compress){
+      save_device_mtx_to_file<float>(U_training, batch_size_training, num_latent_factors, "U_training");
+      save_device_mtx_to_file<float>(V, ratings_cols, num_latent_factors, "V");
+      //save_device_arrays_side_by_side_to_file<float>(U_training, U_training_check, batch_size_training * num_latent_factors, "U_training");
+    }else{
+      save_device_mtx_to_file<float>(U_training, batch_size_training, batch_size_CU, "U_training");
+      save_device_mtx_to_file<float>(V, ratings_cols, batch_size_CU, "V");
+      //save_device_arrays_side_by_side_to_file<float>(U_training, U_training_check, batch_size_training * batch_size_CU     , "U_training");
+    }
+  }
   checkCudaErrors(cudaFree(U_training_check));
-  cudaDeviceSynchronize();
+  checkCudaErrors(cudaDeviceSynchronize());
   gettimeofday(&program_end, NULL);
   program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
   //printf("program_time: %f\n", program_time);   
@@ -5935,10 +6340,11 @@ void gpu_R_error_testing<float>(const cublasHandle_t dn_handle, const cusparseHa
   const float *V, float *U_testing, float *R_testing, 
   float training_rate, float regularization_constant,
   float* testing_error_on_training_entries, float* testing_error_on_testing_entries, 
-  long long int* total_iterations)
+  long long int* total_iterations, bool S_with_U, float *SV)
 {
   bool Debug = false;
   LOG("gpu_R_error_testing called");
+  std::string blank = "";
 
   struct timeval program_start, program_end;
   double program_time;
@@ -6000,7 +6406,7 @@ void gpu_R_error_testing<float>(const cublasHandle_t dn_handle, const cusparseHa
       CUDA_CHECK( cudaMalloc( (void**)&U_testing_check, batch_size_testing * batch_size_CU  * sizeof(float) ) );  
     }
 
-  if(Debug && 0 ){
+  if(Debug){
 
 
     if(compress){
@@ -6035,14 +6441,17 @@ void gpu_R_error_testing<float>(const cublasHandle_t dn_handle, const cusparseHa
 
 
 
-  gpu_spXdense_MMM<float>(sp_handle, false, false, batch_size_testing,
-   (compress == false) ? batch_size_CU : num_latent_factors, 
-   ratings_cols, nnz, first_coo_ind, &alpha, sp_descr, 
-   testing_entries, 
-   csr_format_ratingsMtx_userID_dev_testing_batch, 
-   coo_format_ratingsMtx_itemID_dev_testing,
-   V, ratings_cols, &beta, U_testing, batch_size_testing, Debug);
+  // gpu_spXdense_MMM<float>(sp_handle, false, false, batch_size_testing,
+  //  (compress == false) ? batch_size_CU : num_latent_factors, 
+  //  ratings_cols, nnz, first_coo_ind, &alpha, sp_descr, 
+  //  testing_entries, 
+  //  csr_format_ratingsMtx_userID_dev_testing_batch, 
+  //  coo_format_ratingsMtx_itemID_dev_testing,
+  //  V, ratings_cols, &beta, U_testing, batch_size_testing, Debug);
 
+  gpu_rng_gaussian<float>(batch_size_testing * ( (compress == false) ? batch_size_CU : num_latent_factors), (float)0.0, (float)1.0, U_testing);
+
+  float largest_sv = gpu_norm(dn_handle, batch_size_testing, U_testing);
 
   // V^T * V
   // gpu_gemm<float>(dn_handle, false, true, (compress == false) ? batch_size_CU : num_latent_factors,
@@ -6058,19 +6467,21 @@ void gpu_R_error_testing<float>(const cublasHandle_t dn_handle, const cusparseHa
       that were predicted in the previous step
   */
 
-  if(Debug && 0){
+  if(Debug){
     if(compress){
-      save_device_mtx_to_file<float>(U_testing, batch_size_testing, num_latent_factors, "U_testing");
-      save_device_mtx_to_file<float>(V, ratings_cols, num_latent_factors, "V");
+      save_device_mtx_to_file<float>(U_testing, batch_size_testing, num_latent_factors, "U_testing", false, strPreamble(blank));
+      save_device_mtx_to_file<float>(V, ratings_cols, num_latent_factors, "V", false, strPreamble(blank));
       //save_device_arrays_side_by_side_to_file<float>(U_testing, U_testing_check, batch_size_testing * num_latent_factors, "U_testing");
     }else{
-      save_device_mtx_to_file<float>(U_testing, batch_size_testing, batch_size_CU, "U_testing");
-      save_device_mtx_to_file<float>(V, ratings_cols, batch_size_CU, "V");
+      save_device_mtx_to_file<float>(U_testing, batch_size_testing, batch_size_CU, "U_testing", false, strPreamble(blank));
+      save_device_mtx_to_file<float>(V, ratings_cols, batch_size_CU, "V", false, strPreamble(blank));
       //save_device_arrays_side_by_side_to_file<float>(U_testing, U_testing_check, batch_size_testing * batch_size_CU     , "U_testing");
     }
     //save_device_arrays_side_by_side_to_file(coo_format_ratingsMtx_itemID_dev_testing, testing_entries, nnz, "R_testing");
   }
   if(Debug){
+    LOG("largest_sv : "<<largest_sv)
+    LOG("compress : "<<compress)
     save_device_arrays_side_by_side_to_file<float>(coo_format_ratingsMtx_rating_dev_testing, testing_entries, coo_testing_errors, nnz, "ratings_testing_errors_v2");
   }
 
@@ -6093,6 +6504,42 @@ void gpu_R_error_testing<float>(const cublasHandle_t dn_handle, const cusparseHa
     // C is N by M
     // cublasDgemm(handle, transb, transa, N, M, K, alpha, B, ldb, A, lda, beta, C, ldc) 
     // performs C=alpha op ( B ) op ( A ) + beta C
+    if(Debug){
+      LOG("S_with_U : "<<S_with_U)
+      LOG("SV != NULL : "<<(SV != NULL))
+    }
+    if(S_with_U){
+      if(SV != NULL){
+        int first_tiny_sv_ = first_tiny_sv((compress == false) ? batch_size_CU : num_latent_factors, SV, (float)0.0001);
+        if(Debug){
+          LOG("first_tiny_sv_ : "<<first_tiny_sv_)
+        }
+        if(first_tiny_sv_ < (compress == false) ? batch_size_CU : num_latent_factors){
+          LOG("WARNING WILL DIVIDE BY ~ZERO");
+          long long int temp = (compress == false) ? batch_size_CU : num_latent_factors;
+          LOG("first_tiny_sv_ : " << first_tiny_sv_<< " < "<<temp);
+        }
+        gpu_div_US_in_SVD<float>(batch_size_testing, (compress == false) ? batch_size_CU : num_latent_factors, U_testing, SV, true /*right div*/);
+
+        //void gpu_normalize_mtx_rows_or_cols(const long long int M, const long long int N,  
+        //                              bool row_major_ordering, float* x, bool normalize_rows);
+        gpu_normalize_mtx_rows_or_cols(batch_size_testing, (compress == false) ? batch_size_CU : num_latent_factors,  
+                                          false, U_testing, false);
+
+        gpu_mult_US_in_SVD<float>(batch_size_testing, (compress == false) ? batch_size_CU : num_latent_factors, U_testing, SV, true /*right mult*/);
+      }else{
+        //more thinking here:force order
+        float current_largest_sv = gpu_norm(dn_handle, batch_size_testing, U_testing);
+        gpu_scale(dn_handle, batch_size_testing * ( (compress == false) ? batch_size_CU : num_latent_factors), largest_sv/current_largest_sv, U_testing);
+      }
+    }else{
+      //void gpu_normalize_mtx_rows_or_cols(const long long int M, const long long int N,  
+      //                              bool row_major_ordering, float* x, bool normalize_rows);
+      if(Debug) LOG("here");
+      gpu_normalize_mtx_rows_or_cols(batch_size_testing, (compress == false) ? batch_size_CU : num_latent_factors,  
+                                        false, U_testing, false);      
+    } 
+
     gpu_gemm<float>(dn_handle, true, false, ratings_cols, batch_size_testing, 
       (compress == false) ? batch_size_CU : num_latent_factors,
       (float)1.0, V, U_testing, (float)0.0, R_testing);
@@ -6258,7 +6705,7 @@ void gpu_R_error_testing<float>(const cublasHandle_t dn_handle, const cusparseHa
     //checkCudaErrors(cudaFree(U_testing_check));
   }
   checkCudaErrors(cudaFree(U_testing_check));
-  cudaDeviceSynchronize();
+  checkCudaErrors(cudaDeviceSynchronize());
   gettimeofday(&program_end, NULL);
   program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
   //printf("program_time: %f\n", program_time);   
