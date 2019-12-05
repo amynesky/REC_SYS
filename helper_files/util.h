@@ -123,7 +123,7 @@ void copy_device_mtx_into_host_submtx(const int M, const int N, const Dtype* X, 
 // Returns the sum of the absolute values of the elements of vector x
 
 template <typename Dtype>
-Dtype cpu_asum(const int n, const Dtype* x);
+Dtype cpu_asum(const long long int n, const Dtype* x);
 
 template <typename Dtype>
 Dtype cpu_sum(const long long int n, const Dtype* x);
@@ -140,23 +140,26 @@ template < typename Dtype>
 void cpu_permute(Dtype* a, const int* pvt, const long long int rows, const long long int cols, bool direction);
 
 template < typename Dtype>
-void MatrixInplaceTranspose(Dtype *A, int r, int c, bool row_major_ordering = true);
+void MatrixInplaceTranspose(Dtype *A, long long int r, long long int c, bool row_major_ordering = true);
 
 template < typename Dtype>
-void cpu_axpby(const int N, const Dtype alpha, const Dtype* X,
-                            const Dtype beta, Dtype* Y);
+void cpu_axpby(const long long int N, const Dtype alpha, const Dtype* X, const Dtype beta, Dtype* Y);
+
+void cpu_axpby_test();
 
 template < typename Dtype>
-Dtype cpu_abs_max(long long int n, Dtype* X);
-
-template < typename Dtype>
-void cpu_gemm(const bool TransA,
-             const bool TransB, const int M, const int N, const int K,
+void cpu_gemm(const bool TransA, const bool TransB, 
+              const long long int M, const long long int N, const long long int K,
              const Dtype alpha, const Dtype* A, const Dtype* B, const Dtype beta,
              Dtype* C);
 
+void cpu_gemm_test();
+
 template <typename Dtype>
 void cpu_swap_ordering(const long long int rows, const long long int cols, Dtype *A, const bool row_major_ordering);
+
+template <typename Dtype>
+Dtype cpu_min(const long long int n,  const Dtype* x);
 
 template <typename Dtype>
 Dtype cpu_abs_max(const long long int n,  const Dtype* x);
@@ -294,7 +297,7 @@ void cpu_dense_nearest_row(const int rows_A, const int cols, const Dtype* dense_
 
 template <typename Dtype>
 void cpu_calculate_KM_error_and_update(const int rows_A, const int cols, Dtype* dense_mtx_A, 
-    const int rows_B, const Dtype* dense_mtx_B, int* selection, Dtype alpha, Dtype lambda);
+    const int rows_B, const Dtype* dense_mtx_B, int* selection, Dtype alpha, Dtype lambda, Dtype* checking = NULL);
 
 #ifndef CPU_ONLY  // GPU
 

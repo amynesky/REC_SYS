@@ -96,7 +96,7 @@ template<typename Dtype>
 bool gpu_isBad(const Dtype* A, long long int size) 
 {
 
-  long long int num_gpu_blocks= GET_BLOCKS(size);
+  long long int num_gpu_blocks = GET_BLOCKS(size);
 
   bool isBad_host = false;
   bool* isBad;
@@ -104,20 +104,22 @@ bool gpu_isBad(const Dtype* A, long long int size)
   CUDA_CHECK(cudaMemcpy(isBad, &isBad_host, sizeof(bool), cudaMemcpyHostToDevice));
   
   if (num_gpu_blocks > CUDA_NUM_BLOCKS){
-    int num_loops = 0;
-    int num_entries = CUDA_NUM_BLOCKS*512;
-    int spot = 0;
+    long long int num_loops = (long long int)0;
+    long long int num_entries = CUDA_NUM_BLOCKS*CUDA_NUM_THREADS;
+    long long int spot = (long long int)0;
+    if(too_big(num_entries) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
     while (num_gpu_blocks > CUDA_NUM_BLOCKS){
-      gpu_isBad_kernel<Dtype><<<CUDA_NUM_BLOCKS, CUDA_NUM_THREADS>>>(A +spot , num_entries, isBad);
+      gpu_isBad_kernel<Dtype><<<CUDA_NUM_BLOCKS, CUDA_NUM_THREADS>>>(A + spot , (int)num_entries, isBad);
       num_gpu_blocks = num_gpu_blocks - CUDA_NUM_BLOCKS;
-      num_loops += 1;
+      num_loops += (long long int)1;
       spot = num_loops * num_entries;
     };
     // spot is the number of entries done so far
     // total - (done) = left to go 
-    gpu_isBad_kernel<Dtype><<<num_gpu_blocks, CUDA_NUM_THREADS>>>(A + spot , size - spot, isBad);
+    gpu_isBad_kernel<Dtype><<<num_gpu_blocks, CUDA_NUM_THREADS>>>(A + spot , (int)(size - spot), isBad);
   }else{
-    gpu_isBad_kernel<Dtype><<<num_gpu_blocks, CUDA_NUM_THREADS>>>(A , size, isBad);
+    if(too_big(size) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
+    gpu_isBad_kernel<Dtype><<<num_gpu_blocks, CUDA_NUM_THREADS>>>(A , (int)size, isBad);
   };
 
   CUDA_CHECK(cudaMemcpy(&isBad_host, isBad, sizeof(bool), cudaMemcpyDeviceToHost));
@@ -139,42 +141,42 @@ extern "C" {
 #endif /* __cplusplus */
 
 int getDeviceVersion(void)
+{
+  int device;
+  struct cudaDeviceProp properties;
+
+  if (cudaGetDevice(&device) != cudaSuccess)
   {
-    int device;
-    struct cudaDeviceProp properties;
-
-    if (cudaGetDevice(&device) != cudaSuccess)
-    {
-      printf("failed to get device\n");
-      return 0;
-    }
-
-    if (cudaGetDeviceProperties(&properties, device) != cudaSuccess)
-    {
-      printf("failed to get properties\n");
-      return 0;
-    }
-
-    return properties.major * 100 + properties.minor * 10;
+    printf("failed to get device\n");
+    return 0;
   }
+
+  if (cudaGetDeviceProperties(&properties, device) != cudaSuccess)
+  {
+    printf("failed to get properties\n");
+    return 0;
+  }
+
+  return properties.major * 100 + properties.minor * 10;
+}
 
 size_t getDeviceMemory(void)
+{
+  struct cudaDeviceProp properties;
+  int device;
+
+  if (cudaGetDevice(&device) != cudaSuccess)
   {
-    struct cudaDeviceProp properties;
-    int device;
-
-    if (cudaGetDevice(&device) != cudaSuccess)
-    {
-      return 0;
-    }
-
-    if (cudaGetDeviceProperties(&properties, device) != cudaSuccess)
-    {
-      return 0;
-    }
-
-    return properties.totalGlobalMem;
+    return 0;
   }
+
+  if (cudaGetDeviceProperties(&properties, device) != cudaSuccess)
+  {
+    return 0;
+  }
+
+  return properties.totalGlobalMem;
+}
 #if defined(__cplusplus)
 }
 #endif /* __cplusplus */
@@ -315,28 +317,30 @@ void print_gpu_mtx_entries(const Dtype* array, int lda, int sda, std::string tit
     if(transpose){
       for( int j = 0; j < sda; j+= 1 ) {
         for( int i = 0; i < lda; i+= 1 ) {
+          long long int index = (long long int)i  + ((long long int)j) * ((long long int)lda);
           if (i==lda-1){
             if (j==sda-1){
-              line = (line + ToString<Dtype>(host_pointer[i  + j* lda])).c_str();
+              line = (line + ToString<Dtype>(host_pointer[index])).c_str();
             }else{
-              line = (line + ToString<Dtype>(host_pointer[i  + j* lda]) + "\r\n").c_str();
+              line = (line + ToString<Dtype>(host_pointer[index]) + "\r\n").c_str();
             };
           }else{
-            line = (line + ToString<Dtype>(host_pointer[i  + j* lda]) + ", ").c_str();
+            line = (line + ToString<Dtype>(host_pointer[index]) + ", ").c_str();
           };
         };
       };
     }else{
      for( int i = 0; i < lda; i+= 1 ) {
       for( int j = 0; j < sda; j+= 1 ) {
+        long long int index = (long long int)i  + ((long long int)j) * ((long long int)lda);
         if (j==sda-1){
           if (i==lda-1){
-            line = (line + ToString<Dtype>(host_pointer[i  + j* lda])).c_str();
+            line = (line + ToString<Dtype>(host_pointer[index])).c_str();
           }else{
-            line = (line + ToString<Dtype>(host_pointer[i  + j* lda]) + "\r\n").c_str();
+            line = (line + ToString<Dtype>(host_pointer[index]) + "\r\n").c_str();
           };
         }else{
-          line = (line + ToString<Dtype>(host_pointer[i  + j* lda]) + ", ").c_str();
+          line = (line + ToString<Dtype>(host_pointer[index]) + ", ").c_str();
         };
       };
     };     
@@ -639,7 +643,8 @@ void save_device_mtx_to_file(const Dtype* A_dev, int lda, int sda, std::string t
     for (int i = 0; i < lda; i++){
       //entries<<"***"<<i<<"***";
       for (int j = 0; j < sda; j++){
-        entries<<A_host[(long long int)i + (long long int)j * (long long int)lda];
+        long long int index = (long long int)i + ((long long int)j) * ((long long int)lda);
+        entries<<A_host[index];
         if(j < sda - 1){
           //entries<<"\r\n";
           entries<<", ";
@@ -657,7 +662,8 @@ void save_device_mtx_to_file(const Dtype* A_dev, int lda, int sda, std::string t
     for (int j = 0; j < sda; j++){
       //entries<<"***"<<j<<"***";
       for (int i = 0; i < lda; i++){
-        entries<<A_host[(long long int)i + (long long int)j * (long long int)lda];
+        long long int index = (long long int)i + ((long long int)j) * ((long long int)lda);
+        entries<<A_host[index];
         if(i < lda - 1){
           //entries<<"\r\n";
           entries<<", ";
@@ -684,7 +690,7 @@ template void save_device_mtx_to_file<double>(const double* A_dev, int lda, int 
 //============================================================================================
 
 template <typename Dtype>
-__global__ void add_scalar_kernel(const long long int  n, const Dtype alpha, Dtype* y) {
+__global__ void add_scalar_kernel(int n, const Dtype alpha, Dtype* y) {
   CUDA_KERNEL_LOOP(index, n) {
     y[index] += alpha;
   }
@@ -704,6 +710,7 @@ void gpu_add_scalar(const long long int N, const Dtype alpha, Dtype* Y)
     long long int num_loops = (long long int)0;
     long long int num_entries = (long long int)(CUDA_NUM_BLOCKS * CUDA_NUM_THREADS);
     long long int spot = (long long int)0;
+    if(too_big(num_entries) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
     while (num_gpu_blocks > CUDA_NUM_BLOCKS){
       add_scalar_kernel<Dtype><<<CUDA_NUM_BLOCKS, CUDA_NUM_THREADS>>>(num_entries, alpha, Y + spot);
 
@@ -713,9 +720,10 @@ void gpu_add_scalar(const long long int N, const Dtype alpha, Dtype* Y)
     };
     // spot is the number of entries done so far
     // total - (done) = left to go 
-    add_scalar_kernel<Dtype><<<num_gpu_blocks, CUDA_NUM_THREADS>>>(N - spot, alpha, Y+spot);
+    add_scalar_kernel<Dtype><<<num_gpu_blocks, CUDA_NUM_THREADS>>>((int)(N - spot), alpha, Y+spot);
   }else{
-    add_scalar_kernel<Dtype><<<num_gpu_blocks, CUDA_NUM_THREADS>>>(N, alpha, Y);
+    if(too_big(N) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
+    add_scalar_kernel<Dtype><<<num_gpu_blocks, CUDA_NUM_THREADS>>>((int)N, alpha, Y);
   }
 
   CUDA_CHECK(cudaMemcpy(&isBad_host, isBad, sizeof(bool), cudaMemcpyDeviceToHost));
@@ -800,8 +808,9 @@ __global__ void gpu_get_rand_bools_kernel(curandState *state, Dtype *a, const in
 template < typename Dtype>
 void gpu_get_rand_bools(const long long int n,  Dtype* x, float probability_of_success) 
 {
+  if(too_big(n) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
   curandState *devState;  
-  gpuErrchk(cudaMalloc((void**)&devState, n*sizeof(curandState)));
+  gpuErrchk(cudaMalloc((void**)&devState, n * sizeof(curandState)));
 
   const unsigned long seed = cluster_seedgen();
 
@@ -811,7 +820,7 @@ void gpu_get_rand_bools(const long long int n,  Dtype* x, float probability_of_s
     ABORT_IF_NEQ(0, 1, "Max Blocks Exceeded");
   };
 
-  initCurand<<<num_gpu_blocks, CUDA_NUM_THREADS>>>(devState, seed, n);
+  initCurand<<<num_gpu_blocks, CUDA_NUM_THREADS>>>(devState, seed, (int)n);
   gpuErrchk(cudaPeekAtLastError());
   gpuErrchk(cudaDeviceSynchronize());
 
@@ -823,7 +832,7 @@ void gpu_get_rand_bools(const long long int n,  Dtype* x, float probability_of_s
 
 }
 
-template void gpu_get_rand_bools<bool>(const long long int n,  bool* x, float probability_of_success) ;
+template  void gpu_get_rand_bools<bool>(const long long int n,  bool* x, float probability_of_success) ;
 template void gpu_get_rand_bools<float>(const long long int n,  float* x, float probability_of_success) ;
 
 __global__ void gpu_get_rand_groups_kernel(curandState *state, const int n,  int* x, float* probability_of_success, const int num_groups)
@@ -845,22 +854,23 @@ __global__ void gpu_get_rand_groups_kernel(curandState *state, const int n,  int
 
 void gpu_get_rand_groups(const long long int n,  int* x, float* probability_of_success, const int num_groups) 
 {
+  if(too_big(n) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
   curandState *devState;  
   gpuErrchk(cudaMalloc((void**)&devState, n*sizeof(curandState)));
 
   const unsigned long seed = cluster_seedgen();
 
-  const long long int num_gpu_blocks= GET_BLOCKS(n);
+  const long long int num_gpu_blocks = GET_BLOCKS(n);
 
   if (num_gpu_blocks > CUDA_NUM_BLOCKS){
     ABORT_IF_NEQ(0, 1, "Max Blocks Exceeded");
   };
 
-  initCurand<<<num_gpu_blocks, CUDA_NUM_THREADS>>>(devState, seed, n);
+  initCurand<<<num_gpu_blocks, CUDA_NUM_THREADS>>>(devState, seed, (int)n);
   gpuErrchk(cudaPeekAtLastError());
   gpuErrchk(cudaDeviceSynchronize());
 
-  gpu_get_rand_groups_kernel<<<num_gpu_blocks, CUDA_NUM_THREADS>>>(devState, n, x, probability_of_success, num_groups);
+  gpu_get_rand_groups_kernel<<<num_gpu_blocks, CUDA_NUM_THREADS>>>(devState, (int)n, x, probability_of_success, num_groups);
   gpuErrchk(cudaPeekAtLastError());
   gpuErrchk(cudaDeviceSynchronize());
 
@@ -885,6 +895,7 @@ __global__ void gpu_reverse_bools_kernel(const long long int n,  Dtype* x, bool*
 template < typename Dtype>
 void gpu_reverse_bools(const long long int n,  Dtype* x) 
 {
+  if(too_big(n) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
   bool isBad_host = false;
   bool* isBad;
   CUDA_CHECK(cudaMalloc((void**)&isBad, sizeof(bool)));
@@ -1099,7 +1110,7 @@ void gpu_sort_index_by_max<float>(cublasHandle_t handle, const long long int row
     // print_gpu_array_entries<float>(indicies, 10 , 1 , n);
     // print_gpu_array_entries<float>(x, 10 , 1 , n);
   if(too_big(cols) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
-  for(long long int i = (long long int)0; i < rows; i++){
+  for(long long int i = (long long int)0; i < rows; i+=(long long int)1){
     thrust::device_ptr<float> indicies_(indicies + i * cols);
     thrust::device_vector<float> indicies__(indicies_, indicies_ + cols);
     thrust::device_ptr<float> r_(x + i * cols);
@@ -1144,8 +1155,9 @@ void gpu_set_all(  Dtype* x, const long long int n, const Dtype alpha)
     long long int num_loops = (long long int)0;
     long long int num_entries = (long long int)(CUDA_NUM_BLOCKS*CUDA_NUM_THREADS);
     long long int spot = (long long int)0;
+    if(too_big(num_entries) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
     while (num_gpu_blocks > CUDA_NUM_BLOCKS){
-      gpu_set_all_kernel<Dtype><<<CUDA_NUM_BLOCKS, CUDA_NUM_THREADS>>>( x + spot, num_entries, alpha);
+      gpu_set_all_kernel<Dtype><<<CUDA_NUM_BLOCKS, CUDA_NUM_THREADS>>>( x + spot, (int)num_entries, alpha);
 
       num_gpu_blocks = num_gpu_blocks - (long long int)CUDA_NUM_BLOCKS;
       num_loops += (long long int)1;
@@ -1153,9 +1165,10 @@ void gpu_set_all(  Dtype* x, const long long int n, const Dtype alpha)
     };
     // spot is the number of entries done so far
     // total - (done) = left to go 
-    gpu_set_all_kernel<Dtype><<<num_gpu_blocks, CUDA_NUM_THREADS>>>( x + spot, n - spot, alpha);
+    gpu_set_all_kernel<Dtype><<<num_gpu_blocks, CUDA_NUM_THREADS>>>( x + spot, (int)(n - spot), alpha);
   }else{
-    gpu_set_all_kernel<Dtype><<<num_gpu_blocks, CUDA_NUM_THREADS>>>( x, n, alpha);
+    if(too_big(n) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
+    gpu_set_all_kernel<Dtype><<<num_gpu_blocks, CUDA_NUM_THREADS>>>( x, (int)n, alpha);
   }
 
 }
@@ -1177,11 +1190,12 @@ __global__ void gpu_set_as_index_kernel( int* x, const int n)
 
 void gpu_set_as_index(  int* x, const long long int n) 
 {
-  long long int num_gpu_blocks= GET_BLOCKS(n);
+  if(too_big(n) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
+  long long int num_gpu_blocks = GET_BLOCKS(n);
   if (num_gpu_blocks > CUDA_NUM_BLOCKS){
     ABORT_IF_NEQ(0, 1, "Max Blocks Exceeded");
   }; 
-  gpu_set_as_index_kernel<<<num_gpu_blocks, CUDA_NUM_THREADS>>>( x, n);
+  gpu_set_as_index_kernel<<<num_gpu_blocks, CUDA_NUM_THREADS>>>( x, (int)n);
 
 }
 
@@ -1200,11 +1214,12 @@ __global__ void gpu_set_as_index_kernel( Dtype* x, const int rows, const int col
 template <>
 void gpu_set_as_index<float>(  float* x, const long long int rows, const long long int cols) 
 {
-  long long int num_gpu_blocks= GET_BLOCKS(rows*cols);
+  if(too_big(rows*cols) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
+  long long int num_gpu_blocks = GET_BLOCKS(rows*cols);
   if (num_gpu_blocks > CUDA_NUM_BLOCKS){
     ABORT_IF_NEQ(0, 1, "Max Blocks Exceeded");
   }; 
-  gpu_set_as_index_kernel<<<num_gpu_blocks, CUDA_NUM_THREADS>>>( x, rows,cols);
+  gpu_set_as_index_kernel<<<num_gpu_blocks, CUDA_NUM_THREADS>>>( x, (int)rows, (int)cols);
 
 }
 
@@ -1237,10 +1252,10 @@ void gpu_set_as_index_host<int>(  int* x_host, const long long int rows, const l
 
     int * x_dev;
     checkCudaErrors(cudaMalloc((void**)&x_dev, num_entries * sizeof(int)));
-
+    if(too_big(num_entries) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
     while (num_gpu_blocks > CUDA_NUM_BLOCKS){
       checkCudaErrors(cudaMemcpy(x_dev, x_host + spot,  num_entries *  sizeof(int), cudaMemcpyHostToDevice));
-      gpu_set_as_index_host_kernel<<<CUDA_NUM_BLOCKS, CUDA_NUM_THREADS>>>( x_dev, spot, num_entries, rows,cols);
+      gpu_set_as_index_host_kernel<<<CUDA_NUM_BLOCKS, CUDA_NUM_THREADS>>>( x_dev, spot, (int)num_entries, rows,cols);
       checkCudaErrors(cudaMemcpy(x_host + spot, x_dev,  num_entries *  sizeof(int), cudaMemcpyDeviceToHost));
       num_gpu_blocks = num_gpu_blocks - (long long int)CUDA_NUM_BLOCKS;
       num_loops += (long long int)1;
@@ -1249,15 +1264,16 @@ void gpu_set_as_index_host<int>(  int* x_host, const long long int rows, const l
     // spot is the number of entries done so far
     // total - (done) = left to go 
     checkCudaErrors(cudaMemcpy(x_dev, x_host + spot,  (rows*cols - spot) *  sizeof(int), cudaMemcpyHostToDevice));
-    gpu_set_as_index_host_kernel<<<num_gpu_blocks, CUDA_NUM_THREADS>>>( x_dev, spot, rows*cols - spot, rows,cols);
+    gpu_set_as_index_host_kernel<<<num_gpu_blocks, CUDA_NUM_THREADS>>>( x_dev, spot, (int)(rows*cols - spot), rows,cols);
     checkCudaErrors(cudaMemcpy(x_host + spot, x_dev,  (rows*cols - spot) *  sizeof(int), cudaMemcpyDeviceToHost));
     checkCudaErrors(cudaFree(x_dev));
   }else{
+    if(too_big(rows*cols) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
     int * x_dev;
     checkCudaErrors(cudaMalloc((void**)&x_dev, rows*cols * sizeof(int)));
 
     checkCudaErrors(cudaMemcpy(x_dev, x_host,  rows*cols *  sizeof(int), cudaMemcpyHostToDevice));
-    gpu_set_as_index_host_kernel<<<num_gpu_blocks, CUDA_NUM_THREADS>>>( x_dev, 0, rows*cols, rows,cols);
+    gpu_set_as_index_host_kernel<<<num_gpu_blocks, CUDA_NUM_THREADS>>>( x_dev, 0, (int)(rows*cols), rows,cols);
     checkCudaErrors(cudaMemcpy(x_host , x_dev,  rows*cols *  sizeof(int), cudaMemcpyDeviceToHost));
     checkCudaErrors(cudaFree(x_dev));
   };
@@ -1431,7 +1447,7 @@ float gpu_range<float>(const long long int n,  const float* x)
 template <>
 float gpu_sum<float>(const long long int n,  const float* x) 
 {
-  if(too_big(n) ) {ABORT_IF_EQ(0, 1,"Long long long int too big");}
+  if(too_big(n) ) {ABORT_IF_EQ(0, 0,"Long long long int too big");}
   float* y = (float*) x;
   thrust::device_ptr<float> X = thrust::device_pointer_cast(y);
   float sum = thrust::reduce(X, X + n, (float)0., thrust::plus<float>());
@@ -1525,9 +1541,10 @@ float gpu_variance<float>(const long long int n, const float* x) {
 
 
 template<typename Dtype>
-Dtype gpu_expected_dist_two_guassian(cublasHandle_t dn_handle, const long long int n){
+Dtype gpu_expected_dist_two_guassian(cublasHandle_t dn_handle, const long long int n)
+{
   bool Debug = false;
-
+  if(too_big(n) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
   struct timeval program_start, program_end;
   double program_time;
   gettimeofday(&program_start, NULL);
@@ -1567,7 +1584,8 @@ Dtype gpu_expected_dist_two_guassian(cublasHandle_t dn_handle, const long long i
 }
 
 template <>
-float gpu_sum_of_squares<float>(const long long int n, const float* x) {
+float gpu_sum_of_squares<float>(const long long int n, const float* x) 
+{
   if(too_big(n) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
   square<float> unary_op; 
   thrust::plus<float> binary_op; 
@@ -1668,7 +1686,7 @@ void transpose_in_place<float>(cublasHandle_t handle, const long long int lda, c
 {
   bool Debug = false;
   /*
-    long long int num_gpu_blocks= GET_BLOCKS(lda * sda);
+    long long int num_gpu_blocks = GET_BLOCKS(lda * sda);
 
     ABORT_IF_NEQ(lda, sda, "Transpose in place for r!= c is more sofisticated than what is currently written"); 
 
@@ -1686,7 +1704,7 @@ void transpose_in_place<float>(cublasHandle_t handle, const long long int lda, c
       while (num_gpu_blocks > CUDA_NUM_BLOCKS){
         transpose_in_place_kernel<<<CUDA_NUM_BLOCKS, CUDA_NUM_THREADS>>>(lda, sda, A, spot, num_entries);
 
-        num_gpu_blocks= num_gpu_blocks - (long long int)CUDA_NUM_BLOCKS;
+        num_gpu_blocks = num_gpu_blocks - (long long int)CUDA_NUM_BLOCKS;
         num_loops+=(long long int)1;
         spot = num_loops * num_entries;
         if(Debug) LOG("starting index :"<<spot);
@@ -1712,7 +1730,7 @@ void transpose_in_place<float>(cublasHandle_t handle, const long long int lda, c
   float* result;
   CUDA_CHECK(cudaMalloc((void**)&result, lda * sda * sizeof(float)));
 
-  transpose<float>(handle,lda, sda, A, result);
+  transpose<float>(handle, lda, sda, A, result);
 
   CUDA_CHECK(cudaMemcpy(A, result, lda * sda * sizeof(float), cudaMemcpyDeviceToDevice));
   checkCudaErrors(cudaFree(result));
@@ -1723,6 +1741,7 @@ __global__ void gpu_swap_ordering_kernel(const long long int rows, const long lo
  const bool row_major_ordering, float * result,
  const long long int start, const int total)
 {
+  //WRONG DO NOT USE
   //int idx = threadIdx.x + blockIdx.x * blockDim.x;
   //a[idx] = curand_uniform(&state[idx]);
   CUDA_KERNEL_LOOP(i, total){
@@ -1754,7 +1773,7 @@ void gpu_swap_ordering<float>(const long long int rows, const long long int cols
 {
   /*
     bool Debug = false;
-    long long int num_gpu_blocks= GET_BLOCKS(rows * cols);
+    long long int num_gpu_blocks = GET_BLOCKS(rows * cols);
     float* result;
     CUDA_CHECK(cudaMalloc((void**)&result, rows * cols * sizeof(float)));
 
@@ -1766,7 +1785,7 @@ void gpu_swap_ordering<float>(const long long int rows, const long long int cols
       while (num_gpu_blocks > CUDA_NUM_BLOCKS){
         gpu_swap_ordering_kernel<<<CUDA_NUM_BLOCKS, CUDA_NUM_THREADS>>>(rows, cols, A, row_major_ordering, result, spot, num_entries);
 
-        num_gpu_blocks= num_gpu_blocks - (long long int)CUDA_NUM_BLOCKS;
+        num_gpu_blocks = num_gpu_blocks - (long long int)CUDA_NUM_BLOCKS;
         num_loops+=(long long int)1;
         spot = num_loops * num_entries;
         if(Debug) LOG("starting index :"<<spot);
@@ -1795,9 +1814,10 @@ void gpu_swap_ordering<float>(const long long int rows, const long long int cols
 }
 
 template <>
-void gpu_gemv<float>(cublasHandle_t dn_handle, const bool TransA, const int M,
- const int N, const float alpha, const float* A, const float* x, const int inc_x,
- const float beta, float* y, const int inc_y) 
+void gpu_gemv<float>(cublasHandle_t dn_handle, const bool TransA, 
+  const long long int M, const long long int N, 
+  const float alpha, const float* A, const float* x, const long long int inc_x,
+ const float beta, float* y, const long long int inc_y) 
 {
   cublasOperation_t cuTransA = (TransA == false) ? CUBLAS_OP_T : CUBLAS_OP_N;
 
@@ -1829,9 +1849,10 @@ void gpu_gemv<float>(cublasHandle_t dn_handle, const bool TransA, const int M,
 
 
 template <>
-void gpu_gemv<double>(cublasHandle_t dn_handle, const bool TransA, const int M,
-  const int N, const double alpha, const double* A, const double* x, const int inc_x,
-  const double beta, double* y, const int inc_y) 
+void gpu_gemv<double>(cublasHandle_t dn_handle, const bool TransA, 
+  const long long int M, const long long int N, 
+  const double alpha, const double* A, const double* x, const long long int inc_x,
+  const double beta, double* y, const long long int inc_y) 
 {
   cublasOperation_t cuTransA =
   (TransA == false) ? CUBLAS_OP_T : CUBLAS_OP_N;
@@ -1855,15 +1876,15 @@ template<>
 void gpu_hadamard<float>(const long long int n, const float* A, float* B ) 
 {
   //performs B = A * B
-    long long int num_gpu_blocks = GET_BLOCKS(n);
+  long long int num_gpu_blocks = GET_BLOCKS(n);
   // if (num_gpu_blocks > CUDA_NUM_BLOCKS){
   //   ABORT_IF_NEQ(0, 1, "Max Blocks Exceeded");
   // };
-
+  if(too_big(n) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
   if (num_gpu_blocks > CUDA_NUM_BLOCKS){
     ABORT_IF_NEQ(0, 1, "Max Blocks Exceeded");
   };
-  gpu_hadamard_kernel<float><<<num_gpu_blocks, CUDA_NUM_THREADS>>>(n, A, B);
+  gpu_hadamard_kernel<float><<<num_gpu_blocks, CUDA_NUM_THREADS>>>((int)n, A, B);
 
 }
 
@@ -1924,6 +1945,7 @@ template void gpu_axpby<double>(cublasHandle_t dn_handle,const long long int N, 
 template<>
 float gpu_sum_of_squares_of_diff<float>(cublasHandle_t dn_handle, const long long int n, const float* x, float* y)
 {
+  if(too_big(n) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
   gpu_axpby<float>(dn_handle, n, (float)(1.0), x, (float)(-1.0), y);
 
   square<float> unary_op; 
@@ -1936,38 +1958,54 @@ float gpu_sum_of_squares_of_diff<float>(cublasHandle_t dn_handle, const long lon
   return s/* /(float)n*/;
 }
 
-template <>
-cublasStatus_t cublasXgemm<float>(cublasHandle_t handle,
- cublasOperation_t transa, cublasOperation_t transb, int m, int n, int k,
- float *alpha, const float *A, int lda,
- float *B, int ldb, float *beta,
- float *C, int ldc)
-{
-  return cublasSgemm(handle, transa, transb, m, n, k, alpha, A, lda, B, ldb, beta, C, ldc);
-}
 
-template <>
-cublasStatus_t cublasXgemm<double>(cublasHandle_t handle, cublasOperation_t transa, cublasOperation_t transb, 
- int m, int n, int k,
- double *alpha, const double *A, int lda,
- double *B, int ldb, double *beta,
- double *C, int ldc)
+template <typename Dtype>
+__global__ void gpu_gemm_debug_kernel(const bool TransA,
+ const bool TransB, const long long int M, const long long int N, const long long int K,
+ const Dtype alpha, const Dtype* A, const Dtype* B, const Dtype beta,
+ const Dtype* C, Dtype* c) 
 {
-  return cublasDgemm(handle, transa, transb, m, n, k, alpha, A, lda, B, ldb, beta, C, ldc);
+  CUDA_KERNEL_LOOP(one, 1){
+    long long int row = N - (long long int)1;
+    long long int col = M - (long long int)1;
+
+    long long int lda = (TransA == false) ? K : M;
+    long long int ldb = (TransB == false) ? N : K;
+    c[one] = C[row + col * N] * beta;
+    Dtype temp = (Dtype)0.0;
+    Dtype a = (float)0.0;
+    Dtype b = (float)0.0;
+    for(long long int i = (long long int)0; i < K; i += (long long int)1){
+      a = (TransA == false) ? A[i + col * lda] : A[col + i * lda];
+      b = (TransB == false) ? B[row + i * ldb] : B[i + row * ldb];
+      temp += a * b;
+    }
+    temp *= alpha;
+    c[one] += temp;
+  }
+
 }
 
 template <>
 void gpu_gemm<float>(cublasHandle_t dn_handle, const bool TransA,
- const bool TransB, const int M, const int N, const int K,
+ const bool TransB, const long long int M, const long long int N, const long long int K,
  const float alpha, const float* A, const float* B, const float beta,
  float* C) 
 {
+  bool Debug = false;
+  float c;
+  if(Debug){
+    LOG("calling gpu_gemm");
+    gpu_gemm_debug_kernel<float><<<1, 1>>>(TransA, TransB, M, N, K, alpha, A, B, beta, C, &c);
+    checkCudaErrors(cudaDeviceSynchronize());
+    LOG("c : "<< c);
+  }
   // Note that cublas follows fortran order.
   // column-major ordering marches down a complete column
   // before moving to the next column
   // thus the leading dimension is the number of ROWS 
-  int lda = (TransA == false) ? K : M;
-  int ldb = (TransB == false) ? N : K;
+  long long int lda = (TransA == false) ? K : M;
+  long long int ldb = (TransB == false) ? N : K;
   cublasOperation_t cuTransA =
   (TransA == false) ? CUBLAS_OP_N : CUBLAS_OP_T;
   cublasOperation_t cuTransB =
@@ -1983,11 +2021,17 @@ void gpu_gemm<float>(cublasHandle_t dn_handle, const bool TransA,
   // C is N by M
 
   // performs C=alpha op ( B ) op ( A ) + beta C
+  if(Debug){
+    long long int row = N - (long long int)1;
+    long long int col = M - (long long int)1;
+    checkCudaErrors(cudaMemcpy(&c, C + (row + col * N), sizeof(float), cudaMemcpyDeviceToHost));
+    LOG("C : "<< c);
+  }
 }
 
 template <>
 void gpu_gemm<double>(cublasHandle_t dn_handle, const bool TransA,
-  const bool TransB, const int M, const int N, const int K,
+  const bool TransB, const long long int M, const long long int N, const long long int K,
   const double alpha, const double* A, const double* B, const double beta,
   double* C) 
 {
@@ -1995,8 +2039,8 @@ void gpu_gemm<double>(cublasHandle_t dn_handle, const bool TransA,
   // column-major ordering marches down a complete column
   // before moving to the next column
   // thus the leading dimension is the number of ROWS 
-  int lda = (TransA == false) ? K : M;
-  int ldb = (TransB == false) ? N : K;
+  long long int lda = (TransA == false) ? K : M;
+  long long int ldb = (TransB == false) ? N : K;
   cublasOperation_t cuTransA =
   (TransA == false) ? CUBLAS_OP_N : CUBLAS_OP_T;
   cublasOperation_t cuTransB =
@@ -2083,9 +2127,9 @@ cublasStatus_t cublasXgemmBatched<double>(cublasHandle_t handle,
 
 template <>
 void cublasXSparsegemm<float>(cusparseHandle_t handle, bool TransA, bool TransB, 
-  int m, int n, int k, int nnz, float *alpha, const cusparseMatDescr_t descrA, 
+  long long int m, long long int n, long long int k, int nnz, float *alpha, const cusparseMatDescr_t descrA, 
   const float *csrValA, const int *csrRowPtrA, const int *csrColIndA,
-  float *B, int ldb, float *beta, float *C, int ldc)
+  float *B, long long int ldb, float *beta, float *C, long long int ldc)
 {
   /*
     This function performs one of the following matrix-matrix operations:
@@ -2110,9 +2154,9 @@ void cublasXSparsegemm<float>(cusparseHandle_t handle, bool TransA, bool TransB,
 
 template <>
 void cublasXSparsegemm<double>(cusparseHandle_t handle, bool TransA, bool TransB,
-  int m, int n, int k, int nnz, double *alpha, const cusparseMatDescr_t descrA, 
+  long long int m, long long int n, long long int k, int nnz, double *alpha, const cusparseMatDescr_t descrA, 
   const double *csrValA, const int *csrRowPtrA, const int *csrColIndA,
-  double *B, int ldb, double *beta, double *C, int ldc)
+  double *B, long long int ldb, double *beta, double *C, long long int ldc)
 {
   cusparseOperation_t cuTransA =
   (TransA == false) ? CUSPARSE_OPERATION_NON_TRANSPOSE : CUSPARSE_OPERATION_TRANSPOSE;
@@ -2237,196 +2281,196 @@ void cublasCSCSparseXgemm<float>(cusparseHandle_t handle,int m, int n, int k, in
 
 
 
-  __global__ void gpu_split_data_kernel(const int* csr_format_ratingsMtx_userID_dev,
-    const int* coo_format_ratingsMtx_itemID_dev,
-    const float* coo_format_ratingsMtx_rating_dev, 
-    const int ratings_rows, const bool *testing_bools,
-    int* csr_format_ratingsMtx_userID_dev_training,
-    int* coo_format_ratingsMtx_itemID_dev_training,
-    float* coo_format_ratingsMtx_rating_dev_training,
-    const int ratings_rows_training,
-    int* csr_format_ratingsMtx_userID_dev_testing,
-    int* coo_format_ratingsMtx_itemID_dev_testing,
-    float* coo_format_ratingsMtx_rating_dev_testing,
-    const int ratings_rows_testing) 
-  {
+__global__ void gpu_split_data_kernel(const int* csr_format_ratingsMtx_userID_dev,
+  const int* coo_format_ratingsMtx_itemID_dev,
+  const float* coo_format_ratingsMtx_rating_dev, 
+  const int ratings_rows, const bool *testing_bools,
+  int* csr_format_ratingsMtx_userID_dev_training,
+  int* coo_format_ratingsMtx_itemID_dev_training,
+  float* coo_format_ratingsMtx_rating_dev_training,
+  const int ratings_rows_training,
+  int* csr_format_ratingsMtx_userID_dev_testing,
+  int* coo_format_ratingsMtx_itemID_dev_testing,
+  float* coo_format_ratingsMtx_rating_dev_testing,
+  const int ratings_rows_testing) 
+{
 
-    CUDA_KERNEL_LOOP(row, ratings_rows){
+  CUDA_KERNEL_LOOP(row, ratings_rows){
 
-      int r_ = 0;
-      int csr_start = 0;
-      int num_user = 0;
-      while(r_ < row){
-        if(testing_bools[r_] == testing_bools[row]){
-          csr_start += csr_format_ratingsMtx_userID_dev[r_ + 1] - csr_format_ratingsMtx_userID_dev[r_];
-          num_user  += 1;
-        }
-        r_++;
+    int r_ = 0;
+    int csr_start = 0;
+    int num_user = 0;
+    while(r_ < row){
+      if(testing_bools[r_] == testing_bools[row]){
+        csr_start += csr_format_ratingsMtx_userID_dev[r_ + 1] - csr_format_ratingsMtx_userID_dev[r_];
+        num_user  += 1;
       }
-      int csr_end = csr_start + csr_format_ratingsMtx_userID_dev[row + 1] - csr_format_ratingsMtx_userID_dev[row];
-      int* csr_format_ratingsMtx_userID;
-      int* coo_format_ratingsMtx_itemID;
-      float* coo_format_ratingsMtx_rating;
-
-      if(testing_bools[row]){
-        csr_format_ratingsMtx_userID = csr_format_ratingsMtx_userID_dev_testing;
-        coo_format_ratingsMtx_itemID = coo_format_ratingsMtx_itemID_dev_testing;
-        coo_format_ratingsMtx_rating = coo_format_ratingsMtx_rating_dev_testing;
-        if(num_user == ratings_rows_testing - 1) csr_format_ratingsMtx_userID[num_user + 1] = csr_end;
-      }else{
-        csr_format_ratingsMtx_userID = csr_format_ratingsMtx_userID_dev_training;
-        coo_format_ratingsMtx_itemID = coo_format_ratingsMtx_itemID_dev_training;
-        coo_format_ratingsMtx_rating = coo_format_ratingsMtx_rating_dev_training;
-        if(num_user == ratings_rows_training - 1) csr_format_ratingsMtx_userID[num_user + 1] = csr_end;
-      };
-      csr_format_ratingsMtx_userID[num_user] = csr_start;
-
-      int i = csr_start;
-      for(r_ = csr_format_ratingsMtx_userID_dev[row]; r_ < csr_format_ratingsMtx_userID_dev[row + 1]; r_++){
-        coo_format_ratingsMtx_itemID[i] = coo_format_ratingsMtx_itemID_dev[r_];
-        coo_format_ratingsMtx_rating[i]  = coo_format_ratingsMtx_rating_dev[r_]; 
-        i++;
-      }
-
+      r_++;
     }
-  }
+    int csr_end = csr_start + csr_format_ratingsMtx_userID_dev[row + 1] - csr_format_ratingsMtx_userID_dev[row];
+    int* csr_format_ratingsMtx_userID;
+    int* coo_format_ratingsMtx_itemID;
+    float* coo_format_ratingsMtx_rating;
 
-
-
-
-
-  void gpu_split_data(const int* csr_format_ratingsMtx_userID_dev,
-    const int* coo_format_ratingsMtx_itemID_dev,
-    const float* coo_format_ratingsMtx_rating_dev, 
-    const int ratings_rows, const bool *testing_bools,
-    int* csr_format_ratingsMtx_userID_dev_training,
-    int* coo_format_ratingsMtx_itemID_dev_training,
-    float* coo_format_ratingsMtx_rating_dev_training,
-    const int ratings_rows_training,
-    int* csr_format_ratingsMtx_userID_dev_testing,
-    int* coo_format_ratingsMtx_itemID_dev_testing,
-    float* coo_format_ratingsMtx_rating_dev_testing,
-    const int ratings_rows_testing) 
-  {
-    struct timeval program_start, program_end;
-    double program_time;
-    gettimeofday(&program_start, NULL);
-    std::cout<<"gpu_split_data called..."<<std::endl;
-
-    const long long int num_gpu_blocks= GET_BLOCKS(ratings_rows);
-
-    if (num_gpu_blocks > CUDA_NUM_BLOCKS){
-      ABORT_IF_NEQ(0, 1, "Max Blocks Exceeded");
+    if(testing_bools[row]){
+      csr_format_ratingsMtx_userID = csr_format_ratingsMtx_userID_dev_testing;
+      coo_format_ratingsMtx_itemID = coo_format_ratingsMtx_itemID_dev_testing;
+      coo_format_ratingsMtx_rating = coo_format_ratingsMtx_rating_dev_testing;
+      if(num_user == ratings_rows_testing - 1) csr_format_ratingsMtx_userID[num_user + 1] = csr_end;
+    }else{
+      csr_format_ratingsMtx_userID = csr_format_ratingsMtx_userID_dev_training;
+      coo_format_ratingsMtx_itemID = coo_format_ratingsMtx_itemID_dev_training;
+      coo_format_ratingsMtx_rating = coo_format_ratingsMtx_rating_dev_training;
+      if(num_user == ratings_rows_training - 1) csr_format_ratingsMtx_userID[num_user + 1] = csr_end;
     };
+    csr_format_ratingsMtx_userID[num_user] = csr_start;
 
-    gpu_split_data_kernel<<<num_gpu_blocks, CUDA_NUM_THREADS>>>(csr_format_ratingsMtx_userID_dev,
-      coo_format_ratingsMtx_itemID_dev,
-      coo_format_ratingsMtx_rating_dev, 
-      ratings_rows, testing_bools,
-      csr_format_ratingsMtx_userID_dev_training,
-      coo_format_ratingsMtx_itemID_dev_training,
-      coo_format_ratingsMtx_rating_dev_training,
-      ratings_rows_training,
-      csr_format_ratingsMtx_userID_dev_testing,
-      coo_format_ratingsMtx_itemID_dev_testing,
-      coo_format_ratingsMtx_rating_dev_testing,
-      ratings_rows_testing);
-    checkCudaErrors(cudaDeviceSynchronize());
-    gettimeofday(&program_end, NULL);
-    program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
+    int i = csr_start;
+    for(r_ = csr_format_ratingsMtx_userID_dev[row]; r_ < csr_format_ratingsMtx_userID_dev[row + 1]; r_++){
+      coo_format_ratingsMtx_itemID[i] = coo_format_ratingsMtx_itemID_dev[r_];
+      coo_format_ratingsMtx_rating[i]  = coo_format_ratingsMtx_rating_dev[r_]; 
+      i++;
+    }
+
+  }
+}
+
+
+
+
+
+void gpu_split_data(const int* csr_format_ratingsMtx_userID_dev,
+  const int* coo_format_ratingsMtx_itemID_dev,
+  const float* coo_format_ratingsMtx_rating_dev, 
+  const int ratings_rows, const bool *testing_bools,
+  int* csr_format_ratingsMtx_userID_dev_training,
+  int* coo_format_ratingsMtx_itemID_dev_training,
+  float* coo_format_ratingsMtx_rating_dev_training,
+  const int ratings_rows_training,
+  int* csr_format_ratingsMtx_userID_dev_testing,
+  int* coo_format_ratingsMtx_itemID_dev_testing,
+  float* coo_format_ratingsMtx_rating_dev_testing,
+  const int ratings_rows_testing) 
+{
+  struct timeval program_start, program_end;
+  double program_time;
+  gettimeofday(&program_start, NULL);
+  std::cout<<"gpu_split_data called..."<<std::endl;
+
+  const long long int num_gpu_blocks = GET_BLOCKS(ratings_rows);
+
+  if (num_gpu_blocks > CUDA_NUM_BLOCKS){
+    ABORT_IF_NEQ(0, 1, "Max Blocks Exceeded");
+  };
+
+  gpu_split_data_kernel<<<num_gpu_blocks, CUDA_NUM_THREADS>>>(csr_format_ratingsMtx_userID_dev,
+    coo_format_ratingsMtx_itemID_dev,
+    coo_format_ratingsMtx_rating_dev, 
+    ratings_rows, testing_bools,
+    csr_format_ratingsMtx_userID_dev_training,
+    coo_format_ratingsMtx_itemID_dev_training,
+    coo_format_ratingsMtx_rating_dev_training,
+    ratings_rows_training,
+    csr_format_ratingsMtx_userID_dev_testing,
+    coo_format_ratingsMtx_itemID_dev_testing,
+    coo_format_ratingsMtx_rating_dev_testing,
+    ratings_rows_testing);
+  checkCudaErrors(cudaDeviceSynchronize());
+  gettimeofday(&program_end, NULL);
+  program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
   //printf("getData runtime: %f\n", program_time); 
-    std::cout<<"finished call to gpu_split_data in "<<program_time<< "ms"<<std::endl<<std::endl;
+  std::cout<<"finished call to gpu_split_data in "<<program_time<< "ms"<<std::endl<<std::endl;
   //std::cout<<std::endl;
 
-  }
+}
 
 
-  __global__ void gpu_split_data_kernel(const int* csr_format_ratingsMtx_userID_dev,
-    const int* coo_format_ratingsMtx_itemID_dev,
-    const float* coo_format_ratingsMtx_rating_dev, 
-    const int ratings_rows, const int *group_indicies,
-    int** csr_format_ratingsMtx_userID_dev_by_group,
-    int** coo_format_ratingsMtx_itemID_dev_by_group,
-    float** coo_format_ratingsMtx_rating_dev_by_group,
-    const int* ratings_rows_by_group) 
-  {
+__global__ void gpu_split_data_kernel(const int* csr_format_ratingsMtx_userID_dev,
+  const int* coo_format_ratingsMtx_itemID_dev,
+  const float* coo_format_ratingsMtx_rating_dev, 
+  const int ratings_rows, const int *group_indicies,
+  int** csr_format_ratingsMtx_userID_dev_by_group,
+  int** coo_format_ratingsMtx_itemID_dev_by_group,
+  float** coo_format_ratingsMtx_rating_dev_by_group,
+  const int* ratings_rows_by_group) 
+{
 
-    CUDA_KERNEL_LOOP(row, ratings_rows){
+  CUDA_KERNEL_LOOP(row, ratings_rows){
 
-      int r_ = 0;
-      int csr_start = 0;
-      int num_user = 0;
-      int group = group_indicies[row];
-      while(r_ < row){
-        if(group_indicies[r_] == group){
-          csr_start += csr_format_ratingsMtx_userID_dev[r_ + 1] - csr_format_ratingsMtx_userID_dev[r_];
-          num_user  += 1;
-        }
-        r_++;
+    int r_ = 0;
+    int csr_start = 0;
+    int num_user = 0;
+    int group = group_indicies[row];
+    while(r_ < row){
+      if(group_indicies[r_] == group){
+        csr_start += csr_format_ratingsMtx_userID_dev[r_ + 1] - csr_format_ratingsMtx_userID_dev[r_];
+        num_user  += 1;
       }
-      int csr_end = csr_start + csr_format_ratingsMtx_userID_dev[row + 1] - csr_format_ratingsMtx_userID_dev[row];
-      int* csr_format_ratingsMtx_userID;
-      int* coo_format_ratingsMtx_itemID;
-      float* coo_format_ratingsMtx_rating;
-      int ratings_rows_ = ratings_rows_by_group[group];
-      csr_format_ratingsMtx_userID = csr_format_ratingsMtx_userID_dev_by_group[group];
-      coo_format_ratingsMtx_itemID = coo_format_ratingsMtx_itemID_dev_by_group[group];
-      coo_format_ratingsMtx_rating = coo_format_ratingsMtx_rating_dev_by_group[group];
-      if(num_user == ratings_rows_ - 1) csr_format_ratingsMtx_userID[num_user + 1] = csr_end;
-      csr_format_ratingsMtx_userID[num_user] = csr_start;
-
-      int i = csr_start;
-      for(r_ = csr_format_ratingsMtx_userID_dev[row]; r_ < csr_format_ratingsMtx_userID_dev[row + 1]; r_++){
-        coo_format_ratingsMtx_itemID[i] = coo_format_ratingsMtx_itemID_dev[r_];
-        coo_format_ratingsMtx_rating[i]  = coo_format_ratingsMtx_rating_dev[r_]; 
-        i++;
-      }
-
+      r_++;
     }
+    int csr_end = csr_start + csr_format_ratingsMtx_userID_dev[row + 1] - csr_format_ratingsMtx_userID_dev[row];
+    int* csr_format_ratingsMtx_userID;
+    int* coo_format_ratingsMtx_itemID;
+    float* coo_format_ratingsMtx_rating;
+    int ratings_rows_ = ratings_rows_by_group[group];
+    csr_format_ratingsMtx_userID = csr_format_ratingsMtx_userID_dev_by_group[group];
+    coo_format_ratingsMtx_itemID = coo_format_ratingsMtx_itemID_dev_by_group[group];
+    coo_format_ratingsMtx_rating = coo_format_ratingsMtx_rating_dev_by_group[group];
+    if(num_user == ratings_rows_ - 1) csr_format_ratingsMtx_userID[num_user + 1] = csr_end;
+    csr_format_ratingsMtx_userID[num_user] = csr_start;
+
+    int i = csr_start;
+    for(r_ = csr_format_ratingsMtx_userID_dev[row]; r_ < csr_format_ratingsMtx_userID_dev[row + 1]; r_++){
+      coo_format_ratingsMtx_itemID[i] = coo_format_ratingsMtx_itemID_dev[r_];
+      coo_format_ratingsMtx_rating[i]  = coo_format_ratingsMtx_rating_dev[r_]; 
+      i++;
+    }
+
   }
+}
 
 
 
 
 
-  void gpu_split_data(const int* csr_format_ratingsMtx_userID_dev,
-    const int* coo_format_ratingsMtx_itemID_dev,
-    const float* coo_format_ratingsMtx_rating_dev, 
-    const int ratings_rows, const int *group_indicies,
-    int** csr_format_ratingsMtx_userID_dev_by_group,
-    int** coo_format_ratingsMtx_itemID_dev_by_group,
-    float** coo_format_ratingsMtx_rating_dev_by_group,
-    const int* ratings_rows_by_group) 
-  {
-    struct timeval program_start, program_end;
-    double program_time;
-    gettimeofday(&program_start, NULL);
-    LOG("gpu_split_data called...");
+void gpu_split_data(const int* csr_format_ratingsMtx_userID_dev,
+  const int* coo_format_ratingsMtx_itemID_dev,
+  const float* coo_format_ratingsMtx_rating_dev, 
+  const int ratings_rows, const int *group_indicies,
+  int** csr_format_ratingsMtx_userID_dev_by_group,
+  int** coo_format_ratingsMtx_itemID_dev_by_group,
+  float** coo_format_ratingsMtx_rating_dev_by_group,
+  const int* ratings_rows_by_group) 
+{
+  struct timeval program_start, program_end;
+  double program_time;
+  gettimeofday(&program_start, NULL);
+  LOG("gpu_split_data called...");
 
-    const long long int num_gpu_blocks= GET_BLOCKS(ratings_rows);
+  const long long int num_gpu_blocks = GET_BLOCKS(ratings_rows);
 
-    if (num_gpu_blocks > CUDA_NUM_BLOCKS){
-      ABORT_IF_NEQ(0, 1, "Max Blocks Exceeded");
-    };
+  if (num_gpu_blocks > CUDA_NUM_BLOCKS){
+    ABORT_IF_NEQ(0, 1, "Max Blocks Exceeded");
+  };
 
-    gpu_split_data_kernel<<<num_gpu_blocks, CUDA_NUM_THREADS>>>(csr_format_ratingsMtx_userID_dev,
-      coo_format_ratingsMtx_itemID_dev,
-      coo_format_ratingsMtx_rating_dev, 
-      ratings_rows, group_indicies,
-      csr_format_ratingsMtx_userID_dev_by_group,
-      coo_format_ratingsMtx_itemID_dev_by_group,
-      coo_format_ratingsMtx_rating_dev_by_group,
-      ratings_rows_by_group);
-    checkCudaErrors(cudaDeviceSynchronize());
-    gettimeofday(&program_end, NULL);
-    program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
+  gpu_split_data_kernel<<<num_gpu_blocks, CUDA_NUM_THREADS>>>(csr_format_ratingsMtx_userID_dev,
+    coo_format_ratingsMtx_itemID_dev,
+    coo_format_ratingsMtx_rating_dev, 
+    ratings_rows, group_indicies,
+    csr_format_ratingsMtx_userID_dev_by_group,
+    coo_format_ratingsMtx_itemID_dev_by_group,
+    coo_format_ratingsMtx_rating_dev_by_group,
+    ratings_rows_by_group);
+  checkCudaErrors(cudaDeviceSynchronize());
+  gettimeofday(&program_end, NULL);
+  program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
   //printf("getData runtime: %f\n", program_time); 
-    LOG("finished call to gpu_split_data in "<<program_time<< "ms");
+  LOG("finished call to gpu_split_data in "<<program_time<< "ms");
   //std::cout<<std::endl;
 
-  }
+}
 
-  __global__ void collect_user_means_kernel(float* user_means_training,float* user_var_training, const long long int ratings_rows_training,
+__global__ void collect_user_means_kernel(float* user_means_training,float* user_var_training, const long long int ratings_rows_training,
                                           const int* csr_format_ratingsMtx_userID_dev_training,
                                           const float* coo_format_ratingsMtx_rating_dev_training,
                                           float* user_means_testing,float* user_var_testing, const long long int ratings_rows_testing,
@@ -2507,7 +2551,7 @@ void collect_user_means(float* user_means_training,float* user_var_training, con
   CUDA_CHECK(cudaMalloc((void**)&isBad, sizeof(bool)));
   CUDA_CHECK(cudaMemcpy(isBad, &isBad_host, sizeof(bool), cudaMemcpyHostToDevice));
 
-  const int num_gpu_blocks= GET_BLOCKS(ratings_rows_testing + ratings_rows_training + ratings_rows_GA);
+  const int num_gpu_blocks = GET_BLOCKS(ratings_rows_testing + ratings_rows_training + ratings_rows_GA);
 
   if (num_gpu_blocks > CUDA_NUM_BLOCKS){
       ABORT_IF_NEQ(0, 1, "Max Blocks Exceeded");
@@ -2551,154 +2595,154 @@ void collect_user_means(float* user_means_training,float* user_var_training, con
 }
 
 
-  __global__ void collect_user_means_kernel(float* user_means,float* user_var, const long long int ratings_rows,
-    const int* csr_format_ratingsMtx_userID_dev,
-    const float* coo_format_ratingsMtx_rating_dev,
-    bool* isBad)
-  {
+__global__ void collect_user_means_kernel(float* user_means,float* user_var, const long long int ratings_rows,
+  const int* csr_format_ratingsMtx_userID_dev,
+  const float* coo_format_ratingsMtx_rating_dev,
+  bool* isBad)
+{
 
-    CUDA_KERNEL_LOOP(row, ratings_rows){
-      float m = 0;
-      float v = 0;
-      int count = 0;
-      for(long long int i = csr_format_ratingsMtx_userID_dev[row]; i < csr_format_ratingsMtx_userID_dev[row + 1]; i++){
-        m += coo_format_ratingsMtx_rating_dev[i];
-        v += pow(coo_format_ratingsMtx_rating_dev[i],(float)2.0); 
-        count++;
-      }
-      user_means[row] = m / (float)count;
-      user_var[row] = v / (float)count - pow(user_means[row], (float)2.0);
-      if(user_var[row] <= (float)0.0){
-        user_var[row] = (float)0.0;
-    //isBad[0] = true;
-      }
+  CUDA_KERNEL_LOOP(row, ratings_rows){
+    float m = 0;
+    float v = 0;
+    int count = 0;
+    for(long long int i = csr_format_ratingsMtx_userID_dev[row]; i < csr_format_ratingsMtx_userID_dev[row + 1]; i++){
+      m += coo_format_ratingsMtx_rating_dev[i];
+      v += pow(coo_format_ratingsMtx_rating_dev[i],(float)2.0); 
+      count++;
+    }
+    user_means[row] = m / (float)count;
+    user_var[row] = v / (float)count - pow(user_means[row], (float)2.0);
+    if(user_var[row] <= (float)0.0){
+      user_var[row] = (float)0.0;
+      //isBad[0] = true;
     }
   }
+}
 
 
-  void collect_user_means(float* user_means,float* user_var, const long long int ratings_rows,
-    const int* csr_format_ratingsMtx_userID_dev,
-    const float* coo_format_ratingsMtx_rating_dev)
-  {
-    bool Debug = false;
+void collect_user_means(float* user_means,float* user_var, const long long int ratings_rows,
+  const int* csr_format_ratingsMtx_userID_dev,
+  const float* coo_format_ratingsMtx_rating_dev)
+{
+  bool Debug = false;
 
-    bool isBad_host = false;
-    bool* isBad;
-    CUDA_CHECK(cudaMalloc((void**)&isBad, sizeof(bool)));
-    CUDA_CHECK(cudaMemcpy(isBad, &isBad_host, sizeof(bool), cudaMemcpyHostToDevice));
+  bool isBad_host = false;
+  bool* isBad;
+  CUDA_CHECK(cudaMalloc((void**)&isBad, sizeof(bool)));
+  CUDA_CHECK(cudaMemcpy(isBad, &isBad_host, sizeof(bool), cudaMemcpyHostToDevice));
 
-    const long long int num_gpu_blocks= GET_BLOCKS(ratings_rows);
+  const long long int num_gpu_blocks = GET_BLOCKS(ratings_rows);
 
-    if (num_gpu_blocks > CUDA_NUM_BLOCKS){
-      ABORT_IF_NEQ(0, 1, "Max Blocks Exceeded");
-    };
+  if (num_gpu_blocks > CUDA_NUM_BLOCKS){
+    ABORT_IF_NEQ(0, 1, "Max Blocks Exceeded");
+  };
 
-    collect_user_means_kernel<<<num_gpu_blocks, CUDA_NUM_THREADS>>>(user_means, user_var, ratings_rows,
-      csr_format_ratingsMtx_userID_dev,
-      coo_format_ratingsMtx_rating_dev,
-      isBad);
+  collect_user_means_kernel<<<num_gpu_blocks, CUDA_NUM_THREADS>>>(user_means, user_var, ratings_rows,
+    csr_format_ratingsMtx_userID_dev,
+    coo_format_ratingsMtx_rating_dev,
+    isBad);
 
-    CUDA_CHECK(cudaMemcpy(&isBad_host, isBad, sizeof(bool), cudaMemcpyDeviceToHost));
-    checkCudaErrors(cudaFree(isBad));
-    if(isBad_host){
-      float ratings_rows_min = gpu_min<float>(ratings_rows, user_var);
-      LOG("ratings_rows_min :" <<ratings_rows_min);
+  CUDA_CHECK(cudaMemcpy(&isBad_host, isBad, sizeof(bool), cudaMemcpyDeviceToHost));
+  checkCudaErrors(cudaFree(isBad));
+  if(isBad_host){
+    float ratings_rows_min = gpu_min<float>(ratings_rows, user_var);
+    LOG("ratings_rows_min :" <<ratings_rows_min);
 
-      float ratings_rows_max = gpu_abs_max<float>(ratings_rows, user_var);
-      LOG("ratings_rows_max :" <<ratings_rows_max);
+    float ratings_rows_max = gpu_abs_max<float>(ratings_rows, user_var);
+    LOG("ratings_rows_max :" <<ratings_rows_max);
 
-      save_device_array_to_file<float>(user_var, ratings_rows, "user_var");
-      ABORT_IF_NEQ(0, 1, "isBad");
-    };
+    save_device_array_to_file<float>(user_var, ratings_rows, "user_var");
+    ABORT_IF_NEQ(0, 1, "isBad");
+  };
 
-  }
-
-
+}
 
 
 
 
-  __global__ void fill_training_mtx_kernel(const long long int ratings_rows_training, 
-    const long long int ratings_cols_training, const bool row_major_ordering, 
-    const int* csr_format_ratingsMtx_userID_dev_training,
-    const int* coo_format_ratingsMtx_itemID_dev_training,
-    const float* coo_format_ratingsMtx_rating_dev_training,
-    float* full_training_ratings_mtx, long long int start, int num,
-    bool* isBad)
-  {
-
-    CUDA_KERNEL_LOOP(j, num){
-      long long int row = (long long int)j + start;
-      for(long long int i = csr_format_ratingsMtx_userID_dev_training[row]; i < csr_format_ratingsMtx_userID_dev_training[row + (long long int)1]; i++){
-        long long int col = coo_format_ratingsMtx_itemID_dev_training[i];
-        float val = coo_format_ratingsMtx_rating_dev_training[i]; 
-        if (::isinf(val) || ::isnan(val)){
-          isBad[0] = true;
-        };
-        if(row_major_ordering){
-          full_training_ratings_mtx[ratings_cols_training * row + col] = val;
-        }else{
-          full_training_ratings_mtx[row + ratings_rows_training * col] = val;
-        };
-      }
-    }
-  }
 
 
-  void gpu_fill_training_mtx(const long long int ratings_rows_training, 
-    const long long int ratings_cols_training, 
-    const bool row_major_ordering,
-    const int* csr_format_ratingsMtx_userID_dev_training,
-    const int* coo_format_ratingsMtx_itemID_dev_training,
-    const float* coo_format_ratingsMtx_rating_dev_training,
-    float* full_training_ratings_mtx)
-  {
-    bool isBad_host = false;
-    bool* isBad;
-    CUDA_CHECK(cudaMalloc((void**)&isBad, sizeof(bool)));
-    CUDA_CHECK(cudaMemcpy(isBad, &isBad_host, sizeof(bool), cudaMemcpyHostToDevice));
+__global__ void fill_training_mtx_kernel(const long long int ratings_rows_training, 
+  const long long int ratings_cols_training, const bool row_major_ordering, 
+  const int* csr_format_ratingsMtx_userID_dev_training,
+  const int* coo_format_ratingsMtx_itemID_dev_training,
+  const float* coo_format_ratingsMtx_rating_dev_training,
+  float* full_training_ratings_mtx, long long int start, int num,
+  bool* isBad)
+{
 
-    long long int num_gpu_blocks= GET_BLOCKS(ratings_rows_training);
-
-    if (num_gpu_blocks > CUDA_NUM_BLOCKS){
-      long long int num_loops   = 0;
-      long long int num_entries = CUDA_NUM_BLOCKS * CUDA_NUM_THREADS;
-      long long int spot        = 0;
-      while (num_gpu_blocks > CUDA_NUM_BLOCKS){
-      fill_training_mtx_kernel<<<CUDA_NUM_BLOCKS, CUDA_NUM_THREADS>>>(ratings_rows_training,ratings_cols_training, row_major_ordering, 
-        csr_format_ratingsMtx_userID_dev_training,
-        coo_format_ratingsMtx_itemID_dev_training,
-        coo_format_ratingsMtx_rating_dev_training,
-        full_training_ratings_mtx, spot, num_entries,
-        isBad);
-        num_gpu_blocks = num_gpu_blocks - CUDA_NUM_BLOCKS;
-        num_loops     += (long long int)1;
-        spot           = num_loops * num_entries;
+  CUDA_KERNEL_LOOP(j, num){
+    long long int row = (long long int)j + start;
+    for(long long int i = csr_format_ratingsMtx_userID_dev_training[row]; i < csr_format_ratingsMtx_userID_dev_training[row + (long long int)1]; i++){
+      long long int col = coo_format_ratingsMtx_itemID_dev_training[i];
+      float val = coo_format_ratingsMtx_rating_dev_training[i]; 
+      if (::isinf(val) || ::isnan(val)){
+        isBad[0] = true;
       };
-      fill_training_mtx_kernel<<<num_gpu_blocks, CUDA_NUM_THREADS>>>(ratings_rows_training,ratings_cols_training, row_major_ordering, 
-        csr_format_ratingsMtx_userID_dev_training,
-        coo_format_ratingsMtx_itemID_dev_training,
-        coo_format_ratingsMtx_rating_dev_training,
-        full_training_ratings_mtx, spot, ratings_rows_training - spot,
-        isBad);
-    }else{
-      fill_training_mtx_kernel<<<num_gpu_blocks, CUDA_NUM_THREADS>>>(ratings_rows_training,ratings_cols_training, row_major_ordering, 
-        csr_format_ratingsMtx_userID_dev_training,
-        coo_format_ratingsMtx_itemID_dev_training,
-        coo_format_ratingsMtx_rating_dev_training,
-        full_training_ratings_mtx, (long long int)0, ratings_rows_training,
-        isBad);
-    };
-
-
-
-    CUDA_CHECK(cudaMemcpy(&isBad_host, isBad, sizeof(bool), cudaMemcpyDeviceToHost));
-    checkCudaErrors(cudaFree(isBad));
-    if(isBad_host){
-      ABORT_IF_NEQ(0, 1, "isBad");
-    };
-
+      if(row_major_ordering){
+        full_training_ratings_mtx[ratings_cols_training * row + col] = val;
+      }else{
+        full_training_ratings_mtx[row + ratings_rows_training * col] = val;
+      };
+    }
   }
+}
+
+
+void gpu_fill_training_mtx(const long long int ratings_rows_training, 
+  const long long int ratings_cols_training, 
+  const bool row_major_ordering,
+  const int* csr_format_ratingsMtx_userID_dev_training,
+  const int* coo_format_ratingsMtx_itemID_dev_training,
+  const float* coo_format_ratingsMtx_rating_dev_training,
+  float* full_training_ratings_mtx)
+{
+  bool isBad_host = false;
+  bool* isBad;
+  CUDA_CHECK(cudaMalloc((void**)&isBad, sizeof(bool)));
+  CUDA_CHECK(cudaMemcpy(isBad, &isBad_host, sizeof(bool), cudaMemcpyHostToDevice));
+
+  long long int num_gpu_blocks = GET_BLOCKS(ratings_rows_training);
+
+  if (num_gpu_blocks > CUDA_NUM_BLOCKS){
+    long long int num_loops   = 0;
+    long long int num_entries = CUDA_NUM_BLOCKS * CUDA_NUM_THREADS;
+    long long int spot        = 0;
+    while (num_gpu_blocks > CUDA_NUM_BLOCKS){
+    fill_training_mtx_kernel<<<CUDA_NUM_BLOCKS, CUDA_NUM_THREADS>>>(ratings_rows_training,ratings_cols_training, row_major_ordering, 
+      csr_format_ratingsMtx_userID_dev_training,
+      coo_format_ratingsMtx_itemID_dev_training,
+      coo_format_ratingsMtx_rating_dev_training,
+      full_training_ratings_mtx, spot, num_entries,
+      isBad);
+      num_gpu_blocks = num_gpu_blocks - (long long int)CUDA_NUM_BLOCKS;
+      num_loops     += (long long int)1;
+      spot           = num_loops * num_entries;
+    };
+    fill_training_mtx_kernel<<<num_gpu_blocks, CUDA_NUM_THREADS>>>(ratings_rows_training,ratings_cols_training, row_major_ordering, 
+      csr_format_ratingsMtx_userID_dev_training,
+      coo_format_ratingsMtx_itemID_dev_training,
+      coo_format_ratingsMtx_rating_dev_training,
+      full_training_ratings_mtx, spot, ratings_rows_training - spot,
+      isBad);
+  }else{
+    fill_training_mtx_kernel<<<num_gpu_blocks, CUDA_NUM_THREADS>>>(ratings_rows_training,ratings_cols_training, row_major_ordering, 
+      csr_format_ratingsMtx_userID_dev_training,
+      coo_format_ratingsMtx_itemID_dev_training,
+      coo_format_ratingsMtx_rating_dev_training,
+      full_training_ratings_mtx, (long long int)0, ratings_rows_training,
+      isBad);
+  };
+
+
+
+  CUDA_CHECK(cudaMemcpy(&isBad_host, isBad, sizeof(bool), cudaMemcpyDeviceToHost));
+  checkCudaErrors(cudaFree(isBad));
+  if(isBad_host){
+    ABORT_IF_NEQ(0, 1, "isBad");
+  };
+
+}
 
 
 
@@ -2789,7 +2833,7 @@ void gpu_supplement_training_mtx_with_content_based(const long long int ratings_
     CUDA_CHECK(cudaMalloc((void**)&isBad, sizeof(bool)));
     CUDA_CHECK(cudaMemcpy(isBad, &isBad_host, sizeof(bool), cudaMemcpyHostToDevice));
 
-    long long int num_gpu_blocks= GET_BLOCKS(ratings_rows_training * ratings_cols_training);
+    long long int num_gpu_blocks = GET_BLOCKS(ratings_rows_training * ratings_cols_training);
 
     if (num_gpu_blocks > CUDA_NUM_BLOCKS){
       long long int num_loops   = 0;
@@ -2806,7 +2850,7 @@ void gpu_supplement_training_mtx_with_content_based(const long long int ratings_
          csr_format_keyWordMtx_itemID_dev,
          coo_format_keyWordMtx_keyWord_dev,
          isBad, spot, num_entries);
-        num_gpu_blocks = num_gpu_blocks - CUDA_NUM_BLOCKS;
+        num_gpu_blocks = num_gpu_blocks - (long long int)CUDA_NUM_BLOCKS;
         num_loops     += (long long int)1;
         spot           = num_loops * num_entries;
       };
@@ -2863,13 +2907,13 @@ __global__ void sparse_nearest_row_kernel(const int rows_A, const int cols, cons
   */
 
   const int row_skip = csr_rows_B[0];
-  CUDA_KERNEL_LOOP(row_B,rows_B) {
+  CUDA_KERNEL_LOOP(row_B, rows_B) {
     Dtype closest_A_row_dist = (Dtype)10000.0;
     int   closest_A_row      = 0;
     for(long long int row_A = (long long int)0; row_A < (long long int)rows_A; row_A++){
       Dtype temp = (Dtype)0.0;
       for(long long int coo_index = (long long int)(csr_rows_B[row_B]); coo_index < (long long int)(csr_rows_B[row_B + 1]); coo_index++){
-        long long int col = (long long int)(coo_cols_B[coo_index]);
+        long long int col = (long long int)(coo_cols_B[coo_index - row_skip]);
         temp += pow(dense_mtx_A[row_A + col * rows_A] - coo_entries_B[coo_index],(Dtype)2.0);
       }
       if(temp < closest_A_row_dist || row_A == 0){
@@ -2912,7 +2956,7 @@ void sparse_nearest_row(const int rows_A, const int cols, const Dtype* dense_mtx
     if(Debug) LOG("sparse_nearest_row called");
 
 
-    const long long int num_gpu_blocks= GET_BLOCKS(rows_B);
+    const long long int num_gpu_blocks = GET_BLOCKS(rows_B);
 
     if (num_gpu_blocks > CUDA_NUM_BLOCKS){
       ABORT_IF_NEQ(0, 1, "Max Blocks Exceeded");
@@ -2971,7 +3015,7 @@ __global__ void dense_nearest_row_kernel(const int rows_A, const int cols, const
     for(long long int row_A = (long long int)0; row_A < (long long int)rows_A; row_A++){
       Dtype temp = (Dtype)0.0;
       for(long long int col = (long long int)0; col < (long long int)cols; col++){
-        temp += pow(dense_mtx_A[row_A + col * rows_A] - dense_mtx_B[row_B + col * rows_B],(Dtype)2.0);
+        temp += pow(dense_mtx_A[row_A + col * (long long int)rows_A] - dense_mtx_B[(long long int)row_B + col * (long long int)rows_B],(Dtype)2.0);
       }
       if(temp < closest_A_row_dist || row_A == 0){
         closest_A_row_dist = temp;
@@ -2995,55 +3039,53 @@ void dense_nearest_row(const int rows_A, const int cols, const Dtype* dense_mtx_
     subtract dense_mtx_A from sparse mtx B and put the sparse results in coo_errors
     dense_mtx_A must be in column major ordering
   */
+  bool Debug = false;
+  bool isBad_host = false;
+  bool* isBad;
+  CUDA_CHECK(cudaMalloc((void**)&isBad, sizeof(bool)));
+  CUDA_CHECK(cudaMemcpy(isBad, &isBad_host, sizeof(bool), cudaMemcpyHostToDevice));
+
+  // if(coo_A == NULL){
+  //   Debug = false;
+  // }else{
+  //   Debug = true;
+  // }
+
+  if(Debug) LOG("dense_nearest_row called");
 
 
-    bool Debug = false;
-    bool isBad_host = false;
-    bool* isBad;
-    CUDA_CHECK(cudaMalloc((void**)&isBad, sizeof(bool)));
-    CUDA_CHECK(cudaMemcpy(isBad, &isBad_host, sizeof(bool), cudaMemcpyHostToDevice));
+  const long long int num_gpu_blocks = GET_BLOCKS(rows_B);
 
-    // if(coo_A == NULL){
-    //   Debug = false;
-    // }else{
-    //   Debug = true;
-    // }
-
-    if(Debug) LOG("dense_nearest_row called");
+  if (num_gpu_blocks > CUDA_NUM_BLOCKS){
+    ABORT_IF_NEQ(0, 1, "Max Blocks Exceeded");
+  };
 
 
-    const long long int num_gpu_blocks= GET_BLOCKS(rows_B);
+  if(Debug) {
+    LOG("rows_A : "<< rows_A);
+    LOG("cols : "<< cols);
+    LOG("sparse_error called");
+    save_device_mtx_to_file<Dtype>(dense_mtx_A, rows_A, cols, "dense_mtx_A");
+    save_device_mtx_to_file<Dtype>(dense_mtx_B, rows_B, cols, "dense_mtx_B");
+      // LOG("Press Enter to continue.") ;
+      // std::cin.ignore();
+  };
 
-    if (num_gpu_blocks > CUDA_NUM_BLOCKS){
-      ABORT_IF_NEQ(0, 1, "Max Blocks Exceeded");
-    };
-
-
-    if(Debug) {
-      LOG("rows_A : "<< rows_A);
-      LOG("cols : "<< cols);
-      LOG("sparse_error called");
-      save_device_mtx_to_file<Dtype>(dense_mtx_A, rows_A, cols, "dense_mtx_A");
-      save_device_mtx_to_file<Dtype>(dense_mtx_B, rows_B, cols, "dense_mtx_B");
-        // LOG("Press Enter to continue.") ;
-        // std::cin.ignore();
-    };
-
-    dense_nearest_row_kernel<Dtype><<<num_gpu_blocks, CUDA_NUM_THREADS>>>(rows_A, cols, dense_mtx_A, 
-                              rows_B, dense_mtx_B, selection, error, isBad);
-    if(Debug) {
-      save_device_array_to_file<Dtype>(error, rows_B, "row_errors");
-      save_device_array_to_file<int>(selection, rows_B, "nearest_row");
-      LOG("Press Enter to continue.") ;
-      std::cin.ignore();
-    };    
-    if(Debug && 0)LOG("Here!");
-    CUDA_CHECK(cudaMemcpy(&isBad_host, isBad, sizeof(bool), cudaMemcpyDeviceToHost));
-    checkCudaErrors(cudaFree(isBad));
-    if(isBad_host){
-      ABORT_IF_NEQ(0, 1, "isBad");
-    };
-    if(Debug) LOG("dense_nearest_row call finished");
+  dense_nearest_row_kernel<Dtype><<<num_gpu_blocks, CUDA_NUM_THREADS>>>(rows_A, cols, dense_mtx_A, 
+                            rows_B, dense_mtx_B, selection, error, isBad);
+  if(Debug) {
+    save_device_array_to_file<Dtype>(error, rows_B, "row_errors");
+    save_device_array_to_file<int>(selection, rows_B, "nearest_row");
+    LOG("Press Enter to continue.") ;
+    std::cin.ignore();
+  };    
+  if(Debug && 0)LOG("Here!");
+  CUDA_CHECK(cudaMemcpy(&isBad_host, isBad, sizeof(bool), cudaMemcpyDeviceToHost));
+  checkCudaErrors(cudaFree(isBad));
+  if(isBad_host){
+    ABORT_IF_NEQ(0, 1, "isBad");
+  };
+  if(Debug) LOG("dense_nearest_row call finished");
 }
 
 template void dense_nearest_row<float>(const int rows_A, const int cols, const float* dense_mtx_A, 
@@ -3113,22 +3155,24 @@ void calculate_KM_error_and_update(const int rows_A, const int cols, Dtype* dens
         // std::cin.ignore();
     };
     if (num_gpu_blocks > CUDA_NUM_BLOCKS){
-    int num_loops = 0;
-    int num_entries = CUDA_NUM_BLOCKS*512;
-    int spot = 0;
-    while (num_gpu_blocks > CUDA_NUM_BLOCKS){
-        calculate_KM_error_and_update_kernel<Dtype><<<CUDA_NUM_BLOCKS, CUDA_NUM_THREADS>>>(spot, num_entries, rows_A, cols, dense_mtx_A, 
-                              rows_B, dense_mtx_B, selection, alpha, lambda, isBad);
-      num_gpu_blocks = num_gpu_blocks - CUDA_NUM_BLOCKS;
-      num_loops += 1;
-      spot = num_loops * num_entries;
-    };
-        // spot is the number of entries done so far
-        // total - (done) = left to go 
-        calculate_KM_error_and_update_kernel<Dtype><<<num_gpu_blocks, CUDA_NUM_THREADS>>>(spot, rows_A * cols - spot, rows_A, cols, dense_mtx_A, 
+      int num_loops = (long long int)0;
+      int num_entries = CUDA_NUM_BLOCKS * CUDA_NUM_THREADS;
+      int spot = (long long int)0;
+      if(too_big(num_entries) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
+      while (num_gpu_blocks > CUDA_NUM_BLOCKS){
+          calculate_KM_error_and_update_kernel<Dtype><<<CUDA_NUM_BLOCKS, CUDA_NUM_THREADS>>>(spot, (int)num_entries, rows_A, cols, dense_mtx_A, 
+                                rows_B, dense_mtx_B, selection, alpha, lambda, isBad);
+        num_gpu_blocks = num_gpu_blocks - (long long int)CUDA_NUM_BLOCKS;
+        num_loops += (long long int)1;
+        spot = num_loops * num_entries;
+      };
+          // spot is the number of entries done so far
+          // total - (done) = left to go 
+      calculate_KM_error_and_update_kernel<Dtype><<<num_gpu_blocks, CUDA_NUM_THREADS>>>(spot, (int)(rows_A * cols - spot), rows_A, cols, dense_mtx_A, 
                               rows_B, dense_mtx_B, selection, alpha, lambda, isBad);
     }else{
-        calculate_KM_error_and_update_kernel<Dtype><<<num_gpu_blocks, CUDA_NUM_THREADS>>>((long long int)0, rows_A * cols, rows_A, cols, dense_mtx_A, 
+      if(too_big(rows_A * cols) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
+      calculate_KM_error_and_update_kernel<Dtype><<<num_gpu_blocks, CUDA_NUM_THREADS>>>((long long int)0, (int)(rows_A * cols), rows_A, cols, dense_mtx_A, 
                               rows_B, dense_mtx_B, selection, alpha, lambda, isBad);
     };
 
@@ -3156,24 +3200,24 @@ __global__ void center_ratings_kernel(const float* user_means, const float* user
     const float* coo_format_ratingsMtx_rating_dev,
     float* coo_format_ratingsMtx_row_centered_rating_dev,
     const float val_when_var_is_zero, bool* isBad) 
-  {
+{
 
-    CUDA_KERNEL_LOOP(row, ratings_rows){
-      for(int i = csr_format_ratingsMtx_userID_dev[row]; i < csr_format_ratingsMtx_userID_dev[row + 1]; i++){
-        float val = coo_format_ratingsMtx_rating_dev[i] - user_means[row];
-        if(user_var[row] > (float)0.0){
-          val = val / std::sqrt(user_var[row]);
-        }else{
-          val = val_when_var_is_zero;
-        }
-
-        coo_format_ratingsMtx_row_centered_rating_dev[i] = val;
-        if (::isinf(val) || ::isnan(val)){
-          isBad[0] = true;
-        };
+  CUDA_KERNEL_LOOP(row, ratings_rows){
+    for(int i = csr_format_ratingsMtx_userID_dev[row]; i < csr_format_ratingsMtx_userID_dev[row + 1]; i++){
+      float val = coo_format_ratingsMtx_rating_dev[i] - user_means[row];
+      if(user_var[row] > (float)0.0){
+        val = val / std::sqrt(user_var[row]);
+      }else{
+        val = val_when_var_is_zero;
       }
+
+      coo_format_ratingsMtx_row_centered_rating_dev[i] = val;
+      if (::isinf(val) || ::isnan(val)){
+        isBad[0] = true;
+      };
     }
   }
+}
 
 void center_ratings(const float* user_means, const float* user_var, 
   const int ratings_rows, const int num_entries,
@@ -3189,12 +3233,12 @@ void center_ratings(const float* user_means, const float* user_var,
   CUDA_CHECK(cudaMalloc((void**)&isBad, sizeof(bool)));
   CUDA_CHECK(cudaMemcpy(isBad, &isBad_host, sizeof(bool), cudaMemcpyHostToDevice));
 
-// float min_ = gpu_min<float>(num_entries, coo_format_ratingsMtx_rating_dev);
-// float max_ = gpu_abs_max<float>(num_entries, coo_format_ratingsMtx_rating_dev);
+  // float min_ = gpu_min<float>(num_entries, coo_format_ratingsMtx_rating_dev);
+  // float max_ = gpu_abs_max<float>(num_entries, coo_format_ratingsMtx_rating_dev);
 
-// max_ - 
+  // max_ - 
 
-  const long long int num_gpu_blocks= GET_BLOCKS(ratings_rows);
+  const long long int num_gpu_blocks = GET_BLOCKS(ratings_rows);
 
   if (num_gpu_blocks > CUDA_NUM_BLOCKS){
     ABORT_IF_NEQ(0, 1, "Max Blocks Exceeded");
@@ -3272,7 +3316,7 @@ void center_rows(const long long int rows, const long long int cols,
 
   // max_ - 
 
-  const int num_gpu_blocks= GET_BLOCKS(rows);
+  const int num_gpu_blocks = GET_BLOCKS(rows);
 
   if (num_gpu_blocks > CUDA_NUM_BLOCKS){
       ABORT_IF_NEQ(0, 1, "Max Blocks Exceeded");
@@ -3290,7 +3334,8 @@ void center_rows(const long long int rows, const long long int cols,
 }
 
 
-__device__ long long int from_below_diag_to_whole_device(long long int below_diag_index, int dimension){
+__device__ long long int from_below_diag_to_whole_device(long long int below_diag_index, int dimension)
+{
 
   const long long int num_below_diag = (dimension * (dimension - (long long int)1)) / (long long int)2;
   if( below_diag_index < (long long int)0 || below_diag_index > num_below_diag - (long long int)(1)) return (long long int)(-1);
@@ -3365,7 +3410,8 @@ __device__ long long int from_below_diag_to_whole_device_faster(long long int be
   return row + dimension * col;
 }
 
-__device__ long long int from_whole_to_below_diag_device(long long int whole_index, long long int dimension){
+__device__ long long int from_whole_to_below_diag_device(long long int whole_index, long long int dimension)
+{
   bool debug = false;
   long long int row = (whole_index % dimension);
   long long int col = (whole_index / dimension);
@@ -3450,12 +3496,12 @@ void get_cosine_similarity(const long long int ratings_rows, const long long int
   CUDA_CHECK(cudaMalloc((void**)&isBad, sizeof(bool)));
   CUDA_CHECK(cudaMemcpy(isBad, &isBad_host, sizeof(bool), cudaMemcpyHostToDevice));
 
-// float min_ = gpu_min<float>(num_entries, coo_format_ratingsMtx_rating_dev);
-// float max_ = gpu_abs_max<float>(num_entries, coo_format_ratingsMtx_rating_dev);
+  // float min_ = gpu_min<float>(num_entries, coo_format_ratingsMtx_rating_dev);
+  // float max_ = gpu_abs_max<float>(num_entries, coo_format_ratingsMtx_rating_dev);
 
-// max_ - 
-
-  const long long int num_gpu_blocks= GET_BLOCKS(ratings_rows * ratings_rows);
+  // max_ - 
+  if(too_big(ratings_rows * ratings_rows) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
+  const long long int num_gpu_blocks = GET_BLOCKS(ratings_rows * ratings_rows);
 
   if (num_gpu_blocks > CUDA_NUM_BLOCKS){
     ABORT_IF_NEQ(0, 1, "Max Blocks Exceeded");
@@ -3974,45 +4020,45 @@ void get_cosine_similarity_host_experiment(const long long int ratings_rows,
 
 
 template<typename Dtype>
-__global__ void gpu_permute_kernel(Dtype* A, const int* P, int rows, int cols, bool permute_rows, 
- const int start, const int size) 
+__global__ void gpu_permute_kernel(Dtype* A, const int* P, long long int rows, long long int cols, bool permute_rows, 
+ const long long int start, const int size) 
 {
   //A is rows by cols stored in col major ordering
 
   if(permute_rows){
     //pvt is an array length rows
     CUDA_KERNEL_LOOP(j, size /*cols*/) {
-      int ind=0;
-      Dtype temp=0;
+      long long int ind=(long long int)0;
+      Dtype temp=(Dtype)0.0;
 
-      for(int i=0; i<(rows-1); i++){
+      for(long long int i=(long long int)0; i < (rows - (long long int)1); i+=(long long int)1){
           // get next index
-        ind = P[i];
+        ind = (long long int)(P[i]);
         while(ind<i)
-          ind = P[ind];
+          ind = (long long int)(P[ind]);
 
           // swap elements in array
-        temp = A[i + (j + start) * rows];
-        A[i + (j + start) * rows] = A[ind + (j + start) * rows];
-        A[ind + (j + start) * rows] = temp;
+        temp = A[i + ((long long int)j + start) * rows];
+        A[i + ((long long int)j + start) * rows] = A[ind + ((long long int)j + start) * rows];
+        A[ind + ((long long int)j + start) * rows] = temp;
       };
     };
   } else{
     //pvt is an array length cols
     CUDA_KERNEL_LOOP(i, size /*rows*/) {
-      int ind=0;
-      Dtype temp=0;
+      int ind=(long long int)0;
+      Dtype temp=(Dtype)0.0;
 
-      for(int j=0; j<(cols-1); j++){
+      for(long long int j=(long long int)0; j<(cols-(long long int)1); j+=(long long int)1){
               // get next index
-        ind = P[j];
+        ind = (long long int)(P[j]);
         while(ind<j)
-          ind = P[ind];
+          ind = (long long int)(P[ind]);
 
               // swap elements in array
-        temp = A[(i + start) + j * rows];
-        A[(i + start) + j * rows] = A[(i + start) + ind * rows];
-        A[(i + start) + ind * rows] = temp;
+        temp = A[((long long int)i + start) + j * rows];
+        A[((long long int)i + start) + j * rows] = A[((long long int)i + start) + ind * rows];
+        A[((long long int)i + start) + ind * rows] = temp;
       };
     };
   }
@@ -4029,9 +4075,9 @@ void gpu_permute(Dtype* A, const int* P, long long int rows, long long int cols,
   */
   long long int num_gpu_blocks;
   if(permute_rows){
-    num_gpu_blocks= GET_BLOCKS(cols);
+    num_gpu_blocks = GET_BLOCKS(cols);
   }else{
-    num_gpu_blocks= GET_BLOCKS(rows);
+    num_gpu_blocks = GET_BLOCKS(rows);
   };
   
   // if (num_gpu_blocks > CUDA_NUM_BLOCKS){
@@ -4043,14 +4089,16 @@ void gpu_permute(Dtype* A, const int* P, long long int rows, long long int cols,
     long long int num_entries = CUDA_NUM_BLOCKS * CUDA_NUM_THREADS;
     long long int spot = (long long int)0;
     while (num_gpu_blocks > CUDA_NUM_BLOCKS){
-      gpu_permute_kernel<Dtype><<<CUDA_NUM_BLOCKS, CUDA_NUM_THREADS>>>(A,  P, rows, cols,  permute_rows, spot, num_entries);
-      num_gpu_blocks = num_gpu_blocks - CUDA_NUM_BLOCKS;
+      if(too_big(num_entries) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
+      gpu_permute_kernel<Dtype><<<CUDA_NUM_BLOCKS, CUDA_NUM_THREADS>>>(A,  P, rows, cols,  permute_rows, spot, (int)num_entries);
+      num_gpu_blocks = num_gpu_blocks - (long long int)CUDA_NUM_BLOCKS;
       num_loops += (long long int)1;
       spot = num_loops * num_entries;
     };
-    gpu_permute_kernel<Dtype><<<num_gpu_blocks, CUDA_NUM_THREADS>>>(A,  P, rows, cols,  permute_rows, spot, permute_rows ? (cols - spot) : (rows - spot));
+    gpu_permute_kernel<Dtype><<<num_gpu_blocks, CUDA_NUM_THREADS>>>(A,  P, rows, cols,  permute_rows, spot, (int)(permute_rows ? (cols - spot) : (rows - spot)));
   }else{
-    gpu_permute_kernel<Dtype><<<num_gpu_blocks, CUDA_NUM_THREADS>>>(A,  P, rows, cols,  permute_rows, 0, permute_rows ? cols : rows);
+    if(too_big(permute_rows ? cols : rows) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
+    gpu_permute_kernel<Dtype><<<num_gpu_blocks, CUDA_NUM_THREADS>>>(A,  P, rows, cols,  permute_rows, 0, (int)(permute_rows ? cols : rows));
   };
 }
 
@@ -4099,11 +4147,11 @@ __global__ void gpu_normalize_mtx_rows_or_cols_kernel(const long long int M, con
     CUDA_KERNEL_LOOP(i, M ) {
       float norm = (float)0.0;
       if(row_major_ordering){
-        for( long long int j = 0; j < N; j++){
+        for( long long int j = (long long int)0; j < N; j+=(long long int)1){
           norm += pow(x[(long long int)i * N + j], (float)2.0);
         }
         norm = sqrt(norm);
-        for(long long int j = 0; j < N; j++){
+        for(long long int j = (long long int)0; j < N; j+=(long long int)1){
           x[(long long int)i * N + j] = x[(long long int)i * N + j] / norm;
           if (::isinf(x[(long long int)i * N + j]) || ::isnan(x[(long long int)i * N + j])){
             isBad[0] = true;
@@ -4111,11 +4159,11 @@ __global__ void gpu_normalize_mtx_rows_or_cols_kernel(const long long int M, con
         }
 
       }else{
-        for(long long int j = 0; j < N; j++){
+        for(long long int j = (long long int)0; j < N; j+=(long long int)1){
           norm += pow(x[(long long int)i + M * j], (float)2.0);
         }
         norm = sqrt(norm);
-        for(long long int j = 0; j < N; j++){
+        for(long long int j = (long long int)0; j < N; j+=(long long int)1){
           x[(long long int)i + M * j] = x[(long long int)i + M * j] / norm;
           if (::isinf(x[(long long int)i + M * j]) || ::isnan(x[(long long int)i + M * j])){
             isBad[0] = true;
@@ -4127,22 +4175,22 @@ __global__ void gpu_normalize_mtx_rows_or_cols_kernel(const long long int M, con
     CUDA_KERNEL_LOOP(j, N ) {
       float norm = (float)0.0;
       if(row_major_ordering){
-        for(long long int i = 0; i < M; i++){
+        for(long long int i = (long long int)0; i < M; i+=(long long int)1){
           norm += pow(x[i * N + (long long int)j], (float)2.0);
         }
         norm = sqrt(norm);
-        for(long long int i = 0; i < M; i++){
+        for(long long int i = (long long int)0; i < M; i+=(long long int)1){
           x[i * N + (long long int)j] = x[i * N + (long long int)j] / norm;
           if (::isinf(x[i * N + (long long int)j]) || ::isnan(x[i * N + (long long int)j])){
             isBad[0] = true;
           };
         }
       }else{
-        for(long long int i = 0; i < M; i++){
+        for(long long int i = (long long int)0; i < M; i+=(long long int)1){
           norm += pow(x[i + M * (long long int)j], (float)2.0);
         }
         norm = sqrt(norm);
-        for(long long int i = 0; i < M; i++){
+        for(long long int i = (long long int)0; i < M; i+=(long long int)1){
           x[i + M * (long long int)j] = x[i + M * (long long int)j] / norm;
           if (::isinf(x[i + M * (long long int)j]) || ::isnan(x[i + M * (long long int)j])){
             isBad[0] = true;
@@ -4158,9 +4206,9 @@ void gpu_normalize_mtx_rows_or_cols(const long long int M, const long long int N
 {
   long long int num_gpu_blocks;
   if(normalize_rows){
-    num_gpu_blocks= GET_BLOCKS(M);
+    num_gpu_blocks = GET_BLOCKS(M);
   }else{
-    num_gpu_blocks= GET_BLOCKS(N);
+    num_gpu_blocks = GET_BLOCKS(N);
   };
   
   if (num_gpu_blocks > CUDA_NUM_BLOCKS){
@@ -4276,7 +4324,7 @@ void gpu_mult_US_in_SVD<float>(const long long int m, const long long int num_la
   CUDA_CHECK(cudaMalloc((void**)&isBad, sizeof(bool)));
   CUDA_CHECK(cudaMemcpy(isBad, &isBad_host, sizeof(bool), cudaMemcpyHostToDevice));
 
-  long long int num_gpu_blocks= GET_BLOCKS(m*num_latent_factors);
+  long long int num_gpu_blocks = GET_BLOCKS(m*num_latent_factors);
 
   // if (num_gpu_blocks > CUDA_NUM_BLOCKS){
   //     ABORT_IF_NEQ(0, 1, "Max Blocks Exceeded");
@@ -4287,6 +4335,7 @@ void gpu_mult_US_in_SVD<float>(const long long int m, const long long int num_la
     long long int num_loops   = (long long int)0;
     long long int num_entries = (long long int)(CUDA_NUM_BLOCKS * CUDA_NUM_THREADS);
     long long int spot        = (long long int)0;
+    if(too_big(num_entries) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
     while (num_gpu_blocks > CUDA_NUM_BLOCKS){
       gpu_mult_US_in_SVD_kernel<<<CUDA_NUM_BLOCKS, CUDA_NUM_THREADS>>>(m, U, S, spot, num_entries, right_multiply_by_S, isBad);
       num_gpu_blocks = num_gpu_blocks - (long long int)CUDA_NUM_BLOCKS;
@@ -4297,6 +4346,7 @@ void gpu_mult_US_in_SVD<float>(const long long int m, const long long int num_la
     // total - (done) = left to go 
     gpu_mult_US_in_SVD_kernel<<<num_gpu_blocks, CUDA_NUM_THREADS>>>(m, U, S, spot, m * num_latent_factors - spot, right_multiply_by_S, isBad);
   }else{
+    if(too_big(m * num_latent_factors) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
     gpu_mult_US_in_SVD_kernel<<<num_gpu_blocks, CUDA_NUM_THREADS>>>(m, U, S, (long long int)0, m * num_latent_factors, right_multiply_by_S, isBad);
   };
 
@@ -4321,9 +4371,10 @@ __global__ void gpu_copy_and_transpose_kernel(const int M, const int N,  const D
 
 void gpu_copy_and_transpose(const int M, const int N,  const float* x, float* y) 
 {
+  if(too_big(M * N) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
   // x is M by M in memory
   // y is M by N where N < M 
-  const long long int num_gpu_blocks= GET_BLOCKS(M * N);
+  const long long int num_gpu_blocks = GET_BLOCKS(M * N);
 
   if (num_gpu_blocks > CUDA_NUM_BLOCKS){
     ABORT_IF_NEQ(0, 1, "Max Blocks Exceeded");
@@ -4336,6 +4387,8 @@ template <>
 void gpu_get_num_latent_factors<float>(cublasHandle_t dn_handle, const long long int m, float* S, 
   long long int* num_latent_factors, const float percent) 
 {
+  if(too_big(m) ) {ABORT_IF_EQ(0, 0,"Long long long int too big");}
+
   bool Debug = false;
   float sum;
   if(Debug) LOG("here!");
@@ -4350,8 +4403,8 @@ void gpu_get_num_latent_factors<float>(cublasHandle_t dn_handle, const long long
   if(Debug) LOG("here!");
 
   float sum_so_far;
-  num_latent_factors[0] = m-1;
-  for(int j = 0; j < m-1; j++){
+  num_latent_factors[0] = (int)m-1;
+  for(int j = 0; j < (int)m-1; j++){
     sum_so_far += S_host[j];
     if(sum_so_far / sum >= percent) {
       num_latent_factors[0] = j+1;
@@ -4395,14 +4448,14 @@ int first_tiny_sv(const long long int n, float* SV, float epsilon)
   checkErrors(SV_copy);
   CUDA_CHECK(cudaMemcpy(SV_copy, SV, n * sizeof(float), cudaMemcpyDeviceToHost));
 
-  for(long long int i = (long long int)0; i < n; i++){
+  for(long long int i = (long long int)0; i < n; i+=(long long int)1){
     if(SV_copy[i] < epsilon) {
       free(SV_copy);
-      return i + 1;
+      return (int)i + 1;
     }
   }
   free(SV_copy);
-  return n + 1;
+  return ((int)n + 1);
 
 }
 
@@ -4426,7 +4479,7 @@ void gpu_orthogonal_decomp<float>(cublasHandle_t handle, cusolverDnHandle_t dn_s
               m by n          m by n           n by n
 
   */
-
+  if(too_big(n * m) ) {ABORT_IF_EQ(0, 0,"Long long long int too big");}
   bool Debug = false;
   const long long int min_dim = std::min(m,n);
 
@@ -4609,7 +4662,6 @@ void gpu_orthogonal_decomp<float>(cublasHandle_t handle, cusolverDnHandle_t dn_s
     print_gpu_array_entries<float>(S, std::min(m,n));
     print_gpu_mtx_entries<float>(U, m, min_dim);
     print_gpu_mtx_entries<float>(V, n, min_dim);
-    save_device_array_to_file<float>(d_S, min_dim, "singular_values");
     save_device_array_to_file<float>(d_S, min_dim, "singular_values");
     // LOG("Press Enter to continue.") ;
     // std::cin.ignore();
@@ -4808,8 +4860,7 @@ void gpu_block_orthogonal_decomp_from_host<float>(cublasHandle_t handle, cusolve
     //   th_id = omp_get_thread_num();
     // #endif
     // for(long long int block = (long long int)th_id; block < (long long int)num_blocks; block += (long long int)nthreads){
-    for(long long int block = (long long int)0; block < (long long int)num_blocks; block++){
-      
+    for(long long int block = (long long int)0; block < (long long int)num_blocks; block++){   
       long long int start = block * (block_rows * m + min_dim);
 
       if(block < (long long int)(num_blocks - 1) || divides_evenly || num_blocks == 1){
@@ -5009,7 +5060,8 @@ void gpu_block_orthogonal_decomp_from_host<float>(cublasHandle_t handle, cusolve
 }
 
 
-void gpu_block_orthogonal_decomp_from_host_test(cublasHandle_t handle, cusolverDnHandle_t dn_solver_handle) {
+void gpu_block_orthogonal_decomp_from_host_test(cublasHandle_t handle, cusolverDnHandle_t dn_solver_handle) 
+{
   const long long int m = 18;
   const long long int n = 20;
   const long long int block_rows = m;
@@ -5058,21 +5110,22 @@ void gpu_block_orthogonal_decomp_from_host_test(cublasHandle_t handle, cusolverD
   checkErrors(R);
 
   /*
-      A is m by n stored in row-maj ordering where m<<n
-      V is n by m stored in row-maj ordering
-      (V^T is m by n)
-      U is m by m stored in row-maj ordering
-  */
-  // M, N, K
-  //M number of rows of matrix op(A) and C.
-  //N is number of columns of matrix op(B) and C.]
-  //K is number of rows of op(B) and columns of op(A).
+    A is m by n stored in row-maj ordering where m<<n
+    V is n by m stored in row-maj ordering
+    (V^T is m by n)
+    U is m by m stored in row-maj ordering
+  
+    // M, N, K
+    //M number of rows of matrix op(A) and C.
+    //N is number of columns of matrix op(B) and C.]
+    //K is number of rows of op(B) and columns of op(A).
 
-  // op(A) is M by K
-  // op(B) is K by N
-  // C is M by N
-  // cublasDgemm(handle, transa, transb, M, N, K, alpha, A, lda, B, ldb, beta, C, ldc) 
-  // performs C=alpha op ( B ) op ( A ) + beta C
+    // op(A) is M by K
+    // op(B) is K by N
+    // C is M by N
+    // cublasDgemm(handle, transa, transb, M, N, K, alpha, A, lda, B, ldb, beta, C, ldc) 
+    // performs C=alpha op ( B ) op ( A ) + beta C
+  */
 
 
   cpu_gemm<float>(true, false, m, m, m /*num_latent_factors[0]*/,
@@ -5097,13 +5150,12 @@ void gpu_block_orthogonal_decomp_from_host_test(cublasHandle_t handle, cusolverD
    (float)1.0, U, V, (float)0.0,
    R);
 
-  cpu_axpby<float>(m * n, (float)1.0, A,
-    (float)(-1.0), R);
+  cpu_axpby<float>(m * n, (float)1.0, A, (float)(-1.0), R);
 
   print_host_mtx<float>(R, m, n, "svd_error", 1, strPreamble(blank));
 
   //float range_A    = gpu_range<float>(m * n,  A);
-  float error      = cpu_abs_max<float>(m * n, R); 
+  float error      = cpu_abs_max<float>(m * n, (const float*)R); 
   //float error_expt = gpu_expected_abs_value<float>(m * n, R); 
   free(R);
   // LOG("A mtx range of values = "<<range_A) ;
@@ -5493,7 +5545,7 @@ int gpu_get_first_coo_index(const int first_row, const int* csr)
 
 
 template<typename Dtype>
-__global__ void sparse_error_kernel(const int rows, const int cols, const Dtype* dense_mtx_A, 
+__global__ void sparse_error_kernel(const long long int rows, const long long int cols, const Dtype* dense_mtx_A, 
  const int* csr_rows_B, const int* coo_cols_B,
  const Dtype* coo_entries_B, Dtype* coo_errors, const int num_sparse_entries, 
  bool* isBad, Dtype* coo_A, bool Debug)
@@ -5503,20 +5555,20 @@ __global__ void sparse_error_kernel(const int rows, const int cols, const Dtype*
     dense_mtx_A must be in column major ordering
   */
 
-    const int row_skip = csr_rows_B[0];
-    CUDA_KERNEL_LOOP(j,num_sparse_entries) {
-      int count = 0;
-      int row = 0;
+  const int row_skip = csr_rows_B[0];
+  CUDA_KERNEL_LOOP(j, num_sparse_entries) {
+    int count = 0;
+    long long int row = (long long int)0;
     // while(count < j + 1){
     //   count += csr_rows_B[row + 1] - csr_rows_B[row]; //num thing in that row
     //   row +=1;
     // }
-      for(row = 0; row < rows; row++){
+    for(row = (long long int)0; row < rows; row+=(long long int)1){
       count += csr_rows_B[row + 1] - csr_rows_B[row]; //add the number of things in this row to the count
       if(count >= j + 1) break; //you're in the right row
     }
     // count >= j + 1
-    int col = coo_cols_B[/*row_skip + */ j];
+    long long int col = (long long int)(coo_cols_B[/*row_skip + */ j]);
     coo_errors[j] = coo_entries_B[/*row_skip + */ j] - dense_mtx_A[row + col * rows];
 
     if(Debug){
@@ -5530,7 +5582,7 @@ __global__ void sparse_error_kernel(const int rows, const int cols, const Dtype*
   };
 }
 
-void sparse_error(const int rows, const int cols, const float* dense_mtx_A, 
+void sparse_error(const long long int rows, const long long int cols, const float* dense_mtx_A, 
   const int* csr_rows_B, const int* coo_cols_B,
   const float* coo_entries_B, float* coo_errors, const int num_sparse_entries,
   float* coo_A) 
@@ -5541,58 +5593,58 @@ void sparse_error(const int rows, const int cols, const float* dense_mtx_A,
   */
 
 
-    bool Debug = false;
-    bool isBad_host = false;
-    bool* isBad;
-    CUDA_CHECK(cudaMalloc((void**)&isBad, sizeof(bool)));
-    CUDA_CHECK(cudaMemcpy(isBad, &isBad_host, sizeof(bool), cudaMemcpyHostToDevice));
+  bool Debug = false;
+  bool isBad_host = false;
+  bool* isBad;
+  CUDA_CHECK(cudaMalloc((void**)&isBad, sizeof(bool)));
+  CUDA_CHECK(cudaMemcpy(isBad, &isBad_host, sizeof(bool), cudaMemcpyHostToDevice));
 
-    // if(coo_A == NULL){
-    //   Debug = false;
-    // }else{
-    //   Debug = true;
-    // }
+  // if(coo_A == NULL){
+  //   Debug = false;
+  // }else{
+  //   Debug = true;
+  // }
 
-    if(Debug) LOG("sparse_error called");
-
-
-    const long long int num_gpu_blocks= GET_BLOCKS(num_sparse_entries);
-
-    if (num_gpu_blocks > CUDA_NUM_BLOCKS){
-      ABORT_IF_NEQ(0, 1, "Max Blocks Exceeded");
-    };
+  if(Debug) LOG("sparse_error called");
 
 
-    if(Debug) {
-      LOG("rows : "<< rows);
-      LOG("cols : "<< cols);
-      LOG("num_sparse_entries : "<< num_sparse_entries);
-      LOG("sparse_error called");
-      save_device_mtx_to_file<float>(dense_mtx_A, rows, cols, "dense_mtx_A");
+  const long long int num_gpu_blocks = GET_BLOCKS(num_sparse_entries);
+
+  if (num_gpu_blocks > CUDA_NUM_BLOCKS){
+    ABORT_IF_NEQ(0, 1, "Max Blocks Exceeded");
+  };
+
+
+  if(Debug) {
+    LOG("rows : "<< rows);
+    LOG("cols : "<< cols);
+    LOG("num_sparse_entries : "<< num_sparse_entries);
+    LOG("sparse_error called");
+    save_device_mtx_to_file<float>(dense_mtx_A, rows, cols, "dense_mtx_A");
     //save_device_array_to_file<float>(coo_errors, num_sparse_entries, "coo_errors");
-      save_device_array_to_file<float>(coo_entries_B, num_sparse_entries, "coo_entries_B");
-      save_device_array_to_file<int>(coo_cols_B, num_sparse_entries, "coo_cols_B");
-      save_device_array_to_file<int>(csr_rows_B, rows + 1, "csr_rows_B");
+    save_device_array_to_file<float>(coo_entries_B, num_sparse_entries, "coo_entries_B");
+    save_device_array_to_file<int>(coo_cols_B, num_sparse_entries, "coo_cols_B");
+    save_device_array_to_file<int>(csr_rows_B, rows + 1, "csr_rows_B");
     // LOG("Press Enter to continue.") ;
     // std::cin.ignore();
-    };
+  };
 
-    sparse_error_kernel<float><<<num_gpu_blocks, CUDA_NUM_THREADS>>>(rows, cols, dense_mtx_A, csr_rows_B, coo_cols_B,
-      coo_entries_B, coo_errors, num_sparse_entries,
-      isBad, coo_A, Debug);
-    if(Debug) {
-      save_device_array_to_file<float>(coo_errors, num_sparse_entries, "coo_errors_rows");
-      LOG("Press Enter to continue.") ;
-      std::cin.ignore();
-    };    
-    if(Debug && 0)LOG("Here!");
-    CUDA_CHECK(cudaMemcpy(&isBad_host, isBad, sizeof(bool), cudaMemcpyDeviceToHost));
-    checkCudaErrors(cudaFree(isBad));
-    if(isBad_host){
-      ABORT_IF_NEQ(0, 1, "isBad");
-    };
-    if(Debug) LOG("sparse_error call finished");
-  } 
+  sparse_error_kernel<float><<<num_gpu_blocks, CUDA_NUM_THREADS>>>(rows, cols, dense_mtx_A, csr_rows_B, coo_cols_B,
+                                                                  coo_entries_B, coo_errors, num_sparse_entries,
+                                                                  isBad, coo_A, Debug);
+  if(Debug) {
+    save_device_array_to_file<float>(coo_errors, num_sparse_entries, "coo_errors_rows");
+    LOG("Press Enter to continue.") ;
+    std::cin.ignore();
+  };    
+  if(Debug && 0)LOG("Here!");
+  CUDA_CHECK(cudaMemcpy(&isBad_host, isBad, sizeof(bool), cudaMemcpyDeviceToHost));
+  checkCudaErrors(cudaFree(isBad));
+  if(isBad_host){
+    ABORT_IF_NEQ(0, 1, "isBad");
+  };
+  if(Debug) LOG("sparse_error call finished");
+} 
 
 template <>
 void gpu_spXdense_MMM_check<float>(const cublasHandle_t dn_handle, const bool TransA, const bool TransB, 
@@ -5736,7 +5788,8 @@ void gpu_spXdense_MMM<float>(const cusparseHandle_t handle, const bool TransA, c
 
 template <>
 void gpu_R_error<float>(const cublasHandle_t dn_handle, const cusparseHandle_t sp_handle, const cusparseMatDescr_t sp_descr,
-  const int batch_size_testing, const int batch_size_CU, const int num_latent_factors, const int ratings_cols,
+  const long long int batch_size_testing, const long long int batch_size_CU, 
+  const long long int num_latent_factors, const long long int ratings_cols,
   const int nnz, const int first_coo_ind, const bool compress, 
   float* testing_entries, float* coo_testing_errors, const float testing_fraction,
   const float *coo_format_ratingsMtx_rating_dev_testing, 
@@ -6024,7 +6077,8 @@ void gpu_R_error<float>(const cublasHandle_t dn_handle, const cusparseHandle_t s
 
 template <>
 void gpu_R_error_training<float>(const cublasHandle_t dn_handle, const cusparseHandle_t sp_handle, const cusparseMatDescr_t sp_descr,
-  const int batch_size_training, const int batch_size_CU, const int num_latent_factors, const int ratings_cols,
+  const long long int batch_size_training, const long long int batch_size_CU, 
+  const long long int num_latent_factors, const long long int ratings_cols,
   const int nnz, const int first_coo_ind, const bool compress, float* coo_errors, 
   const float *coo_format_ratingsMtx_rating_dev_training, 
   const int *csr_format_ratingsMtx_userID_dev_training_batch, 
@@ -6331,7 +6385,8 @@ void gpu_R_error_training<float>(const cublasHandle_t dn_handle, const cusparseH
 
 template <>
 void gpu_R_error_testing<float>(const cublasHandle_t dn_handle, const cusparseHandle_t sp_handle, const cusparseMatDescr_t sp_descr,
-  const int batch_size_testing, const int batch_size_CU, const int num_latent_factors, const int ratings_cols,
+  const long long int batch_size_testing, const long long int batch_size_CU, 
+  const long long int num_latent_factors, const long long int ratings_cols,
   const int nnz, const int first_coo_ind, const bool compress, 
   float* testing_entries, float* coo_testing_errors, const float testing_fraction,
   const float *coo_format_ratingsMtx_rating_dev_testing, 

@@ -184,6 +184,9 @@ int main(int argc, char *argv[])
     //============================================================================================
 
 
+    cpu_gemm_test();
+    return 0;
+    
     // Creating an object of CSVWriter
 
     std::string Dataset_Name;
@@ -1082,7 +1085,7 @@ int main(int argc, char *argv[])
     testing_error = (float *)malloc((num_iterations / testing_rate) * sizeof(float)); 
     checkErrors(testing_error);
 
-    const long long int batch_size_training = ratings_rows_training / 10;//std::max((long long int)1, ratings_rows_training / (2 * num_batches));
+    const long long int batch_size_training = std::max((long long int)1, ratings_rows_training / (2 * num_batches));
     const long long int batch_size_GU       = ratings_rows_GU; 
     //const long long int batch_size_GU       = std::min((long long int)100, ratings_rows_GU);
     const long long int batch_size_testing  = std::min((long long int)200, ratings_rows_testing);
@@ -1196,11 +1199,10 @@ int main(int argc, char *argv[])
         checkErrors(V_host);
 
         num_latent_factors = std::min(batch_size_GU, (long long int)12037);
-        if(Debug) {
+        if(Debug && 0) {
             checkCudaErrors(cudaDeviceSynchronize()); 
             LOG("num_latent_factors = "<< num_latent_factors);
             LOG("min_ = "<< min_);
-            LOG("Here");
         }
         checkCudaErrors(cudaMalloc((void**)&V_dev, ratings_cols * num_latent_factors * sizeof(float)));
         update_Mem(ratings_cols * num_latent_factors * sizeof(float) );
@@ -1309,18 +1311,18 @@ int main(int argc, char *argv[])
             SV = (float *)malloc(ratings_rows_GU *  sizeof(float)); 
             checkErrors(SV);
             if(Conserve_GPU_Mem){
-                
+                /*
                 cpu_orthogonal_decomp<float>(ratings_rows_GU, ratings_cols, row_major_ordering,
                                         &num_latent_factors, percent,
                                         full_ratingsMtx_host_GU, U_GU, V_host, SV_with_U, SV);
-                                        
+                                        */
                 int block_rows = ratings_rows_GU / 20 < 1 ? ratings_rows_GU : ratings_rows_GU / 20;
-                /*
+                
                 gpu_block_orthogonal_decomp_from_host<float>(dn_handle, dn_solver_handle,
                                                              ratings_rows_GU, ratings_cols,
                                                              &num_latent_factors, percent,
                                                              full_ratingsMtx_host_GU, U_GU, V_host, block_rows, SV_with_U, SV);
-                                                             */
+                                                             
                                                              
                 LOG("num_latent_factors = "<< num_latent_factors);
                 num_latent_factors = std::min(num_latent_factors, std::min(batch_size_GU, (long long int)12037));
@@ -1882,44 +1884,76 @@ int main(int argc, char *argv[])
                     checkErrors(U_training_host);
                     
                     if(Debug){
-                        save_device_mtx_to_file<float>(U_training, batch_size_training, (compress == false) ? batch_size_GU : num_latent_factors, "U_training", false, strPreamble(blank));
+                        save_device_mtx_to_file<float>(U_training, batch_size_training, 3, "U_training", false, strPreamble(blank));
                     }
                     gpu_swap_ordering<float>(batch_size_training, (compress == false) ? batch_size_GU : num_latent_factors, U_training, false);
                     checkCudaErrors(cudaMemcpy(U_training_host, U_training, batch_size_training * ((compress == false) ? batch_size_GU : num_latent_factors), cudaMemcpyDeviceToHost));
-                    if(Debug){
+                    if(Debug && 0){
                         save_host_mtx_to_file<float>(U_training_host, batch_size_training, (compress == false) ? batch_size_GU : num_latent_factors, "U_training_host", true, strPreamble(blank));
                     }
+                    /*
                     cpu_dense_nearest_row<float>(batch_size_GU, (compress == false) ? batch_size_GU : num_latent_factors, U_GU, 
                                                  batch_size_training, U_training_host, selection, errors);
+                                                 */
+                    csr_format_ratingsMtx_userID_dev_training_batch = csr_format_ratingsMtx_userID_host_training +  first_row_in_batch_training;
+                    coo_format_ratingsMtx_itemID_dev_training_batch = coo_format_ratingsMtx_itemID_host_training +  first_coo_ind_training;
+                    coo_format_ratingsMtx_rating_dev_training_batch = coo_format_ratingsMtx_rating_host_training +  first_coo_ind_training;
+                    cpu_sparse_nearest_row<float>(batch_size_GU, (compress == false) ? batch_size_GU : num_latent_factors, U_GU, 
+                                                 batch_size_training, nnz_training, 
+                                                 csr_format_ratingsMtx_userID_dev_training_batch, 
+                                                 coo_format_ratingsMtx_itemID_dev_training_batch,
+                                                 coo_format_ratingsMtx_rating_dev_training_batch, 
+                                                 selection, errors);
+
+                    int min_selection = cpu_min<int>(batch_size_training, selection);
+
                     float k_means_er = cpu_sum(batch_size_training,  errors);
                     //LOG("err norm when clustering U rows : "<<std::sqrt(k_means_er));
                     LOG("mean sqed err when clustering U rows : "<<k_means_er / (float)(batch_size_GU * ((compress == false) ? batch_size_GU : num_latent_factors)));
                     if(Debug){
-                        save_host_array_to_file<float>(errors, batch_size_training, "errors", strPreamble(blank));
-                        print_host_array<int>(selection, batch_size_training, "selection", strPreamble(blank));                        
+                        save_host_array_to_file<float>(errors, (int)batch_size_training, "km_errors", strPreamble(blank));
+                        save_host_array_to_file<int>(selection, (int)batch_size_training, "km_selection", strPreamble(blank));                        
                     }
                     free(errors);
 
                     float* U_GU_old;
-                    U_GU_old  = (float *)malloc(batch_size_training * ((compress == false) ? batch_size_GU : num_latent_factors)* sizeof(float));
-                    checkErrors(U_GU_old);
-                    host_copy(batch_size_training * ((compress == false) ? batch_size_GU : num_latent_factors), U_GU, U_GU_old);
+                    if(Debug){
+                        U_GU_old  = (float *)malloc(batch_size_training * ((compress == false) ? batch_size_GU : num_latent_factors)* sizeof(float));
+                        checkErrors(U_GU_old);
+                        host_copy(batch_size_training * ((compress == false) ? batch_size_GU : num_latent_factors), U_GU, U_GU_old);
+                    }
 
+                    long long int skip = min_selection * ((compress == false) ? batch_size_GU : num_latent_factors);
+                    if(Debug){
+                        LOG("min_selection : "<<min_selection);
+                        LOG("training_rate : "<<training_rate);
+                        LOG("regularization_constant : "<<regularization_constant);
+                        LOG("training_rate : "<<training_rate);
+                        LOG("regularization_constant : "<<regularization_constant);
+                        // save_host_mtx_to_file<float>(U_GU_old + skip, 3, (compress == false) ? batch_size_GU : num_latent_factors, "U_GU_old_0", true, strPreamble(blank));
+                        // save_host_mtx_to_file<float>(U_GU + skip, 3, (compress == false) ? batch_size_GU : num_latent_factors, "U_GU_0", true, strPreamble(blank));
+                    }
                     cpu_calculate_KM_error_and_update(batch_size_GU, (compress == false) ? batch_size_GU : num_latent_factors, U_GU, 
                                                  batch_size_training, U_training_host, selection, training_rate, regularization_constant);
                     free(selection);
                     free(U_training_host);
+                    if(Debug){
+                        // save_host_mtx_to_file<float>(U_GU_old + skip, 3, (compress == false) ? batch_size_GU : num_latent_factors, "U_GU_old_1", true, strPreamble(blank));
+                        // save_host_mtx_to_file<float>(U_GU + skip, 3, (compress == false) ? batch_size_GU : num_latent_factors, "U_GU_1", true, strPreamble(blank));
+                    
+                        cpu_axpby<float>((batch_size_training * ((compress == false) ? batch_size_GU : num_latent_factors)), (float)(-1.0), U_GU, (float)(1.0), U_GU_old);
+                    
+                        // save_host_mtx_to_file<float>(U_GU_old + skip, 3, (compress == false) ? batch_size_GU : num_latent_factors, "U_GU_old_2", true, strPreamble(blank));
+                        // save_host_mtx_to_file<float>(U_GU + skip, 3, (compress == false) ? batch_size_GU : num_latent_factors, "U_GU_2", true, strPreamble(blank));
+                    
+                        float delta_abs_exp = cpu_expected_abs_value<float>((batch_size_training * ((compress == false) ? batch_size_GU : num_latent_factors)), U_GU_old);
+                        float delta_abs_max = cpu_abs_max<float>((batch_size_training * ((compress == false) ? batch_size_GU : num_latent_factors)), U_GU_old); 
+                        LOG("delta U maximum absolute value = "<<delta_abs_max) ;
+                        LOG("delta U expected absolute value = "<<delta_abs_exp) ;
+                        ABORT_IF_EQ(delta_abs_max, delta_abs_exp, "delta U is constant");                    
 
-                    cpu_axpby<float>((batch_size_training * ((compress == false) ? batch_size_GU : num_latent_factors)), (float)(-1.0), U_GU,
-                            (float)(1.0), U_GU_old);
-                    float delta_abs_exp = cpu_expected_abs_value<float>((batch_size_training * ((compress == false) ? batch_size_GU : num_latent_factors)), U_GU_old);
-                    float delta_abs_max = cpu_abs_max<float>((batch_size_training * ((compress == false) ? batch_size_GU : num_latent_factors)), U_GU_old); 
-                    LOG("delta U maximum absolute value = "<<delta_abs_max) ;
-                    LOG("delta U expected absolute value = "<<delta_abs_exp) ;
-                    ABORT_IF_EQ(delta_abs_max, delta_abs_exp, "delta U is constant");                    
-
-                    free(U_GU_old);
-
+                        free(U_GU_old);
+                    }
 
                 }
 

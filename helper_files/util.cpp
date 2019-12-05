@@ -178,30 +178,36 @@ template void copy_device_mtx_into_host_submtx<float>(const int M, const int N, 
 // math functions
 //============================================================================================
 
-template <>
-int cpu_asum<int>(const int n, const int* x) {
-  int s = 0;
-  for (int k = 0; k < n; ++k){
+template <typename Dtype>
+Dtype cpu_asum(const long long int n, const Dtype* x) {
+  Dtype s = (Dtype)0.0;
+  for (long long int k = (long long int)0; k < n; k+=(long long int)1){
     s += abs(x[k]);
     //LOG(INFO) << x[k];
   };
   return s;
 }
 
-template <>
-float cpu_asum<float>(const int n, const float* x) {
-  return cblas_sasum(n, x, 1);
-}
+template int cpu_asum<int>(const long long int n, const int* x);
+template float cpu_asum<float>(const long long int n, const float* x);
+template double cpu_asum<double>(const long long int n, const double* x);
 
-template <>
-double cpu_asum<double>(const int n, const double* x) {
-  return cblas_dasum(n, x, 1);
-}
+// template <>
+// float cpu_asum<float>(const long long int n, const float* x) {
+//   if(too_big(n) ) {ABORT_IF_EQ(0, 0,"Long long long int too big");}
+//   return cblas_sasum((int)n, x, 1);
+// }
+
+// template <>
+// double cpu_asum<double>(const long long int n, const double* x) {
+//   if(too_big(n) ) {ABORT_IF_EQ(0, 0,"Long long long int too big");}
+//   return cblas_dasum((int)n, x, 1);
+// }
 
 template <>
 float cpu_sum<float>(const long long int n,  const float* x) 
 {
-  if(too_big(n) ) {ABORT_IF_EQ(0, 1,"Long long long int too big");}
+  if(too_big(n) ) {ABORT_IF_EQ(0, 0,"Long long long int too big");}
   float sum = thrust::reduce(thrust::host, x, x + n, (float)0., thrust::plus<float>());
   return sum;
 }
@@ -226,8 +232,8 @@ float cpu_sum_of_squares<float>(const long long int n, const float* x) {
   return s/* /(float)n*/;
 }
 
-template <>
-void cpu_scal<float>(const long long int N, const float alpha, float *X) {
+template <typename Dtype>
+void cpu_scal(const long long int N, const Dtype alpha, Dtype *X) {
   bool Debug = false;
   if(Debug) {
     LOG("INT_MAX : "<<INT_MAX);
@@ -235,18 +241,38 @@ void cpu_scal<float>(const long long int N, const float alpha, float *X) {
     LOG("(int)N : "<<(int)N);
     LOG("alpha : "<<alpha);
   }
+
   if(too_big(N) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
   //cblas_sscal((int)N, alpha, X, 1);
-  for (long long int k = (long long int)0; k < N; ++k){
-    X[k] = X[k] * alpha;
-  };
+
+
+  int nthreads = 1;
+  #ifdef _OPENMP
+    int nProcessors = omp_get_max_threads();
+    nthreads = (int)std::min((long long int)nProcessors, N);
+    omp_set_num_threads(nthreads);
+  #endif
+  #pragma omp parallel shared(nthreads)
+  {
+    int th_id = 0;
+    #ifdef _OPENMP
+      th_id = omp_get_thread_num();
+    #endif
+    for(long long int k = (long long int)th_id; k < N; k += (long long int)nthreads){
+    //for (long long int k = (long long int)0; k < N; k+=(long long int)1){
+      X[k] = X[k] * alpha;
+    };
+  }
 }
 
-template <>
-void cpu_scal<double>(const long long int N, const double alpha, double *X) {
-  if(too_big(N) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
-  cblas_dscal((int)N, alpha, X, 1);
-}
+template void cpu_scal<float>(const long long int N, const float alpha, float *X);
+template void cpu_scal<double>(const long long int N, const double alpha, double *X);
+
+// template <>
+// void cpu_scal<double>(const long long int N, const double alpha, double *X) {
+//   if(too_big(N) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
+//   cblas_dscal((int)N, alpha, X, 1);
+// }
 
 
 int gcd(int a, int b) 
@@ -279,7 +305,7 @@ void cpu_permute(Dtype* A, const int* P, const long long int rows, const long lo
       #endif
       for(long long int j = (long long int)th_id; j < cols; j += (long long int)nthreads){
       //for(long long int  j = 0; j <cols; j+=(long long int)1) {
-        long long int  ind=(long long int)0;
+        long long int ind=(long long int)0;
         Dtype temp = (Dtype)0;
 
         for(long long int i = (long long int)0; i < rows - (long long int)1; i+=(long long int)1){
@@ -338,42 +364,44 @@ template void cpu_permute<double>(double* a, const int* pvt,const long long int 
 
 // Non-square matrix transpose of matrix of size r x c and base address A 
 template <>
-void MatrixInplaceTranspose<float>(float *A, int r, int c, bool row_major_ordering) 
+void MatrixInplaceTranspose<float>(float *A, long long int r, long long int c, bool row_major_ordering) 
 { //ABORT_IF_NEQ(0, 1, "Function Not Supported Yet");
+  /*
+    int HASH_SIZE = 128;
 
-  // int HASH_SIZE = 128;
+    int size = r*c - 1; 
+    float t; // holds element to be replaced, eventually becomes next element to move 
+    int next; // location of 't' to be moved 
+    int cycleBegin; // holds start of cycle 
+    int i; // iterator 
+    bitset<HASH_SIZE> b; // hash to mark moved elements 
 
-  // int size = r*c - 1; 
-  // float t; // holds element to be replaced, eventually becomes next element to move 
-  // int next; // location of 't' to be moved 
-  // int cycleBegin; // holds start of cycle 
-  // int i; // iterator 
-  // bitset<HASH_SIZE> b; // hash to mark moved elements 
+    b.reset(); 
+    b[0] = b[size] = 1; 
+    i = 1; // Note that A[0] and A[size-1] won't move 
+    while (i < size) 
+    { 
+        cycleBegin = i; 
+        t = A[i]; 
+        do
+        { 
+            // Input matrix [r x c] 
+            // Output matrix  
+            // i_new = (i*r)%(N-1) 
+            next = (i*r)%size; 
+            swap(A[next], t); 
+            b[i] = 1; 
+            i = next; 
+        } 
+        while (i != cycleBegin); 
 
-  // b.reset(); 
-  // b[0] = b[size] = 1; 
-  // i = 1; // Note that A[0] and A[size-1] won't move 
-  // while (i < size) 
-  // { 
-  //     cycleBegin = i; 
-  //     t = A[i]; 
-  //     do
-  //     { 
-  //         // Input matrix [r x c] 
-  //         // Output matrix  
-  //         // i_new = (i*r)%(N-1) 
-  //         next = (i*r)%size; 
-  //         swap(A[next], t); 
-  //         b[i] = 1; 
-  //         i = next; 
-  //     } 
-  //     while (i != cycleBegin); 
-
-  //     // Get Next Move (what about querying random location?) 
-  //     for (i = 1; i < size && b[i]; i++) 
-  //         ; 
-  //     std::cout << endl; 
-  // } 
+        // Get Next Move (what about querying random location?) 
+        for (i = 1; i < size && b[i]; i++) 
+            ; 
+        std::cout << endl; 
+    } 
+  */
+  if(too_big(r * c) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
   if(row_major_ordering){
     mkl_simatcopy('R', 'T', r, c, (float)1.0, A, c, r);
   }else{
@@ -381,94 +409,211 @@ void MatrixInplaceTranspose<float>(float *A, int r, int c, bool row_major_orderi
   }
 } 
 
-template <>
-void cpu_axpby<float>(const int N, const float alpha, const float* X,
-                            const float beta, float* Y) {
-  /*
-  y := a*x + b*y
-  where:
+template <typename Dtype>
+void cpu_axpby(const long long int N, const Dtype alpha, const Dtype* X, const Dtype beta, Dtype* Y) {
+  bool Debug = false;
+  if(Debug) {
+    LOG("INT_MAX : "<<INT_MAX);
+    LOG("N : "<<N);
+    LOG("(int)N : "<<(int)N);
+    LOG("alpha : "<<alpha);
+  }
 
-  a and b are scalars
+  if(too_big(N) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
+  //cblas_sscal((int)N, alpha, X, 1);
 
-  x and y are vectors each with n elements.
-  */
-  cblas_saxpby(N, alpha, X, 1, beta, Y, 1);
+
+  int nthreads = 1;
+  #ifdef _OPENMP
+    int nProcessors = omp_get_max_threads();
+    nthreads = (int)std::min((long long int)nProcessors, N);
+    omp_set_num_threads(nthreads);
+  #endif
+  #pragma omp parallel shared(nthreads)
+  {
+    int th_id = 0;
+    #ifdef _OPENMP
+      th_id = omp_get_thread_num();
+    #endif
+    for(long long int k = (long long int)th_id; k < N; k += (long long int)nthreads){
+    //for (long long int k = (long long int)0; k < N; k+=(long long int)1){
+      Y[k] = X[k] * alpha + Y[k] * beta;
+    };
+  }
 }
 
-template <>
-void cpu_axpby<double>(const int N, const double alpha, const double* X,
-                             const double beta, double* Y) {
-  /*
-  y := a*x + b*y
-  where:
+template void cpu_axpby<float>(const long long int N, const float alpha, const float* X, const float beta, float* Y);
+template void cpu_axpby<double>(const long long int N, const double alpha, const double* X, const double beta, double* Y);
 
-  a and b are scalars
+// template <>
+// void cpu_axpby<float>(const long long int N, const float alpha, const float* X, const float beta, float* Y) {
+//   /*
+//     y := a*x + b*y
+//     where:
+//     a and b are scalars
+//     x and y are vectors each with n elements.
+//   */
+//   if(too_big(N) ) {ABORT_IF_NEQ(0, 1, "Long long long int too big");}
+//   cblas_saxpby((int)N, alpha, X, 1, beta, Y, 1);
+// }
 
-  x and y are vectors each with n elements.
-  */
-  cblas_daxpby(N, alpha, X, 1, beta, Y, 1);
+// template <>
+// void cpu_axpby<double>(const long long int N, const double alpha, const double* X, const double beta, double* Y) {
+//   /*
+//     y := a*x + b*y
+//     where:
+//     a and b are scalars
+//     x and y are vectors each with n elements.
+//   */
+//   if(too_big(N) ) {ABORT_IF_NEQ(0, 1, "Long long long int too big");}
+//   cblas_daxpby((int)N, alpha, X, 1, beta, Y, 1);
+// }
+
+
+void cpu_axpby_test() {
+
+  const long long int N = (long long int)5;
+  const float alpha = (float)(-1.0);
+  const float beta = (float)1.0;
+  std::string blank = "";
+
+  float* X = NULL;
+  float* Y = NULL;
+  X = (float *)malloc(N *  sizeof(float)); 
+  Y = (float *)malloc(N *  sizeof(float));  
+  checkErrors(X);
+  checkErrors(Y);
+
+  host_rng_uniform<float>(N, (float)(-10.0), (float)10.0, X);
+  host_rng_uniform<float>(N, (float)(-10.0), (float)10.0, Y);
+
+  if(1){
+    print_host_array<float>(X, N, "X", strPreamble(blank));
+    print_host_array<float>(Y, N, "X", strPreamble(blank));
+  }
+
+  cpu_axpby<float>(N, alpha, X, beta, Y);
+
+  if(1){
+    print_host_array<float>(X, N, "X", strPreamble(blank));
+    print_host_array<float>(Y, N, "X", strPreamble(blank));
+  }
+  free(X);
+  free(Y);  
 }
 
 template <typename Dtype>
-Dtype cpu_abs_max(long long int n, Dtype* X){
-  Dtype max_ = std::abs(X[0]);
-  for(long long int i = (long long int)1; i < n; i+=(long long int)1){
-    Dtype temp = std::abs(X[i]);
-    if(temp > max_){
-      max_ = temp;
+void cpu_gemm(const bool TransA, const bool TransB, 
+                     const long long int M, const long long int N, const long long int K,
+                     const Dtype alpha, const Dtype* A, const Dtype* B, const Dtype beta,
+                     Dtype* C) 
+{
+  /*
+    M, N, K
+    M number of rows of matrix op(A) and C.
+    N is number of columns of matrix op(B) and C.]
+    K is number of rows of op(B) and columns of op(A).
+
+    op(A) is M by K
+    op(B) is K by N
+    C is M by N
+    cblas_sgemm(CblasRowMajor, transa, transb, M, N, K, alpha, A, lda, B, ldb, beta, C, ldc) 
+    performs C=alpha op ( A )op ( B ) + beta C
+  */
+  bool Debug = false;
+
+  long long int lda = (TransA == false) ? K : M;
+  long long int ldb = (TransB == false) ? N : K;
+
+  int nthreads = 1;
+  #ifdef _OPENMP
+    int nProcessors = omp_get_max_threads();
+    nthreads = (int)std::min((long long int)nProcessors, N * M);
+    omp_set_num_threads(nthreads);
+  #endif
+  #pragma omp parallel shared(nthreads)
+  {
+    int th_id = 0;
+    #ifdef _OPENMP
+      th_id = omp_get_thread_num();
+    #endif
+    for(long long int k = (long long int)th_id; k < N * M; k += (long long int)nthreads){
+      long long int row = k / N;
+      long long int col = k % N;
+
+      Dtype temp = (Dtype)0.0;
+      Dtype a = (Dtype)0.0;
+      Dtype b = (Dtype)0.0;
+      for(long long int i = (long long int)0; i < K; i += (long long int)1){
+        a = (TransA == false) ? A[row * lda + i] : A[i * lda + row];
+        b = (TransB == false) ? B[i * ldb + col] : B[col * ldb + i];
+        temp += a * b;
+      }
+      temp *= alpha;
+      C[row * N + col] *= beta;
+      C[row * N + col] += temp; 
     }
   }
-  return max_;
+
+  //cblas_dgemm(CblasRowMajor, (TransA == false) ? CblasNoTrans : CblasTrans, (TransB == false) ? CblasNoTrans : CblasTrans, M, N, K, alpha, A, lda, B, ldb, beta, C, N);
+
+  if(Debug){
+
+    LOG("cpu_gemm done");
+  }
 }
 
-template float cpu_abs_max<float>(long long int n, float* X);
-template int cpu_abs_max<int>(long long int n, int* X);
-
-template<>
-void cpu_gemm<float>(const bool TransA,
-                     const bool TransB, const int M, const int N, const int K,
+template void cpu_gemm<float>(const bool TransA, const bool TransB, 
+                     const long long int M, const long long int N, const long long int K,
                      const float alpha, const float* A, const float* B, const float beta,
-                     float* C) 
-{
-  // M, N, K
-  //M number of rows of matrix op(A) and C.
-  //N is number of columns of matrix op(B) and C.]
-  //K is number of rows of op(B) and columns of op(A).
+                     float* C);
 
-  // op(A) is M by K
-  // op(B) is K by N
-  // C is M by N
-  // cublasDgemm(handle, transa, transb, M, N, K, alpha, A, lda, B, ldb, beta, C, ldc) 
-  // performs C=alpha op ( B ) op ( A ) + beta C
-
-  int lda = (TransA == false) ? K : M;
-  int ldb = (TransB == false) ? N : K;
-  cblas_sgemm(CblasRowMajor, (TransA == false) ? CblasNoTrans : CblasTrans, (TransB == false) ? CblasNoTrans : CblasTrans, M, N, K, alpha, A, lda, B,
-      ldb, beta, C, N);
-  //https://developer.apple.com/library/mac/documentation/Accelerate/Reference/BLAS_Ref/index.html#//apple_ref/doc/uid/TP30000414-SW27
-}
-
-template<>
-void cpu_gemm<double>(const bool TransA,
-                      const bool TransB, const int M, const int N, const int K,
+template void cpu_gemm<double>(const bool TransA, const bool TransB, 
+                      const long long int M, const long long int N, const long long int K,
                       const double alpha, const double* A, const double* B, const double beta,
-                      double* C) 
-{
-  // M, N, K
-  //M number of rows of matrix op(A) and C.
-  //N is number of columns of matrix op(B) and C.]
-  //K is number of rows of op(B) and columns of op(A).
+                      double* C);
 
-  // op(A) is M by K
-  // op(B) is K by N
-  // C is M by N
-  // cublasDgemm(handle, transa, transb, M, N, K, alpha, A, lda, B, ldb, beta, C, ldc) 
-  // performs C=alpha op ( B ) op ( A ) + beta C
+void cpu_gemm_test() {
+  bool TransA = true;
+  bool TransB = false;
+  const long long int M = (long long int)5;
+  const long long int N = (long long int)6;
+  const long long int K = (long long int)7;
+  const float alpha = (float)(-1.0);
+  const float beta = (float)1.0;
+  std::string blank = "";
 
-  int lda = (TransA == false) ? K : M;
-  int ldb = (TransB == false) ? N : K;
-  cblas_dgemm(CblasRowMajor, (TransA == false) ? CblasNoTrans : CblasTrans, (TransB == false) ? CblasNoTrans : CblasTrans, M, N, K, alpha, A, lda, B,
-      ldb, beta, C, N);
+  float* A = NULL;
+  float* B = NULL;
+  float* C = NULL;
+  A = (float *)malloc(K * M *  sizeof(float)); 
+  B = (float *)malloc(N * K *  sizeof(float)); 
+  C = (float *)malloc(M * N *  sizeof(float));  
+  checkErrors(A);
+  checkErrors(B);
+  checkErrors(C);
+
+  host_rng_uniform<float>(K * M, (float)(-10.0), (float)10.0, A);
+  host_rng_uniform<float>(N * K, (float)(-10.0), (float)10.0, B);
+  host_rng_uniform<float>(M * N, (float)(-10.0), (float)10.0, C);
+
+  if(1){
+    print_host_mtx(A, (TransA == false) ? M : K, (TransA == false) ? K : M, "A", true, strPreamble(blank));
+    print_host_mtx(B, (TransB == false) ? K : N, (TransB == false) ? N : K, "B", true, strPreamble(blank));
+    print_host_mtx(C, M, N, "C", true, strPreamble(blank));
+  }
+
+
+  cpu_gemm<float>(TransA, TransB, M, N, K, alpha, A, B, beta, C);
+
+  if(1){
+    print_host_mtx(A, (TransA == false) ? M : K, (TransA == false) ? K : M, "A", true, strPreamble(blank));
+    print_host_mtx(B, (TransB == false) ? K : N, (TransB == false) ? N : K, "B", true, strPreamble(blank));
+    print_host_mtx(C, M, N, "C", true, strPreamble(blank));
+  }
+  free(A);
+  free(B); 
+  free(C);  
 }
 
 template <>
@@ -549,13 +694,12 @@ void cpu_swap_ordering<float>(const long long int rows, const long long int cols
   if(Debug) LOG("cpu_swap_ordering done");
 }
 
-
-template<>
-float cpu_abs_max<float>(const long long int n,  const float* x) 
+template <typename Dtype>
+Dtype cpu_min(const long long int n,  const Dtype* x) 
 {
   if(too_big(n) ) {ABORT_IF_NEQ(0, 1, "Long long long int too big");}
 
-  thrust::pair<const float *, const float *> tuple = thrust::minmax_element(thrust::host, x, x + n);
+  thrust::pair<const Dtype *, const Dtype *> tuple = thrust::minmax_element(thrust::host, x, x + n);
 
   // if int data[6] = {1, 0, 2, 2, 1, 3};
   // thrust::pair<int *, int *> result = thrust::minmax_element(thrust::host, data, data + 6);
@@ -564,22 +708,67 @@ float cpu_abs_max<float>(const long long int n,  const float* x)
   // *result.first is 0
   // *result.second is 3
 
-  float max;
+  // save_device_array_to_file<float>(x, n , "gradient");
+  // LOG(INFO) << "max : " <<max ;
+  // LOG(INFO) << "Press Enter to continue." ;
+  // std::cin.ignore();
+
+  return *tuple.first;
+
+}
+
+template int cpu_min<int>(const long long int n,  const int* x);
+
+
+// template <typename Dtype>
+// Dtype cpu_abs_max(const long long int n, Dtype* X){
+//   Dtype max_ = std::abs(X[0]);
+//   for(long long int i = (long long int)1; i < n; i+=(long long int)1){
+//     Dtype temp = std::abs(X[i]);
+//     if(temp > max_){
+//       max_ = temp;
+//     }
+//   }
+//   return max_;
+// }
+
+// template float cpu_abs_max<float>(const long long int n, float* X);
+// template int cpu_abs_max<int>(const long long int n, int* X);
+
+template <typename Dtype>
+Dtype cpu_abs_max(const long long int n, const Dtype* x) 
+{
+  if(too_big(n) ) {ABORT_IF_NEQ(0, 1, "Long long long int too big");}
+
+  thrust::pair<const Dtype *, const Dtype *> tuple = thrust::minmax_element(thrust::host, x, x + n);
+  /*
+    if int data[6] = {1, 0, 2, 2, 1, 3};
+    thrust::pair<int *, int *> result = thrust::minmax_element(thrust::host, data, data + 6);
+    result.first is data + 1
+    result.second is data + 5
+    *result.first is 0
+    *result.second is 3
+  */
+
+  Dtype max = (Dtype)0.0;
 
   if(abs(*tuple.first) > abs(*tuple.second)){
     max =  abs(*tuple.first);
   }else{
     max =  abs(*tuple.second);
   };
-
-  // save_device_array_to_file<float>(x, n , "gradient");
-  // LOG(INFO) << "max : " <<max ;
-  // LOG(INFO) << "Press Enter to continue." ;
-  // std::cin.ignore();
+  /*
+    save_device_array_to_file<float>(x, n , "gradient");
+    LOG(INFO) << "max : " <<max ;
+    LOG(INFO) << "Press Enter to continue." ;
+    std::cin.ignore();
+  */
 
   return max;
 
 }
+
+template float cpu_abs_max<float>(const long long int n,  const float* x); 
 
 // square<T> computes the square of a number f(x) -> x*x 
 template <typename Dtype> 
@@ -1041,7 +1230,7 @@ void save_host_array_to_file(const Dtype* A_host, int count, std::string title, 
     };
   };
   if(file_line != ""){
-    LOG2(file_line, "save_host_array_to_file "<< title);
+    LOG2(file_line, "save_host_array_to_file "<< title << " has "<< count<<" entries");
   }
 }
 
@@ -1552,6 +1741,13 @@ template void cpu_sort_index_by_max<float>(const long long int rows, const long 
 template<typename Dtype>
 void cpu_sort_index_by_max(const long long int dimension,  Dtype* x, int* indicies, int top_N)
 {
+  /*
+    "sort" the rows (not including the diagonal) of a symetric 
+    matrix when storing only the entries below the diagonal 
+    in column major order. The indicies vector stores the first 
+    top_N indicies of the entries in x for a given row for each row. 
+    Thus indicies is top_N * dimension in column major order.
+  */
   bool print = true;
   bool debug = false;
   double avg_time = 0.0;
@@ -1650,8 +1846,13 @@ template void cpu_sort_index_by_max<float>(const long long int dimension,  float
 
 
 void cpu_count_appearances(const int top_N, const long long int dimension,
-  int* count, const int* indicies )
+  int* count, const int* indicies)
 {
+  /*
+    Count the appearances of each of the dimension indicies 
+    in the columns of the vector called indicies which is 
+    top_N * dimension in memory in column major ordering
+  */
   bool print = true;
   struct timeval program_start, program_end;
   double program_time;
@@ -2477,7 +2678,7 @@ void cpu_sparse_nearest_row(const int rows_A, const int cols, const Dtype* dense
       for(long long int row_A = (long long int)0; row_A < (long long int)rows_A; row_A+=(long long int)1){
         Dtype temp = (Dtype)0.0;
         for(long long int coo_index = (long long int)(csr_rows_B[row_B]); coo_index < (long long int)(csr_rows_B[row_B + 1]); coo_index+=(long long int)1){
-          int col = coo_cols_B[coo_index];
+          int col = coo_cols_B[coo_index - row_skip];
           temp += pow(dense_mtx_A[row_A  * cols + col] - coo_entries_B[coo_index], (Dtype)2.0);
         }
         if(temp < closest_A_row_dist || row_A == 0){
@@ -2493,6 +2694,7 @@ void cpu_sparse_nearest_row(const int rows_A, const int cols, const Dtype* dense
       };
     }
   }
+
   program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
   //printf("program_time: %f\n", program_time);   
   if(1) LOG("cpu_sparse_nearest_row run time : "<<readable_time(program_time)<<std::endl);
@@ -2537,7 +2739,7 @@ void cpu_dense_nearest_row(const int rows_A, const int cols, const Dtype* dense_
         for(long long int row_A = (long long int)0; row_A < (long long int)rows_A; row_A+=(long long int)1){
           Dtype temp = (Dtype)0.0;
           for(long long int col = (long long int)0; col < (long long int)cols; col+=(long long int)1){
-            temp += pow(dense_mtx_A[row_A * cols + col] - dense_mtx_B[row_B * cols+ col],(Dtype)2.0);
+            temp += pow(dense_mtx_A[row_A * (long long int)cols + col] - dense_mtx_B[row_B * (long long int)cols+ col],(Dtype)2.0);
           }
           if(temp < closest_A_row_dist || row_A == 0){
             closest_A_row_dist = temp;
@@ -2567,10 +2769,11 @@ template void cpu_dense_nearest_row<float>(const int rows_A, const int cols, con
 template<typename Dtype>
 void cpu_calculate_KM_error_and_update(const int rows_A, const int cols, Dtype* dense_mtx_A, 
                                                     const int rows_B, const Dtype* dense_mtx_B, int* selection,  
-                                                    Dtype alpha, Dtype lambda)
+                                                    Dtype alpha, Dtype lambda, Dtype* checking)
 {
-  bool Debug = false;
+  bool Debug = true;
   LOG("cpu_calculate_KM_error_and_update called");
+  std::string blank = "";
 
   struct timeval program_start, program_end;
   double program_time;
@@ -2579,12 +2782,18 @@ void cpu_calculate_KM_error_and_update(const int rows_A, const int cols, Dtype* 
     subtract dense_mtx_A from sparse mtx B and put the sparse results in coo_errors
     dense_mtx_A must be in column major ordering
   */
-
+  Dtype* per_thread;
   int nthreads = 1;
   #ifdef _OPENMP
     int nProcessors = omp_get_max_threads();
     nthreads = (int)std::min((long long int)nProcessors, (long long int)rows_A * (long long int)cols);
     omp_set_num_threads(nthreads);
+    omp_lock_t printlock;
+    omp_init_lock(&printlock);
+    if(Debug){
+      per_thread = (Dtype *)malloc(nthreads * sizeof(Dtype));
+      checkErrors(per_thread);
+    }
   #endif
   #pragma omp parallel shared(nthreads)
   {
@@ -2598,24 +2807,50 @@ void cpu_calculate_KM_error_and_update(const int rows_A, const int cols, Dtype* 
         long long int col = index % ((long long int) cols);
         Dtype temp = (Dtype)0.0;
         int count = 0;
+        if(Debug){
+          per_thread[th_id] = (Dtype)0.0;
+        }
         for(long long int row_B = (long long int)0; row_B < (long long int)rows_B; row_B +=(long long int)1){
           if(selection[row_B] == (int)row_A){
             temp += dense_mtx_B[row_B * (long long int)cols + col];
             count++;
           }
         }
-        dense_mtx_A[row_A  * (long long int)cols + col] = ((float)1.0 - alpha * lambda) * dense_mtx_A[row_A  * (long long int)cols + col] + alpha * (temp / ((float)count));
-
+        if(count > 0){
+          Dtype old_val = dense_mtx_A[row_A  * (long long int)cols + col];
+          dense_mtx_A[row_A  * (long long int)cols + col] = ((float)1.0 - alpha * lambda) * old_val + alpha * (temp / ((float)count));
+          if(Debug){
+            // omp_set_lock(&printlock);
+            // LOG("th_id : "<<th_id);
+            // LOG("index : "<<index);
+            // LOG("row_A : "<<row_A);
+            // LOG("col : "<<col);
+            // LOG("count : "<<count);
+            // LOG("update term : "<<temp / ((float)count));
+            // LOG("before term : "<<old_val);
+            // LOG("new term : "<<dense_mtx_A[row_A  * (long long int)cols + col]);
+            // omp_unset_lock(&printlock);
+            per_thread[th_id] = std::max(per_thread[th_id], std::abs(dense_mtx_A[row_A  * (long long int)cols + col] - old_val));
+          }
+        }
         if (::isinf(dense_mtx_A[row_A  * (long long int)cols + col]) || ::isnan(dense_mtx_A[row_A  * (long long int)cols + col])){
+          omp_set_lock(&printlock);
+          LOG("th_id : "<<th_id);
           ABORT_IF_EQ(0, 0, "isBad");
+          omp_unset_lock(&printlock);
         };
       };
   }
+  if(Debug){
+    print_host_array(per_thread, nthreads, "max per_thread", strPreamble(blank));
+    save_host_array_to_file(per_thread, nthreads, "max per_thread", strPreamble(blank));
+  }
+  if(per_thread) free(per_thread);
   program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
   //printf("program_time: %f\n", program_time);   
   if(1) LOG("cpu_calculate_KM_error_and_update run time : "<<readable_time(program_time)<<std::endl);
 }
 
 template void cpu_calculate_KM_error_and_update<float>(const int rows_A, const int cols, float* dense_mtx_A, 
-    const int rows_B, const float* dense_mtx_B, int* selection, float alpha, float lambda);
+    const int rows_B, const float* dense_mtx_B, int* selection, float alpha, float lambda, float* checking);
 

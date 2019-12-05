@@ -425,9 +425,9 @@ template < typename Dtype>
 void transpose_in_place(cublasHandle_t handle, const long long int lda, const long long int sda, Dtype *A);
 
 template <typename Dtype>
-void gpu_gemv(cublasHandle_t dn_handle, const bool TransA, const int M, const int N,
-                  const Dtype alpha, const Dtype* A, const Dtype* x, const int inc_x, 
-                  const Dtype beta, Dtype* y, const int inc_y);
+void gpu_gemv(cublasHandle_t dn_handle, const bool TransA, const long long int M, const long long int N,
+                  const Dtype alpha, const Dtype* A, const Dtype* x, const long long int inc_x, 
+                  const Dtype beta, Dtype* y, const long long int inc_y);
 
 template <typename Dtype>
 void gpu_hadamard(const long long int n, const Dtype* A, Dtype* B );
@@ -447,14 +447,9 @@ void gpu_axpby(cublasHandle_t dn_handle, const long long int N, const Dtype alph
 template<typename Dtype>
 Dtype gpu_sum_of_squares_of_diff(cublasHandle_t dn_handle, const long long int n, const Dtype* x, Dtype* y);
 
-template < typename Dtype>
-cublasStatus_t cublasXgemm(cublasHandle_t handle, cublasOperation_t transa, cublasOperation_t transb, 
-                           int m, int n, int k, Dtype *alpha, const Dtype *A, int lda,
-                           Dtype *B, int ldb, Dtype *beta, Dtype *C, int ldc);
-
 template <typename Dtype>
 void gpu_gemm(cublasHandle_t dn_handle, const bool TransA,
-              const bool TransB, const int M, const int N, const int K,
+              const bool TransB, const long long int M, const long long int N, const long long int K,
               const Dtype alpha, const Dtype* A, const Dtype* B, const Dtype beta,
               Dtype* C);
 
@@ -474,9 +469,10 @@ cublasStatus_t cublasXgemmBatched(cublasHandle_t handle,
 
 template < typename Dtype>
 void cublasXSparsegemm(cusparseHandle_t handle, bool TransA, bool TransB,
-                                    int m, int n, int k, int nnz, Dtype *alpha, const cusparseMatDescr_t descrA, 
+                                    long long int m, long long int n, long long int k,
+                                    int nnz, Dtype *alpha, const cusparseMatDescr_t descrA, 
                                     const Dtype *csrValA, const int *csrRowPtrA, const int *csrColIndA,
-                                    Dtype *B, int ldb, Dtype *beta, Dtype *C, int ldc);
+                                    Dtype *B, long long int ldb, Dtype *beta, Dtype *C, long long int ldc);
 
 
 template < typename Dtype>
@@ -676,7 +672,7 @@ int gpu_get_num_entries_in_rows(const int first_row, const int last_row, const i
 
 int gpu_get_first_coo_index(const int first_row, const int* csr);
 
-void sparse_error(const int rows, const int cols, const float* dense_mtx_A, 
+void sparse_error(const long long int rows, const long long int cols, const float* dense_mtx_A, 
                   const int* csr_rows_B, const int* coo_cols_B,
                   const float* coo_entries_B, float* coo_errors, const int num_sparse_entries,
                   float* coo_A);
@@ -697,7 +693,8 @@ void gpu_spXdense_MMM(const cusparseHandle_t handle, const bool TransA, const bo
 
 template <typename Dtype>
 void gpu_R_error(const cublasHandle_t dn_handle, const cusparseHandle_t sp_handle, const cusparseMatDescr_t sp_descr,
-                        const int batch_size_testing, const int batch_size_CU, const int num_latent_factors, const int ratings_cols,
+                          const long long int batch_size_testing, const long long int batch_size_CU, 
+                          const long long int num_latent_factors, const long long int ratings_cols,
                         const int nnz, const int first_coo_ind, const bool compress, 
                         Dtype* testing_entries, Dtype* coo_testing_errors, const Dtype testing_fraction,
                         const Dtype *coo_format_ratingsMtx_rating_dev_testing, 
@@ -710,7 +707,8 @@ void gpu_R_error(const cublasHandle_t dn_handle, const cusparseHandle_t sp_handl
 
 template <typename Dtype>
 void gpu_R_error_training(const cublasHandle_t dn_handle, const cusparseHandle_t sp_handle, const cusparseMatDescr_t sp_descr,
-                                const int batch_size_training, const int batch_size_CU, const int num_latent_factors, const int ratings_cols,
+                          const long long int batch_size_training, const long long int batch_size_CU, 
+                          const long long int num_latent_factors, const long long int ratings_cols,
                                 const int nnz, const int first_coo_ind, const bool compress, Dtype* coo_errors, 
                                 const Dtype *coo_format_ratingsMtx_rating_dev_training, 
                                 const int *csr_format_ratingsMtx_userID_dev_training_batch, 
@@ -721,7 +719,8 @@ void gpu_R_error_training(const cublasHandle_t dn_handle, const cusparseHandle_t
 
 template <typename Dtype>
 void gpu_R_error_testing(const cublasHandle_t dn_handle, const cusparseHandle_t sp_handle, const cusparseMatDescr_t sp_descr,
-                        const int batch_size_testing, const int batch_size_CU, const int num_latent_factors, const int ratings_cols,
+                          const long long int batch_size_testing, const long long int batch_size_CU, 
+                          const long long int num_latent_factors, const long long int ratings_cols,
                         const int nnz, const int first_coo_ind, const bool compress, 
                         Dtype* testing_entries, Dtype* coo_testing_errors, const Dtype testing_fraction,
                         const Dtype *coo_format_ratingsMtx_rating_dev_testing, 
