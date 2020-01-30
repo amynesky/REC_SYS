@@ -345,8 +345,7 @@ template <typename Dtype>
 void gpu_rng_uniform(cublasHandle_t handle, const long long int n, const Dtype a, const Dtype b, Dtype* r);
 
 template <typename Dtype>
-void gpu_rng_gaussian(const long long int n, const Dtype mu, const Dtype sigma,
-                            Dtype* r);
+void gpu_rng_gaussian(const long long int n, const Dtype mu, const Dtype sigma, Dtype* r);
 
 template <typename Dtype>
 void gpu_shuffle_array(cublasHandle_t handle, const long long int n,  Dtype* x);
@@ -403,6 +402,9 @@ Dtype gpu_variance(const long long int n, const Dtype* x);
 
 template<typename Dtype>
 Dtype gpu_expected_dist_two_guassian(cublasHandle_t dn_handle, const long long int n);
+
+template<typename Dtype>
+void gpu_msq_nonzero(const long long int n, const Dtype* x, Dtype* y);
 
 template<typename Dtype>
 Dtype gpu_sum_of_squares(const long long int n, const Dtype* x);
@@ -556,11 +558,6 @@ void gpu_supplement_training_mtx_with_content_based(const long long int ratings_
                                                     const int* csr_format_keyWordMtx_itemID_dev,
                                                     const int* coo_format_keyWordMtx_keyWord_dev);
 
-template <typename Dtype>
-void sparse_nearest_row(const int rows_A, const int cols, const Dtype* dense_mtx_A, 
- const int rows_B, const int num_sparse_entries, const int* csr_rows_B, const int* coo_cols_B,
- const Dtype* coo_entries_B, int* selection,  
- Dtype* error);
 
 template <typename Dtype>
 void dense_nearest_row(const int rows_A, const int cols, const Dtype* dense_mtx_A, 
@@ -693,15 +690,17 @@ void gpu_spXdense_MMM(const cusparseHandle_t handle, const bool TransA, const bo
 
 template <typename Dtype>
 void gpu_R_error(const cublasHandle_t dn_handle, const cusparseHandle_t sp_handle, const cusparseMatDescr_t sp_descr,
-                          const long long int batch_size_testing, const long long int batch_size_CU, 
-                          const long long int num_latent_factors, const long long int ratings_cols,
-                        const int nnz, const int first_coo_ind, const bool compress, 
-                        Dtype* testing_entries, Dtype* coo_testing_errors, const Dtype testing_fraction,
-                        const Dtype *coo_format_ratingsMtx_rating_dev_testing, 
-                        const int *csr_format_ratingsMtx_userID_dev_testing_batch, 
-                        const int *coo_format_ratingsMtx_itemID_dev_testing,
-                        const Dtype *V, Dtype *U_testing, Dtype *R_testing, 
-                        std::string name, float training_rate, float regularization_constant);
+                      const long long int batch_size_t, const long long int batch_size_GU, 
+                      const long long int num_latent_factors, const long long int ratings_cols,
+                      const int nnz, const int first_coo_ind, const bool compress, 
+                      Dtype* testing_entries, Dtype* coo_errors, const Dtype testing_fraction,
+                      const Dtype *coo_format_ratingsMtx_rating_dev_batch, 
+                      const int *csr_format_ratingsMtx_userID_dev_batch, 
+                      const int *coo_format_ratingsMtx_itemID_dev_batch,
+                      const Dtype *V, Dtype *U_t, Dtype *R_t, 
+                      Dtype training_rate, Dtype regularization_constant, const int increment_index,
+                      Dtype* testing_error_on_training_entries, Dtype* testing_error_on_testing_entries, 
+                      Dtype* total_iterations, bool S_with_U = false, Dtype *SV = NULL);
 
 
 
@@ -727,9 +726,20 @@ void gpu_R_error_testing(const cublasHandle_t dn_handle, const cusparseHandle_t 
                         const int *csr_format_ratingsMtx_userID_dev_testing_batch, 
                         const int *coo_format_ratingsMtx_itemID_dev_testing,
                         const Dtype *V, Dtype *U_testing, Dtype *R_testing, 
-                        float training_rate, float regularization_constant,
+                        float training_rate, float regularization_constant, int increment_index,
                         float* testing_error_on_training_entries, float* testing_error_on_testing_entries, 
                         long long int* total_iterations, bool S_with_U = false, Dtype *SV = NULL);
+
+template <typename Dtype>
+void gpu_sparse_nearest_row(const int rows_A, const int cols, const Dtype* dense_mtx_A, 
+ const int rows_B, const int num_sparse_entries, const int* csr_rows_B, const int* coo_cols_B,
+ const Dtype* coo_entries_B, int* selection, Dtype* error, bool row_major_ordering);
+
+template<typename Dtype>
+void gpu_calculate_KM_error_and_update(const int rows_A, const int cols, Dtype* dense_mtx_A, 
+                                                    const int rows_B, const Dtype* dense_mtx_B, int* selection,  
+                                                    Dtype alpha, Dtype lambda);
+
 
 
 

@@ -308,7 +308,7 @@ void CSVReader::getData(int* coo_format_ratingsMtx_userID_host,
 						total_items++;
 
 					}else{
-						if(0){
+						if(Debug){
 				            LOG("col : "<<col) ;
 				            LOG("total_items : "<<total_items) ;
 				            LOG("it->first : "<<it->first) ;
@@ -321,12 +321,12 @@ void CSVReader::getData(int* coo_format_ratingsMtx_userID_host,
 			        row++;
 				};				
 			}
-			if(0){
+			if(Debug){
 				LOG("total_items : "<<total_items) ;
 				save_map(items_dictionary, "items_dictionary_before_shuffle");
 			}
 			cpu_shuffle_map_second((long long int)total_items,  items_dictionary );
-			if(0){
+			if(Debug){
 				save_map(items_dictionary, "items_dictionary_after_shuffle");
 			}
 		}	
@@ -386,7 +386,7 @@ void CSVReader::getData(int* coo_format_ratingsMtx_userID_host,
 
 		// Close the File
 		file.close();
-		if(0){
+		if(Debug){
 			save_host_arrays_side_by_side_to_file(coo_format_ratingsMtx_userID_host, coo_format_ratingsMtx_itemID_host, 
 	                                           coo_format_ratingsMtx_rating_host, num_entries, "coo_before");
 		}

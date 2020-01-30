@@ -120,8 +120,10 @@ void copy_device_mtx_into_host_submtx(const int M, const int N, const Dtype* X, 
 // math functions
 //============================================================================================
 
-// Returns the sum of the absolute values of the elements of vector x
+template <typename Dtype>
+void cpu_incremental_average(const long long int increment_index, Dtype* old_avg, Dtype new_val);
 
+// Returns the sum of the absolute values of the elements of vector x
 template <typename Dtype>
 Dtype cpu_asum(const long long int n, const Dtype* x);
 
@@ -137,7 +139,7 @@ void cpu_scal(const long long int N, const Dtype alpha, Dtype *X);
 int gcd(int a, int b);
 
 template < typename Dtype>
-void cpu_permute(Dtype* a, const int* pvt, const long long int rows, const long long int cols, bool direction);
+void cpu_permute(Dtype* a, const int* pvt, const long long int rows, const long long int cols, bool permute_rows);
 
 template < typename Dtype>
 void MatrixInplaceTranspose(Dtype *A, long long int r, long long int c, bool row_major_ordering = true);
@@ -164,6 +166,9 @@ Dtype cpu_min(const long long int n,  const Dtype* x);
 template <typename Dtype>
 Dtype cpu_abs_max(const long long int n,  const Dtype* x);
 
+template <typename Dtype> 
+Dtype cpu_expected_value(const long long int n,  const Dtype* x);
+
 template <typename Dtype>
 Dtype cpu_expected_abs_value(const long long int n,  const Dtype* x);
 
@@ -178,6 +183,8 @@ void  fillupMatrix(Dtype *A , int lda , int rows, int cols);
 
 template <typename Dtype>
 void host_rng_uniform(const long long int n, const Dtype a, const Dtype b, Dtype* r);
+
+void getRandIntsBetween(int *A , int lower_bd , int upper_bd, int num);
 //============================================================================================
 // prints
 //============================================================================================

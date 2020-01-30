@@ -60,6 +60,12 @@ typedef boost::minstd_rand base_generator_type;
 
 
 bool too_big(const long long int li){
+  bool Debug = false;
+  if(Debug){
+    LOG("INT_MIN : "<<INT_MIN);
+    LOG("INT_MAX : "<<INT_MAX);
+    LOG("compared to : "<<li);
+  }
   if (li >= (long long int)INT_MIN && li <= (long long int)INT_MAX) {
     return false;
   } else {
@@ -177,6 +183,16 @@ template void copy_device_mtx_into_host_submtx<float>(const int M, const int N, 
 //============================================================================================
 // math functions
 //============================================================================================
+
+template <>
+void cpu_incremental_average<float>(const long long int increment_index, float* old_avg, float new_val) {
+  old_avg[0] += (new_val - old_avg[0]) / ((float)(increment_index));
+}
+
+template <>
+void cpu_incremental_average<long long int>(const long long int increment_index, long long int* old_avg, long long int new_val) {
+  old_avg[0] = (long long int)(((float)new_val - (float)old_avg[0]) / ((float)(increment_index)));
+}
 
 template <typename Dtype>
 Dtype cpu_asum(const long long int n, const Dtype* x) {
@@ -508,6 +524,10 @@ void cpu_gemm(const bool TransA, const bool TransB,
                      const Dtype alpha, const Dtype* A, const Dtype* B, const Dtype beta,
                      Dtype* C) 
 {
+  if(1) LOG("cpu_gemm called.");
+  struct timeval program_start, program_end;
+  double program_time;
+  gettimeofday(&program_start, NULL);
   /*
     M, N, K
     M number of rows of matrix op(A) and C.
@@ -559,8 +579,10 @@ void cpu_gemm(const bool TransA, const bool TransB,
 
   if(Debug){
 
-    LOG("cpu_gemm done");
   }
+  gettimeofday(&program_end, NULL);
+  program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
+  if(1) LOG("cpu_gemm run time : "<<readable_time(program_time));
 }
 
 template void cpu_gemm<float>(const bool TransA, const bool TransB, 
@@ -768,6 +790,7 @@ Dtype cpu_abs_max(const long long int n, const Dtype* x)
 
 }
 
+template int cpu_abs_max<int>(const long long int n,  const int* x); 
 template float cpu_abs_max<float>(const long long int n,  const float* x); 
 
 // square<T> computes the square of a number f(x) -> x*x 
@@ -783,13 +806,25 @@ struct abss
   } 
 };
 
+template <typename Dtype> 
+Dtype cpu_expected_value(const long long int n,  const Dtype* x) {
+  if(too_big(n) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
+  Dtype y = (Dtype)0.0;
+  for(long long int i = (long long int)0; i < n; i += (long long int)1 ) {
+    cpu_incremental_average(i, &y, x[i]);
+  };  
+  return y;
+}
+
+template float cpu_expected_value<float>(const long long int n,  const float* x);
+
 template <>
 float cpu_expected_abs_value<float>(const long long int n,  const float* x) {
   if(too_big(n) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
   // setup arguments 
   abss<float> unary_op; 
   thrust::plus<float> binary_op; 
-  float init = 0; 
+  float init = (float)0.0; 
   // compute norm 
 
   float s =  thrust::transform_reduce(thrust::host, x, x+n, unary_op, init, binary_op) ; 
@@ -1092,15 +1127,28 @@ template std::string ToString<float>(const float val);
 template std::string ToString<double>(const double val);
 
 extern "C" std::string readable_time(double ms){
-  int ms_int = (int)ms;
-  int hours = ms_int / 3600000;
-  ms_int = ms_int % 3600000;
-  int minutes = ms_int / 60000;
-  ms_int = ms_int % 60000;
-  int seconds = ms_int / 1000;
-  ms_int = ms_int % 1000;
+  if(ms >= (double)0.0){
+    int ms_int = (int)ms;
+    int hours = ms_int / 3600000;
+    ms_int = ms_int % 3600000;
+    int minutes = ms_int / 60000;
+    ms_int = ms_int % 60000;
+    int seconds = ms_int / 1000;
+    ms_int = ms_int % 1000;
 
-  return (ToString<int>(hours) + ":" +ToString<int>(minutes) + ":" + ToString<int>(seconds) + ":" + ToString<int>(ms_int));
+    return (ToString<int>(hours) + ":" +ToString<int>(minutes) + ":" + ToString<int>(seconds) + ":" + ToString<int>(ms_int));
+  }else{
+    int ms_int = (int)(abs(ms));
+    int hours = ms_int / 3600000;
+    ms_int = ms_int % 3600000;
+    int minutes = ms_int / 60000;
+    ms_int = ms_int % 60000;
+    int seconds = ms_int / 1000;
+    ms_int = ms_int % 1000;
+
+    std::string neg_ = "-";
+    return (neg_ + ToString<int>(hours) + ":" + ToString<int>(minutes) + ":" + ToString<int>(seconds) + ":" + ToString<int>(ms_int));
+  }
 }
 
 template<typename Dtype>
@@ -2447,16 +2495,16 @@ void cpu_orthogonal_decomp<float>(const long long int m, const long long int n, 
     save_host_mtx_to_file<float>(R, m, n, "svd_error");
 
     //float range_A    = gpu_range<float>(m * n,  A);
-        float error      = cpu_abs_max<float>(m * n, R); 
+    float error      = cpu_abs_max<float>(m * n, R); 
     //float error_expt = gpu_expected_abs_value<float>(m * n, R); 
-        free(R);
+    free(R);
     // LOG("A mtx range of values = "<<range_A) ;
-        LOG("SVD max error = "<<error) ;
+    LOG("SVD max error = "<<error) ;
     // LOG("SVD max error over range of values = "<<error/range_A) ;
     // LOG("SVD expected absolute error = "<<error_expt) ;
     // LOG("SVD expected absolute error over range of values = "<<error_expt/range_A) ;
-        LOG("Press Enter to continue.") ;
-        std::cin.ignore();
+    LOG("Press Enter to continue.") ;
+    std::cin.ignore();
 
   }
   gettimeofday(&program_end, NULL);
@@ -2599,6 +2647,12 @@ void cpu_orthogonal_decomp_test() {
 void cpu_center_rows(const long long int rows, const long long int cols, 
                  float* X, const float val_when_var_is_zero, float* user_means,  float* user_var) 
 {
+  LOG("cpu_center_rows called");
+
+  struct timeval program_start, program_end;
+  double program_time;
+  gettimeofday(&program_start, NULL);
+
   int nthreads = 1;
   #ifdef _OPENMP
     int nProcessors = omp_get_max_threads();
@@ -2641,6 +2695,9 @@ void cpu_center_rows(const long long int rows, const long long int cols,
       }       
     }
   }
+  gettimeofday(&program_end, NULL);
+  program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));  
+  if(1) LOG("cpu_center_rows run time : "<<readable_time(program_time)<<std::endl);
 }
 
 template <typename Dtype>
@@ -2677,13 +2734,16 @@ void cpu_sparse_nearest_row(const int rows_A, const int cols, const Dtype* dense
       int   closest_A_row      = 0;
       for(long long int row_A = (long long int)0; row_A < (long long int)rows_A; row_A+=(long long int)1){
         Dtype temp = (Dtype)0.0;
+        long long int count = (long long int)0;
         for(long long int coo_index = (long long int)(csr_rows_B[row_B]); coo_index < (long long int)(csr_rows_B[row_B + 1]); coo_index+=(long long int)1){
           int col = coo_cols_B[coo_index - row_skip];
-          temp += pow(dense_mtx_A[row_A  * cols + col] - coo_entries_B[coo_index], (Dtype)2.0);
+          count += (long long int)1;
+          cpu_incremental_average<Dtype>(count, &temp, (Dtype)pow(dense_mtx_A[row_A  * (long long int)cols + (long long int)col] - coo_entries_B[coo_index - row_skip], (Dtype)2.0));
+          //temp += pow(dense_mtx_A[row_A  * (long long int)cols + (long long int)col] - coo_entries_B[coo_index - row_skip], (Dtype)2.0);
         }
-        if(temp < closest_A_row_dist || row_A == 0){
+        if(temp < closest_A_row_dist || row_A == (long long int)0){
           closest_A_row_dist = temp;
-          closest_A_row      = row_A;
+          closest_A_row      = (int)row_A;
         }
       }
       selection[row_B] = closest_A_row;
@@ -2694,7 +2754,7 @@ void cpu_sparse_nearest_row(const int rows_A, const int cols, const Dtype* dense
       };
     }
   }
-
+  gettimeofday(&program_end, NULL);
   program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
   //printf("program_time: %f\n", program_time);   
   if(1) LOG("cpu_sparse_nearest_row run time : "<<readable_time(program_time)<<std::endl);
@@ -2734,26 +2794,27 @@ void cpu_dense_nearest_row(const int rows_A, const int cols, const Dtype* dense_
     #endif
     for(long long int row_B = (long long int)th_id; row_B < (long long int)rows_B; row_B += (long long int)nthreads){
       //CUDA_KERNEL_LOOP(row_B,rows_B) {
-        Dtype closest_A_row_dist = (Dtype)1000000.0;
-        int   closest_A_row      = 0;
-        for(long long int row_A = (long long int)0; row_A < (long long int)rows_A; row_A+=(long long int)1){
-          Dtype temp = (Dtype)0.0;
-          for(long long int col = (long long int)0; col < (long long int)cols; col+=(long long int)1){
-            temp += pow(dense_mtx_A[row_A * (long long int)cols + col] - dense_mtx_B[row_B * (long long int)cols+ col],(Dtype)2.0);
-          }
-          if(temp < closest_A_row_dist || row_A == 0){
-            closest_A_row_dist = temp;
-            closest_A_row      = (int)row_A;
-          }
+      Dtype closest_A_row_dist = (Dtype)1000000.0;
+      int   closest_A_row      = 0;
+      for(long long int row_A = (long long int)0; row_A < (long long int)rows_A; row_A+=(long long int)1){
+        Dtype temp = (Dtype)0.0;
+        for(long long int col = (long long int)0; col < (long long int)cols; col+=(long long int)1){
+          temp += pow(dense_mtx_A[row_A * (long long int)cols + col] - dense_mtx_B[row_B * (long long int)cols+ col], (Dtype)2.0);
         }
-        selection[row_B] = closest_A_row;
-        error[row_B] = closest_A_row_dist;
+        if(temp < closest_A_row_dist || row_A == (long long int)0){
+          closest_A_row_dist = temp;
+          closest_A_row      = (int)row_A;
+        }
+      }
+      selection[row_B] = closest_A_row;
+      error[row_B] = closest_A_row_dist;
 
-        if (::isinf(error[row_B]) || ::isnan(error[row_B])){
-          ABORT_IF_EQ(0, 0, "isBad");
-        };
+      if (::isinf(error[row_B]) || ::isnan(error[row_B])){
+        ABORT_IF_EQ(0, 0, "isBad");
       };
-    }
+    };
+  }
+  gettimeofday(&program_end, NULL);
   program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
   //printf("program_time: %f\n", program_time);   
   if(1) LOG("cpu_dense_nearest_row run time : "<<readable_time(program_time)<<std::endl);
@@ -2771,7 +2832,7 @@ void cpu_calculate_KM_error_and_update(const int rows_A, const int cols, Dtype* 
                                                     const int rows_B, const Dtype* dense_mtx_B, int* selection,  
                                                     Dtype alpha, Dtype lambda, Dtype* checking)
 {
-  bool Debug = true;
+  bool Debug = false;
   LOG("cpu_calculate_KM_error_and_update called");
   std::string blank = "";
 
@@ -2782,7 +2843,7 @@ void cpu_calculate_KM_error_and_update(const int rows_A, const int cols, Dtype* 
     subtract dense_mtx_A from sparse mtx B and put the sparse results in coo_errors
     dense_mtx_A must be in column major ordering
   */
-  Dtype* per_thread;
+  Dtype* per_thread = NULL;
   int nthreads = 1;
   #ifdef _OPENMP
     int nProcessors = omp_get_max_threads();
@@ -2802,50 +2863,51 @@ void cpu_calculate_KM_error_and_update(const int rows_A, const int cols, Dtype* 
       th_id = omp_get_thread_num();
     #endif
     for(long long int index = (long long int)th_id; index < (long long int)rows_A * (long long int)cols; index += (long long int)nthreads){
-        //CUDA_KERNEL_LOOP(index, num) {
-        long long int row_A = index / ((long long int) cols);
-        long long int col = index % ((long long int) cols);
-        Dtype temp = (Dtype)0.0;
-        int count = 0;
+      //CUDA_KERNEL_LOOP(index, num) {
+      long long int row_A = index / ((long long int) cols);
+      long long int col = index % ((long long int) cols);
+      Dtype temp = (Dtype)0.0;
+      int count = 0;
+      if(Debug){
+        per_thread[th_id] = (Dtype)0.0;
+      }
+      for(long long int row_B = (long long int)0; row_B < (long long int)rows_B; row_B +=(long long int)1){
+        if(selection[row_B] == (int)row_A){
+          temp += dense_mtx_B[row_B * (long long int)cols + col];
+          count++;
+        }
+      }
+      if(count > 0){
+        Dtype old_val = dense_mtx_A[row_A  * (long long int)cols + col];
+        dense_mtx_A[row_A * (long long int)cols + col] = ((Dtype)1.0 - alpha * lambda) * old_val + alpha * (temp / ((Dtype)count));
         if(Debug){
-          per_thread[th_id] = (Dtype)0.0;
+          // omp_set_lock(&printlock);
+          // LOG("th_id : "<<th_id);
+          // LOG("index : "<<index);
+          // LOG("row_A : "<<row_A);
+          // LOG("col : "<<col);
+          // LOG("count : "<<count);
+          // LOG("update term : "<<temp / ((float)count));
+          // LOG("before term : "<<old_val);
+          // LOG("new term : "<<dense_mtx_A[row_A  * (long long int)cols + col]);
+          // omp_unset_lock(&printlock);
+          per_thread[th_id] = std::max(per_thread[th_id], std::abs(dense_mtx_A[row_A  * (long long int)cols + col] - old_val));
         }
-        for(long long int row_B = (long long int)0; row_B < (long long int)rows_B; row_B +=(long long int)1){
-          if(selection[row_B] == (int)row_A){
-            temp += dense_mtx_B[row_B * (long long int)cols + col];
-            count++;
-          }
-        }
-        if(count > 0){
-          Dtype old_val = dense_mtx_A[row_A  * (long long int)cols + col];
-          dense_mtx_A[row_A  * (long long int)cols + col] = ((float)1.0 - alpha * lambda) * old_val + alpha * (temp / ((float)count));
-          if(Debug){
-            // omp_set_lock(&printlock);
-            // LOG("th_id : "<<th_id);
-            // LOG("index : "<<index);
-            // LOG("row_A : "<<row_A);
-            // LOG("col : "<<col);
-            // LOG("count : "<<count);
-            // LOG("update term : "<<temp / ((float)count));
-            // LOG("before term : "<<old_val);
-            // LOG("new term : "<<dense_mtx_A[row_A  * (long long int)cols + col]);
-            // omp_unset_lock(&printlock);
-            per_thread[th_id] = std::max(per_thread[th_id], std::abs(dense_mtx_A[row_A  * (long long int)cols + col] - old_val));
-          }
-        }
-        if (::isinf(dense_mtx_A[row_A  * (long long int)cols + col]) || ::isnan(dense_mtx_A[row_A  * (long long int)cols + col])){
-          omp_set_lock(&printlock);
-          LOG("th_id : "<<th_id);
-          ABORT_IF_EQ(0, 0, "isBad");
-          omp_unset_lock(&printlock);
-        };
-      };
+      }
+      if (::isinf(dense_mtx_A[row_A  * (long long int)cols + col]) || ::isnan(dense_mtx_A[row_A  * (long long int)cols + col])){
+        omp_set_lock(&printlock);
+        LOG("th_id : "<<th_id);
+        ABORT_IF_EQ(0, 0, "isBad");
+        omp_unset_lock(&printlock);
+      }
+    }
   }
   if(Debug){
     print_host_array(per_thread, nthreads, "max per_thread", strPreamble(blank));
     save_host_array_to_file(per_thread, nthreads, "max per_thread", strPreamble(blank));
+    if(per_thread) free(per_thread);
   }
-  if(per_thread) free(per_thread);
+  gettimeofday(&program_end, NULL);
   program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
   //printf("program_time: %f\n", program_time);   
   if(1) LOG("cpu_calculate_KM_error_and_update run time : "<<readable_time(program_time)<<std::endl);

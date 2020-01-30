@@ -219,9 +219,9 @@ int main(int argc, char *argv[])
         exit(EXIT_FAILURE);
     };
 
-    cpu_orthogonal_decomp_test();
+    //cpu_orthogonal_decomp_test();
     //gpu_block_orthogonal_decomp_from_host_test(dn_handle, dn_solver_handle);
-    return 0;
+    //return 0;
 
     //============================================================================================
     // Get the ratings data from CSV File
@@ -1023,7 +1023,7 @@ int main(int argc, char *argv[])
 
 
     long long int num_latent_factors = (long long int)((float)ratings_rows_CU * (float)0.95);
-    const float percent              = (float)0.8;
+    const float percent              = (float)0.99;
 
 
     float * U_CU;       // U_CU is ratings_rows_CU * ratings_rows_CU
@@ -1082,7 +1082,7 @@ int main(int argc, char *argv[])
         cudaFree(coo_format_ratingsMtx_itemID_dev_testing);  update_Mem(num_entries_testing  *  sizeof(int) * (-1));
         cudaFree(coo_format_ratingsMtx_rating_dev_testing);  update_Mem(num_entries_testing  *  sizeof(float) * (-1) );
         
-        if(Debug){
+        if(Debug && 0){
             save_host_array_to_file<int>  (csr_format_ratingsMtx_userID_host_testing,  ratings_rows_testing + 1, "csr_format_ratingsMtx_userID_host_testing_1");
             save_host_array_to_file<int>  (coo_format_ratingsMtx_itemID_host_testing,  num_entries_testing, "coo_format_ratingsMtx_itemID_host_testing");
             save_host_array_to_file<float>  (coo_format_ratingsMtx_rating_host_testing,  num_entries_testing, "coo_format_ratingsMtx_rating_host_testing");

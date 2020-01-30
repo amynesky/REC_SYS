@@ -34,21 +34,33 @@ grep "Testing error norm over norm of testing only entries:" "$OBSERVATIONS/$FIL
 awk 'BEGIN { FS=" entries:" }{ print $2 }' "$OBSERVATIONS/generic_users_testing_normalized_error_3.txt" 2>&1 | tee $OBSERVATIONS/generic_users_testing_normalized_error_2.txt
 awk '{ print $1 }' "$OBSERVATIONS/generic_users_testing_normalized_error_2.txt" 2>&1 | tee $OBSERVATIONS/generic_users_testing_normalized_error.txt
 
-grep "gpu_R_error_training total iterations :" "$OBSERVATIONS/$FILENAME" 2>&1 | tee $OBSERVATIONS/generic_users_training_MSQER_iterations_3.txt
-awk 'BEGIN { FS="iterations" }{ print $2 }' "$OBSERVATIONS/generic_users_training_MSQER_iterations_3.txt" 2>&1 | tee $OBSERVATIONS/generic_users_training_MSQER_iterations_2.txt
-awk '{ print $2 }' "$OBSERVATIONS/generic_users_training_MSQER_iterations_2.txt" 2>&1 | tee $OBSERVATIONS/generic_users_training_MSQER_iterations.txt
+grep "gpu_R_error_training total iterations :" "$OBSERVATIONS/$FILENAME" 2>&1 | tee $OBSERVATIONS/generic_users_training_iterations_3.txt
+awk 'BEGIN { FS="iterations" }{ print $2 }' "$OBSERVATIONS/generic_users_training_iterations_3.txt" 2>&1 | tee $OBSERVATIONS/generic_users_training_iterations_2.txt
+awk '{ print $2 }' "$OBSERVATIONS/generic_users_training_iterations_2.txt" 2>&1 | tee $OBSERVATIONS/generic_users_training_iterations.txt
 
-grep "gpu_R_error_testing total iterations :" "$OBSERVATIONS/$FILENAME" 2>&1 | tee $OBSERVATIONS/generic_users_testing_error_iterations_3.txt
-awk 'BEGIN { FS="iterations" }{ print $2 }' "$OBSERVATIONS/generic_users_testing_error_iterations_3.txt" 2>&1 | tee $OBSERVATIONS/generic_users_testing_error_iterations_2.txt
-awk '{ print $2 }' "$OBSERVATIONS/generic_users_testing_error_iterations_2.txt" 2>&1 | tee $OBSERVATIONS/generic_users_testing_error_iterations.txt
+grep "gpu_R_error_testing total iterations :" "$OBSERVATIONS/$FILENAME" 2>&1 | tee $OBSERVATIONS/generic_users_testing_iterations_3.txt
+awk 'BEGIN { FS="iterations" }{ print $2 }' "$OBSERVATIONS/generic_users_testing_iterations_3.txt" 2>&1 | tee $OBSERVATIONS/generic_users_testing_iterations_2.txt
+awk '{ print $2 }' "$OBSERVATIONS/generic_users_testing_iterations_2.txt" 2>&1 | tee $OBSERVATIONS/generic_users_testing_iterations.txt
 
 grep "num_latent_factors =" "$OBSERVATIONS/$FILENAME" 2>&1 | tee $OBSERVATIONS/generic_users_latent_factors_3.txt
 awk 'BEGIN { FS="=" }{ print $2 }' "$OBSERVATIONS/generic_users_latent_factors_3.txt" 2>&1 | tee $OBSERVATIONS/generic_users_latent_factors_2.txt
 awk '{ print $1 }' "$OBSERVATIONS/generic_users_latent_factors_2.txt" 2>&1 | tee $OBSERVATIONS/generic_users_latent_factors.txt
 
-grep "full_ratingsMtx_dev_GU_current_batch_abs_max =" "$OBSERVATIONS/$FILENAME" 2>&1 | tee $OBSERVATIONS/generic_users_R_abs_max_3.txt
+grep ": R_GU maximum absolute value =" "$OBSERVATIONS/$FILENAME" 2>&1 | tee $OBSERVATIONS/generic_users_R_abs_max_3.txt
 awk 'BEGIN { FS="=" }{ print $2 }' "$OBSERVATIONS/generic_users_R_abs_max_3.txt" 2>&1 | tee $OBSERVATIONS/generic_users_R_abs_max_2.txt
 awk '{ print $1 }' "$OBSERVATIONS/generic_users_R_abs_max_2.txt" 2>&1 | tee $OBSERVATIONS/generic_users_R_abs_max.txt
+
+grep "delta R_GU maximum absolute value =" "$OBSERVATIONS/$FILENAME" 2>&1 | tee $OBSERVATIONS/generic_users_delta_R_abs_max_3.txt
+awk 'BEGIN { FS="=" }{ print $2 }' "$OBSERVATIONS/generic_users_delta_R_abs_max_3.txt" 2>&1 | tee $OBSERVATIONS/generic_users_delta_R_abs_max_2.txt
+awk '{ print $1 }' "$OBSERVATIONS/generic_users_delta_R_abs_max_2.txt" 2>&1 | tee $OBSERVATIONS/generic_users_delta_R_abs_max.txt
+
+grep "delta U maximum absolute value =" "$OBSERVATIONS/$FILENAME" 2>&1 | tee $OBSERVATIONS/generic_users_delta_U_abs_max_3.txt
+awk 'BEGIN { FS="=" }{ print $2 }' "$OBSERVATIONS/generic_users_delta_U_abs_max_3.txt" 2>&1 | tee $OBSERVATIONS/generic_users_delta_U_abs_max_2.txt
+awk '{ print $1 }' "$OBSERVATIONS/generic_users_delta_U_abs_max_2.txt" 2>&1 | tee $OBSERVATIONS/generic_users_delta_U_abs_max.txt
+
+grep "delta V maximum absolute value =" "$OBSERVATIONS/$FILENAME" 2>&1 | tee $OBSERVATIONS/generic_users_delta_V_abs_max_3.txt
+awk 'BEGIN { FS="=" }{ print $2 }' "$OBSERVATIONS/generic_users_delta_V_abs_max_3.txt" 2>&1 | tee $OBSERVATIONS/generic_users_delta_V_abs_max_2.txt
+awk '{ print $1 }' "$OBSERVATIONS/generic_users_delta_V_abs_max_2.txt" 2>&1 | tee $OBSERVATIONS/generic_users_delta_V_abs_max.txt
 
 grep "err norm when clustering over training norm:" "$OBSERVATIONS/$FILENAME" 2>&1 | tee $OBSERVATIONS/generic_users_k_mean_er_normalized_3.txt
 awk 'BEGIN { FS=" norm:" }{ print $2 }' "$OBSERVATIONS/generic_users_k_mean_er_normalized_3.txt" 2>&1 | tee $OBSERVATIONS/generic_users_k_mean_er_normalized_2.txt
@@ -61,10 +73,11 @@ awk '{ print $1 }' "$OBSERVATIONS/generic_users_k_mean_MSQER_2.txt" 2>&1 | tee $
 
 rm $OBSERVATIONS/generic_users_training_MSQER_3.txt
 rm $OBSERVATIONS/generic_users_training_MSQER_2.txt
-rm $OBSERVATIONS/generic_users_training_MSQER_iterations_3.txt
-rm $OBSERVATIONS/generic_users_training_MSQER_iterations_2.txt
-rm $OBSERVATIONS/generic_users_testing_error_iterations_3.txt
-rm $OBSERVATIONS/generic_users_testing_error_iterations_2.txt
+rm $OBSERVATIONS/generic_users_training_iterations_3.txt
+rm $OBSERVATIONS/generic_users_training_iterations_2.txt
+
+rm $OBSERVATIONS/generic_users_testing_iterations_3.txt
+rm $OBSERVATIONS/generic_users_testing_iterations_2.txt
 rm $OBSERVATIONS/generic_users_testing_MSQER_on_testing_entries_3.txt
 rm $OBSERVATIONS/generic_users_testing_MSQER_on_testing_entries_2.txt
 rm $OBSERVATIONS/generic_users_testing_MSQER_on_training_entries_3.txt
@@ -73,14 +86,22 @@ rm $OBSERVATIONS/generic_users_testing_normalized_over_rand_error_3.txt
 rm $OBSERVATIONS/generic_users_testing_normalized_over_rand_error_2.txt
 rm $OBSERVATIONS/generic_users_testing_normalized_error_3.txt
 rm $OBSERVATIONS/generic_users_testing_normalized_error_2.txt
+
 rm $OBSERVATIONS/generic_users_latent_factors_3.txt
 rm $OBSERVATIONS/generic_users_latent_factors_2.txt
+
 rm $OBSERVATIONS/generic_users_k_mean_MSQER_3.txt
 rm $OBSERVATIONS/generic_users_k_mean_MSQER_2.txt
 rm $OBSERVATIONS/generic_users_k_mean_er_normalized_3.txt
 rm $OBSERVATIONS/generic_users_k_mean_er_normalized_2.txt
 rm $OBSERVATIONS/generic_users_R_abs_max_3.txt
 rm $OBSERVATIONS/generic_users_R_abs_max_2.txt
+rm $OBSERVATIONS/generic_users_delta_R_abs_max_3.txt
+rm $OBSERVATIONS/generic_users_delta_R_abs_max_2.txt
+rm $OBSERVATIONS/generic_users_delta_U_abs_max_3.txt
+rm $OBSERVATIONS/generic_users_delta_U_abs_max_2.txt
+rm $OBSERVATIONS/generic_users_delta_V_abs_max_3.txt
+rm $OBSERVATIONS/generic_users_delta_V_abs_max_2.txt
 
 
 END=$(date +%s)
