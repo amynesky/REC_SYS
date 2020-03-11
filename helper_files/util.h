@@ -12,7 +12,7 @@
 #include <sys/time.h>
 #include <boost/algorithm/string.hpp>
 #include <boost/random.hpp>
-#include <Eigen/Dense>
+//#include <Eigen/Dense>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -91,6 +91,9 @@
 #define strPreamble(blank)\
     ((((blank + __FILE__) + " line ") + ToString(__LINE__)) + " at ") + currentDateTime()
 
+#define SIZE_OF(val)\
+    static_cast<long long int>(sizeof(val))
+
 
 #define checkErrors(ans) { Hassert((ans), __FILE__, __LINE__); }
 template <typename Dtype>
@@ -115,13 +118,19 @@ template <typename Dtype>
 void host_copy(const long long int N, const Dtype* X, Dtype* Y);
 
 template <typename Dtype>
-void copy_device_mtx_into_host_submtx(const int M, const int N, const Dtype* X, Dtype* Y, const int inc_Y);
+void copy_device_mtx_into_host_submtx(const long long int M, const long long int N, const Dtype* X, Dtype* Y, const long long int inc_Y);
 //============================================================================================
 // math functions
 //============================================================================================
 
 template <typename Dtype>
+void cpu_incremental_average_array(const long long int increment_index, Dtype* old_avg, Dtype* new_val, int num);
+
+template <typename Dtype>
 void cpu_incremental_average(const long long int increment_index, Dtype* old_avg, Dtype new_val);
+
+template<typename Dtype>
+void cpu_mean_abs_nonzero(const long long int n, const Dtype* x, Dtype* y, bool Debug) ;
 
 // Returns the sum of the absolute values of the elements of vector x
 template <typename Dtype>
@@ -149,11 +158,11 @@ void cpu_axpby(const long long int N, const Dtype alpha, const Dtype* X, const D
 
 void cpu_axpby_test();
 
-template < typename Dtype>
+template <typename Dtype>
 void cpu_gemm(const bool TransA, const bool TransB, 
               const long long int M, const long long int N, const long long int K,
              const Dtype alpha, const Dtype* A, const Dtype* B, const Dtype beta,
-             Dtype* C);
+             Dtype* C, long long int start_ = (long long int)0, long long int num_ = (long long int)0);
 
 void cpu_gemm_test();
 
@@ -216,9 +225,10 @@ void get_host_array_from_saved_txt(const Dtype* A_host, int count, std::string t
 template <typename Dtype>
 void append_host_array_to_file(const Dtype* A_host, int count, std::string title);
 
+template<typename Dtype>
+void save_host_arrays_side_by_side_to_file(const Dtype* A_host, const Dtype* B_host, int count, std::string title, std::string file_line = "");
 
-void save_host_arrays_side_by_side_to_file(const int* A_host, const int* B_host, 
-                                           const float* C_host, int count, std::string title);
+void save_host_arrays_side_by_side_to_file_(const int* A_host, const int* B_host, const float* C_host, int count, std::string title);
 
 template <typename Dtype>
 void save_host_mtx_to_file(const Dtype* A_host, const int rows, const int  cols, std::string title, bool row_major_order = true, std::string file_line = "");
@@ -246,7 +256,7 @@ void cpu_shuffle_mtx_rows_or_cols(cublasHandle_t dn_handle, const long long int 
 void cpu_shuffle_map_second(const long long int M, std::map<int, int>* items_dictionary );
 
 template <typename Dtype>
-void cpu_set_all(Dtype* x, const int N, Dtype alpha);
+void cpu_set_all(Dtype* x, const long long int N, Dtype alpha);
 
 template <typename Dtype>
 void cpu_set_as_index(Dtype* x, const long long int rows, const long long int cols);

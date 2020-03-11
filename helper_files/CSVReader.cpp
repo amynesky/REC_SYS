@@ -387,8 +387,8 @@ void CSVReader::getData(int* coo_format_ratingsMtx_userID_host,
 		// Close the File
 		file.close();
 		if(Debug){
-			save_host_arrays_side_by_side_to_file(coo_format_ratingsMtx_userID_host, coo_format_ratingsMtx_itemID_host, 
-	                                           coo_format_ratingsMtx_rating_host, num_entries, "coo_before");
+			save_host_arrays_side_by_side_to_file_(coo_format_ratingsMtx_userID_host, coo_format_ratingsMtx_itemID_host, 
+	                                           		coo_format_ratingsMtx_rating_host, num_entries, "coo_before");
 		}
 		if(!all_items){
 			int first_index = 0;
@@ -412,7 +412,7 @@ void CSVReader::getData(int* coo_format_ratingsMtx_userID_host,
 			}
 		}
 		if(0){
-			save_host_arrays_side_by_side_to_file(coo_format_ratingsMtx_userID_host, coo_format_ratingsMtx_itemID_host, 
+			save_host_arrays_side_by_side_to_file_(coo_format_ratingsMtx_userID_host, coo_format_ratingsMtx_itemID_host, 
 	                                           coo_format_ratingsMtx_rating_host, num_entries, "coo_after");
 		}
 	}catch(const std::ifstream::failure& e){

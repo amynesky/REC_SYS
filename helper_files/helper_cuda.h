@@ -727,111 +727,111 @@ static const char *_cudaGetErrorEnum(NppStatus error)
 
 #if ((NPP_VERSION_MAJOR << 12) + (NPP_VERSION_MINOR << 4)) <= 0x5000
 
-        case NPP_BAD_ARG_ERROR:
-            return "NPP_BAD_ARGUMENT_ERROR";
+    case NPP_BAD_ARG_ERROR:
+        return "NPP_BAD_ARGUMENT_ERROR";
 
-        case NPP_COEFF_ERROR:
-            return "NPP_COEFFICIENT_ERROR";
+    case NPP_COEFF_ERROR:
+        return "NPP_COEFFICIENT_ERROR";
 
-        case NPP_RECT_ERROR:
-            return "NPP_RECTANGLE_ERROR";
+    case NPP_RECT_ERROR:
+        return "NPP_RECTANGLE_ERROR";
 
-        case NPP_QUAD_ERROR:
-            return "NPP_QUADRANGLE_ERROR";
+    case NPP_QUAD_ERROR:
+        return "NPP_QUADRANGLE_ERROR";
 
-        case NPP_MEM_ALLOC_ERR:
-            return "NPP_MEMORY_ALLOCATION_ERROR";
+    case NPP_MEM_ALLOC_ERR:
+        return "NPP_MEMORY_ALLOCATION_ERROR";
 
-        case NPP_HISTO_NUMBER_OF_LEVELS_ERROR:
-            return "NPP_HISTOGRAM_NUMBER_OF_LEVELS_ERROR";
+    case NPP_HISTO_NUMBER_OF_LEVELS_ERROR:
+        return "NPP_HISTOGRAM_NUMBER_OF_LEVELS_ERROR";
 
-        case NPP_INVALID_INPUT:
-            return "NPP_INVALID_INPUT";
+    case NPP_INVALID_INPUT:
+        return "NPP_INVALID_INPUT";
 
-        case NPP_POINTER_ERROR:
-            return "NPP_POINTER_ERROR";
+    case NPP_POINTER_ERROR:
+        return "NPP_POINTER_ERROR";
 
-        case NPP_WARNING:
-            return "NPP_WARNING";
+    case NPP_WARNING:
+        return "NPP_WARNING";
 
-        case NPP_ODD_ROI_WARNING:
-            return "NPP_ODD_ROI_WARNING";
+    case NPP_ODD_ROI_WARNING:
+        return "NPP_ODD_ROI_WARNING";
 #else
 
-            // These are for CUDA 5.5 or higher
-        case NPP_BAD_ARGUMENT_ERROR:
-            return "NPP_BAD_ARGUMENT_ERROR";
+        // These are for CUDA 5.5 or higher
+    case NPP_BAD_ARGUMENT_ERROR:
+        return "NPP_BAD_ARGUMENT_ERROR";
 
-        case NPP_COEFFICIENT_ERROR:
-            return "NPP_COEFFICIENT_ERROR";
+    case NPP_COEFFICIENT_ERROR:
+        return "NPP_COEFFICIENT_ERROR";
 
-        case NPP_RECTANGLE_ERROR:
-            return "NPP_RECTANGLE_ERROR";
+    case NPP_RECTANGLE_ERROR:
+        return "NPP_RECTANGLE_ERROR";
 
-        case NPP_QUADRANGLE_ERROR:
-            return "NPP_QUADRANGLE_ERROR";
+    case NPP_QUADRANGLE_ERROR:
+        return "NPP_QUADRANGLE_ERROR";
 
-        case NPP_MEMORY_ALLOCATION_ERR:
-            return "NPP_MEMORY_ALLOCATION_ERROR";
+    case NPP_MEMORY_ALLOCATION_ERR:
+        return "NPP_MEMORY_ALLOCATION_ERROR";
 
-        case NPP_HISTOGRAM_NUMBER_OF_LEVELS_ERROR:
-            return "NPP_HISTOGRAM_NUMBER_OF_LEVELS_ERROR";
+    case NPP_HISTOGRAM_NUMBER_OF_LEVELS_ERROR:
+        return "NPP_HISTOGRAM_NUMBER_OF_LEVELS_ERROR";
 
-        case NPP_INVALID_HOST_POINTER_ERROR:
-            return "NPP_INVALID_HOST_POINTER_ERROR";
+    case NPP_INVALID_HOST_POINTER_ERROR:
+        return "NPP_INVALID_HOST_POINTER_ERROR";
 
-        case NPP_INVALID_DEVICE_POINTER_ERROR:
-            return "NPP_INVALID_DEVICE_POINTER_ERROR";
+    case NPP_INVALID_DEVICE_POINTER_ERROR:
+        return "NPP_INVALID_DEVICE_POINTER_ERROR";
 #endif
 
-        case NPP_LUT_NUMBER_OF_LEVELS_ERROR:
-            return "NPP_LUT_NUMBER_OF_LEVELS_ERROR";
+    case NPP_LUT_NUMBER_OF_LEVELS_ERROR:
+        return "NPP_LUT_NUMBER_OF_LEVELS_ERROR";
 
-        case NPP_TEXTURE_BIND_ERROR:
-            return "NPP_TEXTURE_BIND_ERROR";
+    case NPP_TEXTURE_BIND_ERROR:
+        return "NPP_TEXTURE_BIND_ERROR";
 
-        case NPP_WRONG_INTERSECTION_ROI_ERROR:
-            return "NPP_WRONG_INTERSECTION_ROI_ERROR";
+    case NPP_WRONG_INTERSECTION_ROI_ERROR:
+        return "NPP_WRONG_INTERSECTION_ROI_ERROR";
 
-        case NPP_NOT_EVEN_STEP_ERROR:
-            return "NPP_NOT_EVEN_STEP_ERROR";
+    case NPP_NOT_EVEN_STEP_ERROR:
+        return "NPP_NOT_EVEN_STEP_ERROR";
 
-        case NPP_INTERPOLATION_ERROR:
-            return "NPP_INTERPOLATION_ERROR";
+    case NPP_INTERPOLATION_ERROR:
+        return "NPP_INTERPOLATION_ERROR";
 
-        case NPP_RESIZE_FACTOR_ERROR:
-            return "NPP_RESIZE_FACTOR_ERROR";
+    case NPP_RESIZE_FACTOR_ERROR:
+        return "NPP_RESIZE_FACTOR_ERROR";
 
-        case NPP_HAAR_CLASSIFIER_PIXEL_MATCH_ERROR:
-            return "NPP_HAAR_CLASSIFIER_PIXEL_MATCH_ERROR";
+    case NPP_HAAR_CLASSIFIER_PIXEL_MATCH_ERROR:
+        return "NPP_HAAR_CLASSIFIER_PIXEL_MATCH_ERROR";
 
 
 #if ((NPP_VERSION_MAJOR << 12) + (NPP_VERSION_MINOR << 4)) <= 0x5000
 
-        case NPP_MEMFREE_ERR:
-            return "NPP_MEMFREE_ERR";
+    case NPP_MEMFREE_ERR:
+        return "NPP_MEMFREE_ERR";
 
-        case NPP_MEMSET_ERR:
-            return "NPP_MEMSET_ERR";
+    case NPP_MEMSET_ERR:
+        return "NPP_MEMSET_ERR";
 
-        case NPP_MEMCPY_ERR:
-            return "NPP_MEMCPY_ERROR";
+    case NPP_MEMCPY_ERR:
+        return "NPP_MEMCPY_ERROR";
 
-        case NPP_MIRROR_FLIP_ERR:
-            return "NPP_MIRROR_FLIP_ERR";
+    case NPP_MIRROR_FLIP_ERR:
+        return "NPP_MIRROR_FLIP_ERR";
 #else
 
-        case NPP_MEMFREE_ERROR:
-            return "NPP_MEMFREE_ERROR";
+    case NPP_MEMFREE_ERROR:
+        return "NPP_MEMFREE_ERROR";
 
-        case NPP_MEMSET_ERROR:
-            return "NPP_MEMSET_ERROR";
+    case NPP_MEMSET_ERROR:
+        return "NPP_MEMSET_ERROR";
 
-        case NPP_MEMCPY_ERROR:
-            return "NPP_MEMCPY_ERROR";
+    case NPP_MEMCPY_ERROR:
+        return "NPP_MEMCPY_ERROR";
 
-        case NPP_MIRROR_FLIP_ERROR:
-            return "NPP_MIRROR_FLIP_ERROR";
+    case NPP_MIRROR_FLIP_ERROR:
+        return "NPP_MIRROR_FLIP_ERROR";
 #endif
 
         case NPP_ALIGNMENT_ERROR:
@@ -1218,12 +1218,13 @@ inline int findCudaDevice(int argc, const char **argv)
 {
     cudaDeviceProp deviceProp;
     int devID = 0;
-
+    std::cout<<"here";
     // If the command-line has a device number specified, use it
     if (checkCmdLineFlag(argc, argv, "device"))
     {
+        std::cout<<"here";
         devID = getCmdLineArgumentInt(argc, argv, "device=");
-
+        std::cout<<"here";
         if (devID < 0)
         {
             printf("Invalid command line parameter\n ");
@@ -1231,8 +1232,9 @@ inline int findCudaDevice(int argc, const char **argv)
         }
         else
         {
+            std::cout<<"here";
             devID = gpuDeviceInit(devID);
-
+            std::cout<<"here";
             if (devID < 0)
             {
                 printf("exiting...\n");
@@ -1242,10 +1244,14 @@ inline int findCudaDevice(int argc, const char **argv)
     }
     else
     {
+        std::cout<<"here";
         // Otherwise pick the device with highest Gflops/s
         devID = gpuGetMaxGflopsDeviceId();
+        std::cout<<"here";
         checkCudaErrors(cudaSetDevice(devID));
+        std::cout<<"here";
         checkCudaErrors(cudaGetDeviceProperties(&deviceProp, devID));
+        std::cout<<"here";
         printf("GPU Device %d: \"%s\" with compute capability %d.%d\n\n", devID, deviceProp.name, deviceProp.major, deviceProp.minor);
     }
 

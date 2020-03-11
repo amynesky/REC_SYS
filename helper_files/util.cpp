@@ -54,7 +54,7 @@
 #include "util.h"
 #include "util_gpu.cuh"
 
-using namespace Eigen;
+//using namespace Eigen;
 
 typedef boost::minstd_rand base_generator_type;
 
@@ -81,7 +81,7 @@ const std::string currentDateTime() {
     tstruct = *localtime(&now);
     // Visit http://en.cppreference.com/w/cpp/chrono/c/strftime
     // for more information about date/time format
-    strftime(buf, sizeof(buf), "%Y-%m-%d.%X", &tstruct);
+    strftime(buf, SIZE_OF(buf), "%Y-%m-%d.%X", &tstruct);
 
     return buf;
 }
@@ -95,7 +95,7 @@ template <typename Dtype>
 void host_copy(const long long int N, const Dtype* X, Dtype* Y) 
 {
   if (X != Y) {
-    memcpy(Y, X, sizeof(Dtype) * N);  // NOLINT(caffe/alt_fn)
+    memcpy(Y, X, SIZE_OF(Dtype) * N);  // NOLINT(caffe/alt_fn)
   }
 
 }
@@ -106,7 +106,7 @@ template void host_copy<float>(const long long int N, const float* X, float* Y);
 template void host_copy<double>(const long long int N, const double* X, double* Y);
 
 template <typename Dtype>
-void copy_device_mtx_into_host_submtx(const int M, const int N, const Dtype* X, Dtype* Y, const int inc_Y)
+void copy_device_mtx_into_host_submtx(const long long int M, const long long int N, const Dtype* X, Dtype* Y, const long long int inc_Y)
 {
   bool Debug = false;
   std::string blank = "";
@@ -121,7 +121,7 @@ void copy_device_mtx_into_host_submtx(const int M, const int N, const Dtype* X, 
   }
 
   if(inc_Y == M){
-    checkCudaErrors(cudaMemcpy(Y,  X,  M * N * sizeof(Dtype), cudaMemcpyDeviceToHost));
+    checkCudaErrors(cudaMemcpy(Y,  X,  M * N * SIZE_OF(Dtype), cudaMemcpyDeviceToHost));
     if(Debug){
       checkCudaErrors(cudaDeviceSynchronize());
       print_host_mtx<Dtype>(Y, inc_Y, N, "Y", 0, strPreamble(blank));
@@ -133,7 +133,7 @@ void copy_device_mtx_into_host_submtx(const int M, const int N, const Dtype* X, 
     int nthreads = 1;
     #ifdef _OPENMP
       int nProcessors = omp_get_max_threads();
-      nthreads = (int)std::min(nProcessors, N);
+      nthreads = (int)std::min(nProcessors, (int)N);
       if(Debug){
         LOG("copy_device_mtx_into_host_submtx done");
         LOG("nthreads : "<< nthreads);
@@ -148,10 +148,10 @@ void copy_device_mtx_into_host_submtx(const int M, const int N, const Dtype* X, 
       #ifdef _OPENMP
         th_id = omp_get_thread_num();
       #endif
-      for(long long int j = (long long int)th_id; j < (long long int)N; j += (long long int)nthreads){
+      for(long long int j = (long long int)th_id; j < N; j += (long long int)nthreads){
       //for(long long int j = (long long int)0; j < (long long int)N; j+=(long long int)1){
-        long long int y_skip = j * (long long int)inc_Y;
-        long long int x_skip = j * (long long int)M;
+        long long int y_skip = j * inc_Y;
+        long long int x_skip = j * M;
         if(Debug){
           omp_set_lock(&printlock);
           LOG("th_id : "<< th_id);
@@ -164,7 +164,7 @@ void copy_device_mtx_into_host_submtx(const int M, const int N, const Dtype* X, 
         }
         Dtype* Y_temp = Y + y_skip;
         const Dtype* X_temp = X + x_skip;
-        checkCudaErrors(cudaMemcpy(Y_temp,  X_temp,  M * sizeof(Dtype), cudaMemcpyDeviceToHost));
+        checkCudaErrors(cudaMemcpy(Y_temp,  X_temp,  M * SIZE_OF(Dtype), cudaMemcpyDeviceToHost));
         if(Debug){
           checkCudaErrors(cudaDeviceSynchronize());
           print_host_mtx<Dtype>(Y, inc_Y, N, "Y", 0, strPreamble(blank));
@@ -178,21 +178,73 @@ void copy_device_mtx_into_host_submtx(const int M, const int N, const Dtype* X, 
   }
 }
 
-template void copy_device_mtx_into_host_submtx<float>(const int M, const int N, const float* X, float* Y, const int inc_Y);
+template void copy_device_mtx_into_host_submtx<float>(const long long int M, const long long int N, const float* X, float* Y, const long long int inc_Y);
 
 //============================================================================================
 // math functions
 //============================================================================================
+
+
+
+
+
+
+
+template <>
+void cpu_incremental_average_array<float>(const long long int increment_index, float* old_avgs, float* new_vals, int num) {
+  int nthreads = 1;
+  #ifdef _OPENMP
+    int nProcessors = omp_get_max_threads();
+    nthreads = (int)std::min(nProcessors, num);
+    omp_set_num_threads(nthreads);
+  #endif
+  #pragma omp parallel shared(nthreads)
+  {
+    int th_id = 0;
+    #ifdef _OPENMP
+      th_id = omp_get_thread_num();
+    #endif
+    for(int j = th_id; j < num; j++){
+      old_avgs[j] += (new_vals[j] - old_avgs[j]) / ((float)(increment_index));
+    }
+  }
+}
 
 template <>
 void cpu_incremental_average<float>(const long long int increment_index, float* old_avg, float new_val) {
   old_avg[0] += (new_val - old_avg[0]) / ((float)(increment_index));
 }
 
+
+
 template <>
 void cpu_incremental_average<long long int>(const long long int increment_index, long long int* old_avg, long long int new_val) {
   old_avg[0] = (long long int)(((float)new_val - (float)old_avg[0]) / ((float)(increment_index)));
 }
+
+template<typename Dtype>
+void cpu_mean_abs_nonzero(const long long int n, const Dtype* x, Dtype* y, bool Debug) 
+{
+  if(too_big(n) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
+
+  y[0] = (Dtype)0.0;
+  long long int z = (long long int)0;
+  long long int count_nonzero = (long long int)0;
+  for(long long int i = (long long int)0; i < n; i+=(long long int)1) {
+    if(x[i] != (Dtype)0.0){
+      count_nonzero++;
+      cpu_incremental_average((long long int)(count_nonzero), y, std::abs(x[i]));
+    }
+  }
+  z = n - count_nonzero;
+
+  if(Debug){
+    LOG(z <<" out of "<< n<<" entries are zero in submitted vector.");
+    LOG(((Dtype)z) / ((Dtype)n)  <<" of the entries are zero in submitted vector.");
+  }
+}
+
+template void cpu_mean_abs_nonzero(const long long int n, const float* x, float* y, bool Debug);
 
 template <typename Dtype>
 Dtype cpu_asum(const long long int n, const Dtype* x) {
@@ -326,19 +378,25 @@ void cpu_permute(Dtype* A, const int* P, const long long int rows, const long lo
 
         for(long long int i = (long long int)0; i < rows - (long long int)1; i+=(long long int)1){
           // get next index
-          ind = P[i];
-          while(ind<i)
-            ind = P[ind];
-
+          ind = (long long int)P[i];
+          while(ind < i){
+            ind = (long long int)P[ind];
+          }
           // swap elements in array
           temp = A[i + j * rows];
           A[i + j * rows] = A[ind + j * rows];
           A[ind + j * rows] = temp;
+          if (::isinf(A[i + j * rows]) || ::isnan(A[i + j * rows])){
+            LOG("A["<<i<<", "<<j<<"]"<<A[i + j * rows]);
+          }
+          if (::isinf(A[ind + j * rows]) || ::isnan(A[ind + j * rows])){
+            LOG("A["<<ind<<", "<<j<<"]"<<A[ind + j * rows]);
+          }
         };
       };
     }
   } else{
-    if(Debug) LOG("permute_rows is false") ;
+    if(Debug) LOG("permute_rows is false");
     //pvt is an array length cols
     int nthreads = 1;
     #ifdef _OPENMP
@@ -359,23 +417,29 @@ void cpu_permute(Dtype* A, const int* P, const long long int rows, const long lo
 
         for(long long int j=(long long int)0; j < cols - (long long int)1; j+=(long long int)1){
           // get next index
-          ind = P[j];
-          while(ind<j)
-            ind = P[ind];
-
+          ind = (long long int)P[j];
+          while(ind < j){
+            ind = (long long int)P[ind];
+          }
           // swap elements in array
           if(Debug) LOG("i + j * rows: "<<i<<" + "<<j<<" * "<<rows<<" = "<<i + j * rows) ;
           if(Debug) LOG("i + ind * rows: "<<i<<" + "<<ind<<" * "<<rows<<" = "<<i + ind * rows) ;
           temp = A[i + j * rows];
           A[i + j * rows] = A[i + ind * rows];
           A[i + ind * rows] = temp;
+          if (::isinf(A[i + j * rows]) || ::isnan(A[i + j * rows])){
+            LOG("A["<<i<<", "<<j<<"]"<<A[i + j * rows]);
+          }
+          if (::isinf(A[i + ind * rows]) || ::isnan(A[i + ind * rows])){
+            LOG("A["<<i<<", "<<ind<<"]"<<A[i + ind * rows]);
+          }
         };
       };
     }
   }
 }
 template void cpu_permute<float>(float* A, const int* P, const long long int rows, const long long int cols, bool permute_rows) ;
-template void cpu_permute<double>(double* a, const int* pvt,const long long int  rows,const long long int  cols, bool direction);
+template void cpu_permute<double>(double* A, const int* P, const long long int rows, const long long int cols, bool permute_rows);
 
 
 // Non-square matrix transpose of matrix of size r x c and base address A 
@@ -495,8 +559,8 @@ void cpu_axpby_test() {
 
   float* X = NULL;
   float* Y = NULL;
-  X = (float *)malloc(N *  sizeof(float)); 
-  Y = (float *)malloc(N *  sizeof(float));  
+  X = (float *)malloc(N *  SIZE_OF(float)); 
+  Y = (float *)malloc(N *  SIZE_OF(float));  
   checkErrors(X);
   checkErrors(Y);
 
@@ -522,9 +586,11 @@ template <typename Dtype>
 void cpu_gemm(const bool TransA, const bool TransB, 
                      const long long int M, const long long int N, const long long int K,
                      const Dtype alpha, const Dtype* A, const Dtype* B, const Dtype beta,
-                     Dtype* C) 
+                     Dtype* C, long long int start_, long long int num_) 
 {
-  if(1) LOG("cpu_gemm called.");
+  bool Debug = false;
+  if(Debug) LOG("cpu_gemm called.");
+  std::string blank = "";
   struct timeval program_start, program_end;
   double program_time;
   gettimeofday(&program_start, NULL);
@@ -540,16 +606,23 @@ void cpu_gemm(const bool TransA, const bool TransB,
     cblas_sgemm(CblasRowMajor, transa, transb, M, N, K, alpha, A, lda, B, ldb, beta, C, ldc) 
     performs C=alpha op ( A )op ( B ) + beta C
   */
-  bool Debug = false;
-
+  
+  if(num_ <= (long long int)0 || num_ > (M * N) || start_ <= (long long int)0 || start_ > (M * N) || num_ - start_ > (M * N) ){
+    num_ = M * N;
+    start_ = (long long int)0;
+    LOG("start_ : "<<start_) ;
+    LOG("num_ : "<<num_) ;
+  }
   long long int lda = (TransA == false) ? K : M;
   long long int ldb = (TransB == false) ? N : K;
 
   int nthreads = 1;
   #ifdef _OPENMP
     int nProcessors = omp_get_max_threads();
-    nthreads = (int)std::min((long long int)nProcessors, N * M);
+    nthreads = (int)std::min((long long int)nProcessors, num_);
     omp_set_num_threads(nthreads);
+    omp_lock_t printlock;
+    omp_init_lock(&printlock);
   #endif
   #pragma omp parallel shared(nthreads)
   {
@@ -557,21 +630,86 @@ void cpu_gemm(const bool TransA, const bool TransB,
     #ifdef _OPENMP
       th_id = omp_get_thread_num();
     #endif
-    for(long long int k = (long long int)th_id; k < N * M; k += (long long int)nthreads){
-      long long int row = k / N;
-      long long int col = k % N;
-
+    if(Debug){
+      omp_set_lock(&printlock);
+      LOG("num_ : "<<num_);
+      LOG("(long long int)th_id : "<<(long long int)th_id);
+      LOG("start_ + (long long int)th_id : "<<start_ + (long long int)th_id);
+      omp_unset_lock(&printlock);
+    }
+    for(long long int k = (long long int)th_id; k < num_; k += (long long int)nthreads){
+      long long int row = (start_ + k) / N;
+      long long int col = (start_ + k) % N;
+      std::string line = ToString<Dtype>(alpha) + "* ( ";
       Dtype temp = (Dtype)0.0;
       Dtype a = (Dtype)0.0;
       Dtype b = (Dtype)0.0;
       for(long long int i = (long long int)0; i < K; i += (long long int)1){
         a = (TransA == false) ? A[row * lda + i] : A[i * lda + row];
         b = (TransB == false) ? B[i * ldb + col] : B[col * ldb + i];
+        if (::isinf(a) || ::isnan(a)){
+          omp_set_lock(&printlock);
+          LOG("k : "<<k);
+          LOG("row : "<<row);
+          LOG("col : "<<col);
+          LOG("i : "<<i);
+          LOG("a : "<<a);
+          ABORT_IF_EQ(0, 0, "abort");
+          omp_unset_lock(&printlock);
+        }
+        if (::isinf(b) || ::isnan(b)){
+          omp_set_lock(&printlock);
+          LOG("k : "<<k);
+          LOG("row : "<<row);
+          LOG("col : "<<col);
+          LOG("i : "<<i);
+          LOG("b : "<<b);
+          ABORT_IF_EQ(0, 0, "abort");
+          omp_unset_lock(&printlock);
+        }
         temp += a * b;
+        if(Debug){
+          if (i > (long long int)0){
+            line = ( line + " + " + ToString<Dtype>(a) + " * " + ToString<Dtype>(b) ).c_str();
+          }else{
+            line = ( line + ToString<Dtype>(a) + " * " + ToString<Dtype>(b) ).c_str();
+          }
+        }
+        //temp += a * b * alpha;
+      }
+      line = (line + " ) ").c_str();
+      if (::isinf(temp) || ::isnan(temp)){
+        omp_set_lock(&printlock);
+        LOG("k : "<<k);
+        LOG("row : "<<row);
+        LOG("col : "<<col);
+        LOG("temp : "<<temp);
+        ABORT_IF_EQ(0, 0, "abort");
+        omp_unset_lock(&printlock);
       }
       temp *= alpha;
-      C[row * N + col] *= beta;
-      C[row * N + col] += temp; 
+      if(beta == (Dtype)0.0){
+        C[k] = temp;
+      }else{
+        C[k] *= beta;
+        C[k] += temp;         
+      }
+      if (::isinf(C[k]) || ::isnan(C[k])){
+        omp_set_lock(&printlock);
+        LOG("C["<<row<<" , "<<col<<"] : "<<C[k]);
+        ABORT_IF_EQ(0, 0, "abort");
+        omp_unset_lock(&printlock);
+      }
+      if(Debug && (th_id == 0)) {
+        omp_set_lock(&printlock);
+        LOG("k : "<<k);
+        LOG("C["<<row<<" , "<<col<<"] = "<<C[k]);
+        //LOG(line);
+        gettimeofday(&program_end, NULL);
+        program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
+        LOG("cpu_gemm run time so far : "<<readable_time(program_time));
+        omp_unset_lock(&printlock);
+      }
     }
   }
 
@@ -582,18 +720,18 @@ void cpu_gemm(const bool TransA, const bool TransB,
   }
   gettimeofday(&program_end, NULL);
   program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
-  if(1) LOG("cpu_gemm run time : "<<readable_time(program_time));
+  if(Debug) LOG("cpu_gemm run time : "<<readable_time(program_time));
 }
 
 template void cpu_gemm<float>(const bool TransA, const bool TransB, 
                      const long long int M, const long long int N, const long long int K,
                      const float alpha, const float* A, const float* B, const float beta,
-                     float* C);
+                     float* C, long long int start_, long long int num_);
 
 template void cpu_gemm<double>(const bool TransA, const bool TransB, 
                       const long long int M, const long long int N, const long long int K,
                       const double alpha, const double* A, const double* B, const double beta,
-                      double* C);
+                      double* C, long long int start_, long long int num_);
 
 void cpu_gemm_test() {
   bool TransA = true;
@@ -608,9 +746,9 @@ void cpu_gemm_test() {
   float* A = NULL;
   float* B = NULL;
   float* C = NULL;
-  A = (float *)malloc(K * M *  sizeof(float)); 
-  B = (float *)malloc(N * K *  sizeof(float)); 
-  C = (float *)malloc(M * N *  sizeof(float));  
+  A = (float *)malloc(K * M *  SIZE_OF(float)); 
+  B = (float *)malloc(N * K *  SIZE_OF(float)); 
+  C = (float *)malloc(M * N *  SIZE_OF(float));  
   checkErrors(A);
   checkErrors(B);
   checkErrors(C);
@@ -650,7 +788,7 @@ void cpu_swap_ordering<float>(const long long int rows, const long long int cols
   }
   const long long int total = rows * cols;
   float* A_copy = NULL;
-  A_copy  = (float *)malloc(total * sizeof(float));
+  A_copy  = (float *)malloc(total * SIZE_OF(float));
   checkErrors(A_copy);
   
   host_copy<float>(total, A, A_copy);
@@ -811,7 +949,7 @@ Dtype cpu_expected_value(const long long int n,  const Dtype* x) {
   if(too_big(n) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
   Dtype y = (Dtype)0.0;
   for(long long int i = (long long int)0; i < n; i += (long long int)1 ) {
-    cpu_incremental_average(i, &y, x[i]);
+    cpu_incremental_average(i + (long long int)1, &y, x[i]);
   };  
   return y;
 }
@@ -844,7 +982,7 @@ float cpu_expected_abs_value<float>(const long long int n,  const float* x) {
 int64_t cluster_seedgen(void) {
   int64_t s, seed, pid;
   FILE* f = fopen("/dev/urandom", "rb");
-  if (f && fread(&seed, 1, sizeof(seed), f) == sizeof(seed)) {
+  if (f && fread(&seed, 1, SIZE_OF(seed), f) == SIZE_OF(seed)) {
     fclose(f);
     return seed;
   }
@@ -898,6 +1036,7 @@ template double nextafter(const double b);
 template <typename Dtype>
 void host_rng_uniform(const long long int n, const Dtype a, const Dtype b, Dtype* r) {
   //ABORT_IF_NEQ(0, 1, "host_rng_uniform not yet supported");
+  //if(too_big(n) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
   bool Debug = false;
   if(Debug){
     LOG("a : "<<a);
@@ -919,9 +1058,18 @@ void host_rng_uniform(const long long int n, const Dtype a, const Dtype b, Dtype
   // You can now retrieve random numbers from that distribution by means
   // of a STL Generator interface, i.e. calling the generator as a zero-
   // argument function.
-  for(long long int i = (long long int)0; i < n; i+=(long long int)1)
+  long long int zero_count = (long long int)0;
+  for(long long int i = (long long int)0; i < n; i+=(long long int)1){
     r[i] = static_cast<Dtype>(uni()) ;
-
+    if(r[i] == (Dtype)0.0){
+      zero_count+=(long long int)1;
+      //LOG("r["<<i<<"] = 0");
+    }
+  }
+  if(zero_count > (long long int)0){
+    LOG(zero_count <<" out of "<< n<<" entries are zero in submitted vector.");
+    LOG(((float)zero_count) / ((float)n)  <<" of the entries are zero in submitted vector.");
+  }
   if(Debug){
     save_host_array_to_file<Dtype>(r, static_cast<int>(n), "random_array");
   }
@@ -1021,7 +1169,7 @@ void getRandIntsBetween(int *A , int lower_bd , int upper_bd, int num)
     double selectIndices_time, while_time;
 
     int* indicies = NULL;
-    indicies  = (int *)malloc(nnz * sizeof(int));
+    indicies  = (int *)malloc(nnz * SIZE_OF(int));
     checkErrors(indicies);
 
     gettimeofday(&time_start, NULL);
@@ -1326,8 +1474,37 @@ template void append_host_array_to_file<int>(const int* A_host, int count, std::
 template void append_host_array_to_file<float>(const float* A_host, int count, std::string title);
 template void append_host_array_to_file<double>(const double* A_host, int count, std::string title);
 
+template<typename Dtype>
+void save_host_arrays_side_by_side_to_file(const Dtype* A_host, const Dtype* B_host, int count, std::string title, std::string file_line)
+{
 
-void save_host_arrays_side_by_side_to_file(const int* A_host, const int* B_host, 
+
+  std::stringstream filename;
+  filename << title<< ".txt";
+  std::ofstream entries (filename.str().c_str());
+  //entries<<"[ ";
+  for (int i = 0; i < count; i++){
+    entries<<"["<<i<<"] : "<<A_host[i ]<<", "<<B_host[i ];
+    if(i < count - 1){
+    //entries<<", ";
+      entries<<"\r\n";
+    };
+
+  };
+  //LOG("file saved");
+  if(file_line != ""){
+    LOG2(file_line, "save_host_array_to_file "<< title << " has "<< count<<" entries");
+  }
+
+}
+
+template void save_host_arrays_side_by_side_to_file<int>(const int* A_host, const int* B_host, int count, std::string title, std::string file_line);
+template void save_host_arrays_side_by_side_to_file<float>(const float* A_host, const float* B_host, int count, std::string title, std::string file_line);
+template void save_host_arrays_side_by_side_to_file<double>(const double* A_host, const double* B_host, int count, std::string title, std::string file_line);
+
+
+
+void save_host_arrays_side_by_side_to_file_(const int* A_host, const int* B_host, 
  const float* C_host, int count, std::string title)
 {
 
@@ -1346,6 +1523,7 @@ void save_host_arrays_side_by_side_to_file(const int* A_host, const int* B_host,
   };
   //LOG("file saved");
 
+
 }
 
 
@@ -1363,7 +1541,7 @@ void save_host_mtx_to_file(const Dtype* A_host, const int rows, const int cols, 
     for (int i = 0; i < rows; i++){
       for (int j = 0; j < cols; j++){
         //entries<<A_host[i + j * rows];
-        entries<<A_host[i * cols + j];
+        entries<<A_host[((long long int)i) * ((long long int)cols) + ((long long int)j)];
         if(j < cols - 1){
           entries<<", ";
         }
@@ -1374,8 +1552,7 @@ void save_host_mtx_to_file(const Dtype* A_host, const int rows, const int cols, 
   }else{
     for (int i = 0; i < rows; i++){
       for (int j = 0; j < cols; j++){
-        entries<<A_host[i + j * rows];
-        //entries<<A_host[i * cols + j];
+        entries<<A_host[((long long int)i) + ((long long int)rows) * ((long long int)j)];
         if(j < cols - 1){
           entries<<", ";
         }
@@ -1456,7 +1633,7 @@ void cpu_shuffle_array(const long long int n,  Dtype* x)
 {
   bool Debug = false;
   if(too_big(n) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
-  double* order = (double *)malloc(n * sizeof(double));
+  double* order = (double *)malloc(n * SIZE_OF(double));
   checkErrors(order);
   host_rng_uniform<double>(n, (double)0.0, (double)1.0, order);
   if(Debug){
@@ -1489,12 +1666,12 @@ void cpu_shuffle_mtx_rows_or_cols(cublasHandle_t dn_handle, const long long int 
   if(Debug) LOG("cpu_shuffle_mtx_rows_or_cols called") ;
   if(shuffle_rows){
     if(Debug) LOG("shuffle_rows is true") ;
-    CUDA_CHECK(cudaMalloc((void**)&indicies_dev, M * sizeof(int)));
-    indicies_host = (int *)malloc(M * sizeof(int));
+    CUDA_CHECK(cudaMalloc((void**)&indicies_dev, M * SIZE_OF(int)));
+    indicies_host = (int *)malloc(M * SIZE_OF(int));
     checkErrors(indicies_host);
     gpu_set_as_index(indicies_dev, M);
     gpu_shuffle_array<int>(dn_handle, M, indicies_dev);
-    CUDA_CHECK(cudaMemcpy(indicies_host, indicies_dev, M * sizeof(int), cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(indicies_host, indicies_dev, M * SIZE_OF(int), cudaMemcpyDeviceToHost));
     if(row_major_ordering){
       if(Debug) LOG("row_major_ordering is true") ;
       cpu_permute<float>(x, indicies_host, N, M, false); 
@@ -1505,12 +1682,12 @@ void cpu_shuffle_mtx_rows_or_cols(cublasHandle_t dn_handle, const long long int 
     free(indicies_host);
   }else{
     // shuffle columns
-    CUDA_CHECK(cudaMalloc((void**)&indicies_dev, N * sizeof(int)));
-    indicies_host = (int *)malloc(N * sizeof(int));
+    CUDA_CHECK(cudaMalloc((void**)&indicies_dev, N * SIZE_OF(int)));
+    indicies_host = (int *)malloc(N * SIZE_OF(int));
     checkErrors(indicies_host);
     gpu_set_as_index(indicies_dev, N);
     gpu_shuffle_array<int>(dn_handle, N, indicies_dev);
-    CUDA_CHECK(cudaMemcpy(indicies_host, indicies_dev, N * sizeof(int), cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(indicies_host, indicies_dev, N * SIZE_OF(int), cudaMemcpyDeviceToHost));
     if(row_major_ordering){
       cpu_permute<float>(x, indicies_host, N, M, true); 
     }else{
@@ -1530,12 +1707,12 @@ void cpu_shuffle_map_second(const long long int M, std::map<int, int>* items_dic
   int * indicies_host = NULL;
   int * indicies_dev;
 
-  CUDA_CHECK(cudaMalloc((void**)&indicies_dev, M * sizeof(int)));
-  indicies_host = (int *)malloc(M * sizeof(int));
+  CUDA_CHECK(cudaMalloc((void**)&indicies_dev, M * SIZE_OF(int)));
+  indicies_host = (int *)malloc(M * SIZE_OF(int));
   checkErrors(indicies_host);
 
   gpu_set_as_index(indicies_dev, M);
-  CUDA_CHECK(cudaMemcpy(indicies_host, indicies_dev, M * sizeof(int), cudaMemcpyDeviceToHost));
+  CUDA_CHECK(cudaMemcpy(indicies_host, indicies_dev, M * SIZE_OF(int), cudaMemcpyDeviceToHost));
   checkCudaErrors(cudaFree(indicies_dev));
 
   cpu_shuffle_array<int>(M, indicies_host);
@@ -1557,16 +1734,16 @@ void cpu_shuffle_map_second(const long long int M, std::map<int, int>* items_dic
 
 
 template<typename Dtype>
-void cpu_set_all(Dtype* x, const int N, Dtype alpha)
+void cpu_set_all(Dtype* x, const long long int N, Dtype alpha)
 {
-  for(int i=0; i <N; i++) {
+  for(long long int i=(long long int)0; i < N; i+=(long long int)1) {
     //origin+x1+rows*y1
     x[i]=alpha;
   };
 }
 
-template void cpu_set_all<int>(int* x, const int N, int alpha);
-template void cpu_set_all<float>(float* x, const int N, float alpha);
+template void cpu_set_all<int>(int* x, const long long int N, int alpha);
+template void cpu_set_all<float>(float* x, const long long int N, float alpha);
 
 
 template <>
@@ -1813,8 +1990,8 @@ void cpu_sort_index_by_max(const long long int dimension,  Dtype* x, int* indici
     }
   #endif
 
-  Dtype* temp_x  = (Dtype *)malloc((dimension - 1) * nthreads * sizeof(Dtype));
-  int* temp_indicies  = (int *)malloc((dimension - 1) * nthreads * sizeof(int));
+  Dtype* temp_x  = (Dtype *)malloc((dimension - 1) * nthreads * SIZE_OF(Dtype));
+  int* temp_indicies  = (int *)malloc((dimension - 1) * nthreads * SIZE_OF(int));
   checkErrors(temp_x);
   checkErrors(temp_indicies);
   //save_host_mtx_to_file(temp_x, (dimension - 1), nthreads, "temp_x");
@@ -1911,7 +2088,7 @@ void cpu_count_appearances(const int top_N, const long long int dimension,
     int nProcessors = omp_get_max_threads();
     nthreads = (int)std::min((long long int)nProcessors, dimension);
     omp_set_num_threads(nthreads);
-    omp_lock_t *locks = (omp_lock_t *)malloc(dimension * sizeof(omp_lock_t));
+    omp_lock_t *locks = (omp_lock_t *)malloc(dimension * SIZE_OF(omp_lock_t));
     checkErrors(locks);
   #endif
 
@@ -2285,7 +2462,8 @@ void cpu_orthogonal_decomp<float>(const long long int m, const long long int n, 
                                   long long int* num_latent_factors, const float percent,
                                   float* A, float* U, float* V, bool SV_with_U, float* S)
 {
-
+  ABORT_IF_EQ(0, 0, "Function requires Eigen Library");
+  /*
   bool Debug = false;
   LOG("cpu_orthogonal_decomp called");
   std::string blank = "";
@@ -2298,10 +2476,10 @@ void cpu_orthogonal_decomp<float>(const long long int m, const long long int n, 
   float *d_U  = NULL;
   float *d_VT = NULL;
 
-  /*
-    A in row major ordering is equivalent to A^T in column major ordering
-    A in column major ordering is equivalent to A^T in row major ordering
-  */
+  
+  // A in row major ordering is equivalent to A^T in column major ordering
+  // A in column major ordering is equivalent to A^T in row major ordering
+  
 
   if(n > m){
     //we have to solve the transpose problem
@@ -2336,7 +2514,7 @@ void cpu_orthogonal_decomp<float>(const long long int m, const long long int n, 
   }
 
   // float* A_copy = NULL;
-  // A_copy = (float *)malloc(m*n *  sizeof(float)); 
+  // A_copy = (float *)malloc(m*n *  SIZE_OF(float)); 
   // checkErrors(A_copy);  
   // cpu_set_all<float>(A_copy, m*n, (float)0.0);
   // Eigen::Map<Eigen::MatrixXf>( A_copy, sda, lda ) = eigen_A;
@@ -2426,10 +2604,10 @@ void cpu_orthogonal_decomp<float>(const long long int m, const long long int n, 
       cpu_mult_US_in_SVD<float>(smaller_dim, n, V, S, false);
     }
   }else{
-    /*
-      A in row major ordering is equivalent to A^T in column major ordering
-      A in column major ordering is equivalent to A^T in row major ordering
-    */
+    
+    // A in row major ordering is equivalent to A^T in column major ordering
+    // A in column major ordering is equivalent to A^T in row major ordering
+    
     if(SV_with_U){
       cpu_mult_US_in_SVD<float>(smaller_dim, m, U, S, false);
     }else{
@@ -2453,15 +2631,15 @@ void cpu_orthogonal_decomp<float>(const long long int m, const long long int n, 
 
   if(0){
     float* R  = NULL;
-    R = (float *)malloc(m * n *  sizeof(float)); 
+    R = (float *)malloc(m * n *  SIZE_OF(float)); 
     checkErrors(R);
 
-    /*
-        A is m by n stored in row-maj ordering where m<<n
-        V is n by m stored in row-maj ordering
-        (V^T is m by n)
-        U is m by m stored in row-maj ordering
-    */
+    
+    // A is m by n stored in row-maj ordering where m<<n
+    // V is n by m stored in row-maj ordering
+    // (V^T is m by n)
+    // U is m by m stored in row-maj ordering
+
     // M, N, K
     //M number of rows of matrix op(A) and C.
     //N is number of columns of matrix op(B) and C.]
@@ -2473,19 +2651,19 @@ void cpu_orthogonal_decomp<float>(const long long int m, const long long int n, 
     // cublasDgemm(handle, transa, transb, M, N, K, alpha, A, lda, B, ldb, beta, C, ldc) 
     // performs C=alpha op ( B ) op ( A ) + beta C
 
-    cpu_gemm<float>(false, true, m, m, smaller_dim /*num_latent_factors[0]*/,
+    cpu_gemm<float>(false, true, m, m, smaller_dim, // <- num_latent_factors[0]
      (float)1.0, U, U, (float)0.0, R);
 
     save_host_mtx_to_file<float>(R, m, m, "UUT");
 
-    cpu_gemm<float>(true, false, smaller_dim, smaller_dim, n /*num_latent_factors[0]*/,
+    cpu_gemm<float>(true, false, smaller_dim, smaller_dim, n , // <- num_latent_factors[0]
      (float)1.0, V, V, (float)0.0, R);
 
     save_host_mtx_to_file<float>(R, smaller_dim, smaller_dim, "VTV");
 
 
 
-    cpu_gemm<float>(false, true, m, n, smaller_dim /*num_latent_factors[0]*/,
+    cpu_gemm<float>(false, true, m, n, smaller_dim , // <- num_latent_factors[0]
      (float)1.0, U, V, (float)0.0,
      R);
 
@@ -2512,6 +2690,8 @@ void cpu_orthogonal_decomp<float>(const long long int m, const long long int n, 
   //printf("program_time: %f\n", program_time);   
   if(1) LOG("cpu_orthogonal_decomp run time : "<<readable_time(program_time)<<std::endl);
 
+  */
+
 }
 
 
@@ -2534,10 +2714,10 @@ void cpu_orthogonal_decomp_test() {
   float* U = NULL;
   float* V = NULL;
   float* S = NULL;
-  A = (float *)malloc(m*n *  sizeof(float)); 
-  U = (float *)malloc(m*min_dim *  sizeof(float)); 
-  V = (float *)malloc(n*min_dim *  sizeof(float)); 
-  S = (float *)malloc(min_dim *  sizeof(float)); 
+  A = (float *)malloc(m*n *  SIZE_OF(float)); 
+  U = (float *)malloc(m*min_dim *  SIZE_OF(float)); 
+  V = (float *)malloc(n*min_dim *  SIZE_OF(float)); 
+  S = (float *)malloc(min_dim *  SIZE_OF(float)); 
   checkErrors(A);
   checkErrors(U);
   checkErrors(V);
@@ -2570,7 +2750,7 @@ void cpu_orthogonal_decomp_test() {
 
   if(row_major_ordering){
     float* R  = NULL;
-    R = (float *)malloc(max_dim * max_dim *  sizeof(float)); 
+    R = (float *)malloc(max_dim * max_dim *  SIZE_OF(float)); 
     checkErrors(R);
 
     /*
@@ -2852,7 +3032,7 @@ void cpu_calculate_KM_error_and_update(const int rows_A, const int cols, Dtype* 
     omp_lock_t printlock;
     omp_init_lock(&printlock);
     if(Debug){
-      per_thread = (Dtype *)malloc(nthreads * sizeof(Dtype));
+      per_thread = (Dtype *)malloc(nthreads * SIZE_OF(Dtype));
       checkErrors(per_thread);
     }
   #endif

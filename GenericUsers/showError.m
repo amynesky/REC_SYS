@@ -36,18 +36,43 @@ clear all;
 % msq_train = msq_train(3) / nnz_train
 
 
-path = '/Users/amynesky/pylon5/REC_SYS/GenericUsers/observations/ml-20m/not/'; 
+path = 'logarithmic_histogram.txt'; 
 
-path = strcat(path, '1_30_2020/meta_testing_error.txt');
-training_error=dlmread(path);
+lh=dlmread(path);
 
-its = [1:length(training_error)]';
 
-p = polyfit(its, training_error, 1);
-y = polyval(p,its);
+% X = categorical({'(0,0.001)','[0.001,0.01)','[0.01,0.1)','[0.1,1)','[1,10)','[10,100)','[100,1000)'});
+% X = reordercats(X,{'(0,0.001)','[0.001,0.01)','[0.01,0.1)','[0.1,1)','[1,10)','[10,100)','[100,1000)'});
+% figure;
+% for i = 1: length(lh(:,1))
+%     Y = lh(i,:);
+%     bar(X,Y);
+%     ylabel('Probability');
+%     title(strcat({'Logarithmic Histogram of Testing Errors Iter '}, num2str(i)));
+%     ylim([0,1]);
+%     drawnow;
+%     pause(3);
+% end
 
-figure
-hold on
-plot(its, training_error)
-plot(its, y)
+figure;
+hold on;
+for i = 1: length(lh(1,:))
+    Y = lh(:,i);
+    plot([1: length(lh(:,1))],Y)
+    ylabel('Probability');
+    title('Logarithmic Histogram of Testing Errors');
+    ylim([0,1]);
+    legend('(0,0.001)','[0.001,0.01)','[0.01,0.1)','[0.1,1)','[1,10)','[10,100)','[100,1000)')
+end
+
+% 
+% its = [1:length(training_error)]';
+% 
+% p = polyfit(its, training_error, 1);
+% y = polyval(p,its);
+% 
+% figure
+% hold on
+% plot(its, training_error)
+% plot(its, y)
 

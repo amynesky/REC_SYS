@@ -5,6 +5,7 @@
 #SBATCH -t 48:00:00
 #SBATCH --gres=gpu:p100:2
 #SBATCH --mail-type=ALL
+#SBTACH -e /home/nesky/REC_SYS/GenericUsers
 #echo commands to stdout
 
 #echo commands to stdout
@@ -16,9 +17,12 @@ set -x
 
 #module load hdf5/1.8.16_gnu
 module load gcc/5.3.0 boost/1.63.0_py2.7.11 leveldb/1.18 opencv
-module load cuda/8.0 protobuf/3.2.0
+module load cuda/9.0
+module load protobuf/3.2.0
 module load cmake
-module load eigen/3.3.4
+#module load eigen/3.3.4
+
+
 
 # run GPU program
 ./train_generic_users.sh
