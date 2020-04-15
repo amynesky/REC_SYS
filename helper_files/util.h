@@ -109,6 +109,10 @@ inline void Hassert(const Dtype *ptr, const char *file, int line, bool abort=tru
 bool too_big(const long long int li);
 
 const std::string currentDateTime();
+
+template <typename Dtype>
+bool cpu_isBad(const Dtype* A, long long int size, std::string var_name = "", std::string file_line = "");
+
 //============================================================================================
 // manipulate memory
 //============================================================================================
@@ -130,7 +134,7 @@ template <typename Dtype>
 void cpu_incremental_average(const long long int increment_index, Dtype* old_avg, Dtype new_val);
 
 template<typename Dtype>
-void cpu_mean_abs_nonzero(const long long int n, const Dtype* x, Dtype* y, bool Debug) ;
+void cpu_mean_abs_nonzero(const long long int n, const Dtype* x, Dtype* y, bool Debug = false, std::string vec_name = "") ;
 
 // Returns the sum of the absolute values of the elements of vector x
 template <typename Dtype>
@@ -223,18 +227,23 @@ template <typename Dtype>
 void get_host_array_from_saved_txt(const Dtype* A_host, int count, std::string title);
 
 template <typename Dtype>
-void append_host_array_to_file(const Dtype* A_host, int count, std::string title);
+void append_host_array_to_file(const Dtype* A_host, int count, std::string title, std::string file_line = "");
 
 template<typename Dtype>
 void save_host_arrays_side_by_side_to_file(const Dtype* A_host, const Dtype* B_host, int count, std::string title, std::string file_line = "");
+
+template<typename Dtype>
+void save_host_array_side_by_side_with_device_array(const Dtype* A_host, const Dtype* B_dev, int count, std::string title, std::string file_line = "");
 
 void save_host_arrays_side_by_side_to_file_(const int* A_host, const int* B_host, const float* C_host, int count, std::string title);
 
 template <typename Dtype>
 void save_host_mtx_to_file(const Dtype* A_host, const int rows, const int  cols, std::string title, bool row_major_order = true, std::string file_line = "");
 
-void save_map(std::map<int, int>* items_dictionary, std::string title);
+template<typename Dtype>
+void append_host_mtx_to_file(const Dtype* A_host, const int rows, const int cols, std::string title, bool row_major_order, std::string file_line);
 
+void save_map(std::map<int, int>* items_dictionary, std::string title);
 
 //============================================================================================
 // Me Made
@@ -267,14 +276,16 @@ void cpu_get_cosine_similarity(const long long int ratings_rows,
                               const float* coo_format_ratingsMtx_rating_host,
                               float* cosine_similarity);
 
-template <typename Dtype>
-void cpu_sort_index_by_max(const long long int rows, const long long int cols,  Dtype* x, int* indicies);
+template <typename Dtype, typename Itype>
+void cpu_sort_index_by_max(const long long int rows, const long long int cols,  Dtype* x, Itype* indicies);
 
 template<typename Dtype>
-void cpu_sort_index_by_max(const long long int dimension,  Dtype* x, int* indicies, int top_N);
+void cpu_sort_index_by_max(const long long int dimension,  Dtype* x, int* indicies, int top_N, Dtype* x_sorted = NULL);
 
 
 void cpu_count_appearances(const int top_N, const long long int dimension,  int* count, const int* indicies );
+
+void cpu_rank_appearances(const int top_N, const long long int dimension,  float* rank, const int* indicies );
 
 void cpu_mark_CU_users(const int ratings_rows_CU, const int ratings_rows, const int* x, int* y );
 
@@ -302,6 +313,13 @@ void cpu_center_rows(const long long int rows, const long long int cols,
                  float* X, const float val_when_var_is_zero, float* user_means,  float* user_var);
 
 template <typename Dtype>
+void cpu_logarithmic_histogram_abs_val(const int rows_A, const int cols, const Dtype* dense_mtx_A, 
+                                       const int rows_B, const int num_sparse_entries, 
+                                       const int* csr_rows_B, const int* coo_cols_B,
+                                       const Dtype* coo_entries_B, int* selection, 
+                                       int min_pow, int max_pow, Dtype* probability);
+
+template <typename Dtype>
 void cpu_sparse_nearest_row(const int rows_A, const int cols, const Dtype* dense_mtx_A, 
  const int rows_B, const int num_sparse_entries, const int* csr_rows_B, const int* coo_cols_B,
  const Dtype* coo_entries_B, int* selection,  
@@ -315,6 +333,18 @@ void cpu_dense_nearest_row(const int rows_A, const int cols, const Dtype* dense_
 template <typename Dtype>
 void cpu_calculate_KM_error_and_update(const int rows_A, const int cols, Dtype* dense_mtx_A, 
     const int rows_B, const Dtype* dense_mtx_B, int* selection, Dtype alpha, Dtype lambda, Dtype* checking = NULL);
+
+
+template <typename Dtype>
+void cpu_supplement_training_mtx_with_item_sim(const long long int ratings_rows_training, 
+  const long long int ratings_cols_training, 
+  const bool row_major_ordering,
+  const int* csr_format_ratingsMtx_userID_training,
+  const int* coo_format_ratingsMtx_itemID_training,
+  const Dtype* coo_format_ratingsMtx_rating_training,
+  Dtype* full_training_ratings_mtx,
+  const int* top_N_most_sim_itemIDs,
+  const Dtype* top_N_most_sim_item_similarity, const int top_N);
 
 #ifndef CPU_ONLY  // GPU
 

@@ -86,6 +86,26 @@ const std::string currentDateTime() {
     return buf;
 }
 
+
+template<typename Dtype>
+bool cpu_isBad(const Dtype* A, long long int size, std::string var_name, std::string file_line) 
+{
+  bool isBad = false;
+  std::string blank = "";
+  for(long long int i = (long long int)0; i < size; i += (long long int)1){
+    if (::isinf(A[i]) || ::isnan(A[i])){
+      isBad = true;
+    };
+  };
+  if(isBad){
+    save_host_array_to_file(A, (int)size, var_name + "_isBad_array", file_line );
+    ABORT_IF_EQ(0, 0, "isBad");
+  }
+  return isBad;
+}
+
+template bool cpu_isBad<float>(const float* A, long long int size, std::string var_name, std::string file_line);
+
 //============================================================================================
 // manipulate memory
 //============================================================================================
@@ -193,6 +213,9 @@ template void copy_device_mtx_into_host_submtx<float>(const long long int M, con
 template <>
 void cpu_incremental_average_array<float>(const long long int increment_index, float* old_avgs, float* new_vals, int num) {
   int nthreads = 1;
+  if(increment_index < (long long int)1){
+    ABORT_IF_EQ(0, 0, "oops!");
+  }
   #ifdef _OPENMP
     int nProcessors = omp_get_max_threads();
     nthreads = (int)std::min(nProcessors, num);
@@ -204,26 +227,48 @@ void cpu_incremental_average_array<float>(const long long int increment_index, f
     #ifdef _OPENMP
       th_id = omp_get_thread_num();
     #endif
-    for(int j = th_id; j < num; j++){
-      old_avgs[j] += (new_vals[j] - old_avgs[j]) / ((float)(increment_index));
+    if(increment_index == (long long int)1){
+      for(int j = th_id; j < num; j++){
+        old_avgs[j] = new_vals[j];
+      }
+    }else{
+      for(int j = th_id; j < num; j++){
+        old_avgs[j] += (new_vals[j] - old_avgs[j]) / ((float)(increment_index));
+      }
     }
   }
 }
 
-template <>
-void cpu_incremental_average<float>(const long long int increment_index, float* old_avg, float new_val) {
-  old_avg[0] += (new_val - old_avg[0]) / ((float)(increment_index));
+template<typename Dtype>
+void cpu_incremental_average(const long long int increment_index, Dtype* old_avg, Dtype new_val) {
+  if(increment_index < (long long int)1){
+    ABORT_IF_EQ(0, 0, "oops!");
+  }
+  if(increment_index == (long long int)1){
+    old_avg[0] = new_val;
+  }else{
+    old_avg[0] += (new_val - old_avg[0]) / ((Dtype)(increment_index));
+  }
 }
 
-
+template void cpu_incremental_average<int>(const long long int increment_index, int* old_avg, int new_val);
+template void cpu_incremental_average<float>(const long long int increment_index, float* old_avg, float new_val);
+template void cpu_incremental_average<double>(const long long int increment_index, double* old_avg, double new_val);
 
 template <>
 void cpu_incremental_average<long long int>(const long long int increment_index, long long int* old_avg, long long int new_val) {
-  old_avg[0] = (long long int)(((float)new_val - (float)old_avg[0]) / ((float)(increment_index)));
+  if(increment_index < (long long int)1){
+    ABORT_IF_EQ(0, 0, "oops!");
+  }
+  if(increment_index == (long long int)1){
+    old_avg[0] = (long long int)new_val;
+  }else{
+    old_avg[0] = (long long int)(((float)new_val - (float)old_avg[0]) / ((float)(increment_index)));
+  }
 }
 
 template<typename Dtype>
-void cpu_mean_abs_nonzero(const long long int n, const Dtype* x, Dtype* y, bool Debug) 
+void cpu_mean_abs_nonzero(const long long int n, const Dtype* x, Dtype* y, bool Debug, std::string vec_name) 
 {
   if(too_big(n) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
 
@@ -232,19 +277,20 @@ void cpu_mean_abs_nonzero(const long long int n, const Dtype* x, Dtype* y, bool 
   long long int count_nonzero = (long long int)0;
   for(long long int i = (long long int)0; i < n; i+=(long long int)1) {
     if(x[i] != (Dtype)0.0){
-      count_nonzero++;
+      count_nonzero+=(long long int)1;
       cpu_incremental_average((long long int)(count_nonzero), y, std::abs(x[i]));
     }
   }
   z = n - count_nonzero;
 
   if(Debug){
-    LOG(z <<" out of "<< n<<" entries are zero in submitted vector.");
-    LOG(((Dtype)z) / ((Dtype)n)  <<" of the entries are zero in submitted vector.");
+    LOG(z <<" out of "<< n<<" entries are zero in "<<vec_name<<".");
+    LOG( ((Dtype)z) / ((Dtype)n)  <<" of the entries are zero in "<<vec_name<<".");
   }
 }
-
-template void cpu_mean_abs_nonzero(const long long int n, const float* x, float* y, bool Debug);
+template void cpu_mean_abs_nonzero<int>(const long long int n, const int* x, int* y, bool Debug, std::string vec_name);
+template void cpu_mean_abs_nonzero<float>(const long long int n, const float* x, float* y, bool Debug, std::string vec_name);
+template void cpu_mean_abs_nonzero<double>(const long long int n, const double* x, double* y, bool Debug, std::string vec_name);
 
 template <typename Dtype>
 Dtype cpu_asum(const long long int n, const Dtype* x) {
@@ -1419,12 +1465,14 @@ void save_host_array_to_file(const Dtype* A_host, int count, std::string title, 
   std::ofstream entries (filename.str().c_str());
   //entries<<"[ ";
   for (int i = 0; i < count; i++){
-    entries<<A_host[i ];
+    entries<<ToString(A_host[ i ]);
     if(i < count - 1){
       //entries<<", ";
       entries<<"\r\n";
+      entries.flush();
     };
   };
+  entries.close();
   if(file_line != ""){
     LOG2(file_line, "save_host_array_to_file "<< title << " has "<< count<<" entries");
   }
@@ -1453,7 +1501,7 @@ template void get_host_array_from_saved_txt<float>(const float* A_host, int coun
 template void get_host_array_from_saved_txt<double>(const double* A_host, int count, std::string title);
 
 template<typename Dtype>
-void append_host_array_to_file(const Dtype* A_host, int count, std::string title)
+void append_host_array_to_file(const Dtype* A_host, int count, std::string title, std::string file_line)
 {
 
 
@@ -1467,12 +1515,17 @@ void append_host_array_to_file(const Dtype* A_host, int count, std::string title
     if(i < count - 1){
       entries<<", ";
     };
+    entries.flush();
   };
+  entries.close();
+  if(file_line != ""){
+    LOG2(file_line, "append_host_array_to_file "<< title << " has "<< count<<" entries");
+  }
 }
 
-template void append_host_array_to_file<int>(const int* A_host, int count, std::string title);
-template void append_host_array_to_file<float>(const float* A_host, int count, std::string title);
-template void append_host_array_to_file<double>(const double* A_host, int count, std::string title);
+template void append_host_array_to_file<int>(const int* A_host, int count, std::string title, std::string file_line);
+template void append_host_array_to_file<float>(const float* A_host, int count, std::string title, std::string file_line);
+template void append_host_array_to_file<double>(const double* A_host, int count, std::string title, std::string file_line);
 
 template<typename Dtype>
 void save_host_arrays_side_by_side_to_file(const Dtype* A_host, const Dtype* B_host, int count, std::string title, std::string file_line)
@@ -1489,8 +1542,9 @@ void save_host_arrays_side_by_side_to_file(const Dtype* A_host, const Dtype* B_h
     //entries<<", ";
       entries<<"\r\n";
     };
-
+     entries.flush();
   };
+  entries.close();
   //LOG("file saved");
   if(file_line != ""){
     LOG2(file_line, "save_host_array_to_file "<< title << " has "<< count<<" entries");
@@ -1501,6 +1555,41 @@ void save_host_arrays_side_by_side_to_file(const Dtype* A_host, const Dtype* B_h
 template void save_host_arrays_side_by_side_to_file<int>(const int* A_host, const int* B_host, int count, std::string title, std::string file_line);
 template void save_host_arrays_side_by_side_to_file<float>(const float* A_host, const float* B_host, int count, std::string title, std::string file_line);
 template void save_host_arrays_side_by_side_to_file<double>(const double* A_host, const double* B_host, int count, std::string title, std::string file_line);
+
+template<typename Dtype>
+void save_host_array_side_by_side_with_device_array(const Dtype* A_host, const Dtype* B_dev, int count, std::string title, std::string file_line)
+{
+  Dtype *B_host = NULL;
+  B_host=(Dtype *)malloc(count * SIZE_OF(Dtype));
+  checkErrors(B_host);
+  checkCudaErrors(cudaMemcpy(B_host, B_dev, count * SIZE_OF(Dtype), cudaMemcpyDeviceToHost));
+
+  Dtype mean_abs_nonzero_ = (Dtype)0.0;
+  cpu_mean_abs_nonzero<Dtype>((long long int)count, B_host, &mean_abs_nonzero_, true);
+
+  std::stringstream filename;
+  filename << title<< ".txt";
+  std::ofstream entries (filename.str().c_str());
+  //entries<<"[ ";
+  for (int i = 0; i < count; i++){
+    entries<<"["<<i<<"] : "<<A_host[i ]<<", "<<B_host[i ];
+    if(i < count - 1){
+    //entries<<", ";
+      entries<<"\r\n";
+    };
+     entries.flush();
+  };
+  entries.close();
+  //LOG("file saved");
+  if(file_line != ""){
+    LOG2(file_line, "save_host_array_side_by_side_with_device_array "<< title << " has "<< count<<" entries");
+  }
+  free(B_host);
+}
+
+template void save_host_array_side_by_side_with_device_array<int>(const int* A_host, const int* B_dev, int count, std::string title, std::string file_line);
+template void save_host_array_side_by_side_with_device_array<float>(const float* A_host, const float* B_dev, int count, std::string title, std::string file_line);
+template void save_host_array_side_by_side_with_device_array<double>(const double* A_host, const double* B_dev, int count, std::string title, std::string file_line);
 
 
 
@@ -1519,10 +1608,10 @@ void save_host_arrays_side_by_side_to_file_(const int* A_host, const int* B_host
     //entries<<", ";
       entries<<"\r\n";
     };
-
+    entries.flush();
   };
   //LOG("file saved");
-
+  entries.close();
 
 }
 
@@ -1531,7 +1620,13 @@ void save_host_arrays_side_by_side_to_file_(const int* A_host, const int* B_host
 template<typename Dtype>
 void save_host_mtx_to_file(const Dtype* A_host, const int rows, const int cols, std::string title, bool row_major_order, std::string file_line)
 {
+  if(file_line != ""){
+    LOG2(file_line, "save_host_mtx_to_file "<< title<< " running.");
+  }
   //assumes row major order
+  struct timeval program_start, program_end;
+  double program_time;
+  gettimeofday(&program_start, NULL);
 
   std::stringstream filename;
   filename << title<< ".txt";
@@ -1547,6 +1642,7 @@ void save_host_mtx_to_file(const Dtype* A_host, const int rows, const int cols, 
         }
       }
       entries<<"\r\n";
+      entries.flush();
       //entries<<"; ";
     }
   }else{
@@ -1558,17 +1654,71 @@ void save_host_mtx_to_file(const Dtype* A_host, const int rows, const int cols, 
         }
       }
       entries<<"\r\n";
+      entries.flush();
     }    
   }
+  entries.close();
   if(file_line != ""){
-    LOG2(file_line, "save_host_mtx_to_file "<< title);
+    LOG2(file_line, "save_host_mtx_to_file "<< title<< " finished.");
   }
+  gettimeofday(&program_end, NULL);
+  program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
+  if(1) LOG("save_host_mtx_to_file run time : "<<readable_time(program_time));
 }
 
 template void save_host_mtx_to_file<int>(const int* A_host, const int rows, const int cols, std::string title, bool row_major_order, std::string file_line);
 //template void save_host_mtx_to_file<long long int>(const long long int* A_host, int rows, int cols, std::string title, bool row_major_order, std::string file_line);
 template void save_host_mtx_to_file<float>(const float* A_host, const int rows, const int cols, std::string title, bool row_major_order, std::string file_line);
 template void save_host_mtx_to_file<double>(const double* A_host, const int rows, const int cols, std::string title, bool row_major_order, std::string file_line);
+
+
+template<typename Dtype>
+void append_host_mtx_to_file(const Dtype* A_host, const int rows, const int cols, std::string title, bool row_major_order, std::string file_line)
+{
+
+
+  std::stringstream filename;
+  filename << title<< ".txt";
+  std::ofstream entries (filename.str().c_str(), std::ofstream::app);
+  //entries<<"[ ";
+  if(row_major_order){
+    for (int i = 0; i < rows; i++){
+      for (int j = 0; j < cols; j++){
+        //entries<<A_host[i + j * rows];
+        entries<<A_host[((long long int)i) * ((long long int)cols) + ((long long int)j)];
+        if(j < cols - 1){
+          entries<<", ";
+        }
+      }
+      entries<<"\r\n";
+      entries.flush();
+      //entries<<"; ";
+    }
+  }else{
+    for (int i = 0; i < rows; i++){
+      for (int j = 0; j < cols; j++){
+        entries<<A_host[((long long int)i) + ((long long int)rows) * ((long long int)j)];
+        if(j < cols - 1){
+          entries<<", ";
+        }
+      }
+      entries<<"\r\n";
+      entries.flush();
+    }    
+  }
+  entries.close();
+  if(file_line != ""){
+    LOG2(file_line, "save_host_mtx_to_file "<< title);
+  }
+}
+
+template void append_host_mtx_to_file<int>(const int* A_host, const int rows, const int cols, std::string title, bool row_major_order, std::string file_line);
+template void append_host_mtx_to_file<float>(const float* A_host, const int rows, const int cols, std::string title, bool row_major_order, std::string file_line);
+template void append_host_mtx_to_file<double>(const double* A_host, const int rows, const int cols, std::string title, bool row_major_order, std::string file_line);
+
+
+
+
 
 void save_map(std::map<int, int>* items_dictionary, std::string title){
 
@@ -1588,6 +1738,9 @@ void save_map(std::map<int, int>* items_dictionary, std::string title){
     it++;
   }
 }
+
+
+
 
 //============================================================================================
 // Me Made
@@ -1821,20 +1974,22 @@ void cpu_get_cosine_similarity(const long long int ratings_rows,
         float num     = (float)0.0;
         float denom_i = (float)0.0;
         float denom_j = (float)0.0;
+        int start_j = csr_format_ratingsMtx_userID_host[user_j];
         for(int i = csr_format_ratingsMtx_userID_host[user_i]; i < csr_format_ratingsMtx_userID_host[user_i + 1]; i++){
           int user_i_itemID = coo_format_ratingsMtx_itemID_host[i];
           int user_j_itemID = 0;
-          int start_j = csr_format_ratingsMtx_userID_host[user_j];
+          denom_i += pow(coo_format_ratingsMtx_rating_host[i], (float)2.0) ;
           for(int j = start_j; j < csr_format_ratingsMtx_userID_host[user_j + 1]; j++){
             user_j_itemID = coo_format_ratingsMtx_itemID_host[j];
+            denom_j += pow(coo_format_ratingsMtx_rating_host[j], (float)2.0) ;
             if( user_i_itemID == user_j_itemID){
               count   += 1;
               num     += coo_format_ratingsMtx_rating_host[i] * coo_format_ratingsMtx_rating_host[j] ;
-              denom_i += pow(coo_format_ratingsMtx_rating_host[i], (float)2.0) ;
-              denom_j += pow(coo_format_ratingsMtx_rating_host[j], (float)2.0) ; 
               start_j = j + 1;
+              break;
             }else if(user_i_itemID < user_j_itemID){
               start_j = j;
+              denom_j -= pow(coo_format_ratingsMtx_rating_host[j], (float)2.0) ;
               break;
             }
           }
@@ -1923,9 +2078,11 @@ template void quickSort_by_key<int>(int* x, int low_index, int high_index, int* 
 template void quickSort_by_key<float>(float* x, int low_index, int high_index, int* indicies);
 
 
-template<typename Dtype>
-void cpu_sort_index_by_max(const long long int rows, const long long int cols,  Dtype* x, int* indicies)
+template<typename Dtype, typename Itype>
+void cpu_sort_index_by_max(const long long int rows, const long long int cols,  Dtype* x, Itype* indicies)
 {
+  // col major ordering 
+  // sort each col
   bool print = true;
   struct timeval program_start, program_end;
   if(print) LOG("called cpu_sort_index_by_max") ;
@@ -1935,7 +2092,7 @@ void cpu_sort_index_by_max(const long long int rows, const long long int cols,  
   int nthreads = 1;
   #ifdef _OPENMP
     int nProcessors = omp_get_max_threads();
-    nthreads = (int)std::min((long long int)nProcessors, rows);
+    nthreads = (int)std::min((long long int)nProcessors, cols);
     omp_set_num_threads(nthreads);
   #endif
 
@@ -1945,10 +2102,10 @@ void cpu_sort_index_by_max(const long long int rows, const long long int cols,  
     #ifdef _OPENMP
       th_id = omp_get_thread_num();
     #endif
-    for(long long int i = (long long int)th_id; i < rows; i += (long long int)nthreads){
+    for(long long int i = (long long int)th_id; i < cols; i += (long long int)nthreads){
     //for(long long int i = (long long int)0; i < rows; i+=(long long int)1){
       //thrust::sort_by_key sorts indicies by x smallest to x largest
-      thrust::sort_by_key(thrust::host, x + i * cols, x + (i + 1) * cols , indicies + i * cols);
+      thrust::sort_by_key(thrust::host, x + i * rows, x + (i + 1) * rows , indicies + i * rows);
       //quickSort_by_key<Dtype>(x + i * cols, 0, cols, indicies + i * cols);
     }
   }
@@ -1960,16 +2117,19 @@ void cpu_sort_index_by_max(const long long int rows, const long long int cols,  
 }
 
 
-template void cpu_sort_index_by_max<int>(const long long int rows, const long long int cols,  int* x, int* indicies);
-template void cpu_sort_index_by_max<float>(const long long int rows, const long long int cols,  float* x, int* indicies);
+template void cpu_sort_index_by_max<int, int>(const long long int rows, const long long int cols,  int* x, int* indicies);
+template void cpu_sort_index_by_max<float, int>(const long long int rows, const long long int cols,  float* x, int* indicies);
+template void cpu_sort_index_by_max<int, float>(const long long int rows, const long long int cols,  int* x, float* indicies);
 
 template<typename Dtype>
-void cpu_sort_index_by_max(const long long int dimension,  Dtype* x, int* indicies, int top_N)
+void cpu_sort_index_by_max(const long long int dimension,  Dtype* x, int* indicies, int top_N, Dtype* x_sorted)
 {
   /*
     "sort" the rows (not including the diagonal) of a symetric 
     matrix when storing only the entries below the diagonal 
-    in column major order. The indicies vector stores the first 
+    in column major order. 
+
+    The indicies vector stores the first 
     top_N indicies of the entries in x for a given row for each row. 
     Thus indicies is top_N * dimension in column major order.
   */
@@ -1990,8 +2150,8 @@ void cpu_sort_index_by_max(const long long int dimension,  Dtype* x, int* indici
     }
   #endif
 
-  Dtype* temp_x  = (Dtype *)malloc((dimension - 1) * nthreads * SIZE_OF(Dtype));
-  int* temp_indicies  = (int *)malloc((dimension - 1) * nthreads * SIZE_OF(int));
+  Dtype* temp_x  = (Dtype *)malloc((dimension - (long long int)1) * ((long long int)nthreads) * SIZE_OF(Dtype));
+  int* temp_indicies  = (int *)malloc((dimension - (long long int)1) * ((long long int)nthreads) * SIZE_OF(int));
   checkErrors(temp_x);
   checkErrors(temp_indicies);
   //save_host_mtx_to_file(temp_x, (dimension - 1), nthreads, "temp_x");
@@ -2014,16 +2174,16 @@ void cpu_sort_index_by_max(const long long int dimension,  Dtype* x, int* indici
       for(long long int j = (long long int)0; j < i; j+=(long long int)1){
         left_off = num_below_diag + i - (dimension - num_in_col);
 
-        temp_x[th_id * (dimension - 1) + j] = x[left_off];
-        temp_indicies[th_id * (dimension - 1) + j] = j;
+        temp_x[((long long int)th_id) * (dimension - (long long int)1) + j] = x[left_off];
+        temp_indicies[((long long int)th_id) * (dimension - (long long int)1) + j] = (int)j;
 
         num_below_diag += num_in_col;
         num_in_col -= (long long int)(1);
       }
       left_off = num_below_diag + (i + (long long int)(1)) - (dimension - num_in_col);
       for(long long int j = i + (long long int)1; j < dimension; j+=(long long int)1){
-        temp_x[th_id * (dimension - 1) + j - 1] = x[left_off];
-        temp_indicies[th_id * (dimension - 1) + j - 1] = j;
+        temp_x[((long long int)th_id) * (dimension - (long long int)1) + j - 1] = x[left_off];
+        temp_indicies[((long long int)th_id) * (dimension - (long long int)1) + j - 1] = (int)j;
         left_off += (long long int)(1);
       }
 
@@ -2033,9 +2193,19 @@ void cpu_sort_index_by_max(const long long int dimension,  Dtype* x, int* indici
       }
       //LOG("Hello from thread "<<th_id) ;
       //thrust::sort_by_key sorts temp_indicies by temp_x smallest to temp_x largest
-      thrust::sort_by_key(thrust::host, temp_x + (long long int)th_id * (dimension - (long long int)1), temp_x + (long long int)(th_id + 1) * (dimension - (long long int)1) , temp_indicies + (long long int)th_id * (dimension - (long long int)1));
+      thrust::sort_by_key(thrust::host, 
+        temp_x + ((long long int)th_id * (dimension - (long long int)1)), 
+        temp_x + ((long long int)(th_id + 1) * (dimension - (long long int)1)) , 
+        temp_indicies + ((long long int)th_id * (dimension - (long long int)1)));
       //quickSort_by_key<Dtype>(temp_x + th_id * (dimension - 1), 0, dimension - 1, temp_indicies + th_id * (dimension - 1));
-      host_copy(top_N, temp_indicies + (long long int)(th_id + 1) * (dimension - (long long int)1) - (long long int)top_N, indicies + i * (long long int)top_N);
+      host_copy(top_N, 
+        temp_indicies + ((long long int)(th_id + 1) * (dimension - (long long int)1) - (long long int)top_N), 
+        indicies + (i * (long long int)top_N));
+      if(x_sorted){
+        host_copy(top_N, 
+        temp_x + ((long long int)(th_id + 1) * (dimension - (long long int)1) - (long long int)top_N), 
+        x_sorted + (i * (long long int)top_N));
+      }
       if(i == 0 && debug) {
         print_host_array((temp_x + (long long int)th_id * (dimension - (long long int)1)), ((int)dimension - 1), ("temp_x"));
         print_host_array((temp_indicies + (long long int)th_id * (dimension - (long long int)1)), ((int)dimension - 1), ("temp_indicies"));
@@ -2065,8 +2235,8 @@ void cpu_sort_index_by_max(const long long int dimension,  Dtype* x, int* indici
 }
 
 
-template void cpu_sort_index_by_max<int>(const long long int dimension,  int* x, int* indicies, int top_N);
-template void cpu_sort_index_by_max<float>(const long long int dimension,  float* x, int* indicies, int top_N);
+template void cpu_sort_index_by_max<int>(const long long int dimension,  int* x, int* indicies, int top_N,  int* x_sorted);
+template void cpu_sort_index_by_max<float>(const long long int dimension,  float* x, int* indicies, int top_N,  float* x_sorted);
 
 
 
@@ -2110,8 +2280,8 @@ void cpu_count_appearances(const int top_N, const long long int dimension,
       th_id = omp_get_thread_num();
     #endif
     for(long long int j = (long long int)th_id; j < dimension; j += (long long int)nthreads){
-      for(long long int i = (long long int)0; i < top_N; i+=(long long int)1){
-        int temp = indicies[i + top_N * j];
+      for(long long int i = (long long int)0; i < (long long int)top_N; i+=(long long int)1){
+        int temp = indicies[i + (long long int)top_N * j];
         omp_set_lock(locks + temp);
         count[temp] += 1;
         omp_unset_lock(locks + temp);
@@ -2123,11 +2293,74 @@ void cpu_count_appearances(const int top_N, const long long int dimension,
     free(locks);
   #endif
 
-  if(0) LOG("finished call to gpu_orthogonal_decomp") ;
+  if(0) LOG("finished call to cpu_count_appearances") ;
   gettimeofday(&program_end, NULL);
   program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
   if(print) LOG("cpu_count_appearances run time : "<<readable_time(program_time));
 }
+
+
+
+
+void cpu_rank_appearances(const int top_N, const long long int dimension,
+  float* rank, const int* indicies)
+{
+  /*
+    Count the appearances of each of the dimension indicies 
+    in the columns of the vector called indicies which is 
+    top_N * dimension in memory in column major ordering
+  */
+  bool print = true;
+  struct timeval program_start, program_end;
+  double program_time;
+  gettimeofday(&program_start, NULL);
+
+  int nthreads = 1;
+  #ifdef _OPENMP
+    int nProcessors = omp_get_max_threads();
+    nthreads = (int)std::min((long long int)nProcessors, dimension);
+    omp_set_num_threads(nthreads);
+    omp_lock_t *locks = (omp_lock_t *)malloc(dimension * SIZE_OF(omp_lock_t));
+    checkErrors(locks);
+  #endif
+
+  #pragma omp parallel shared(nthreads)
+  {
+    int th_id = 0;
+    #ifdef _OPENMP
+      th_id = omp_get_thread_num();
+    #endif
+    for(long long int j = (long long int)th_id; j < dimension; j += (long long int)nthreads){
+      omp_init_lock(locks + j);
+      omp_unset_lock(locks + j);
+    }
+  }
+  #pragma omp parallel shared(nthreads)
+  {
+    int th_id = 0;
+    #ifdef _OPENMP
+      th_id = omp_get_thread_num();
+    #endif
+    for(long long int j = (long long int)th_id; j < dimension; j += (long long int)nthreads){
+      for(long long int i = (long long int)0; i < (long long int)top_N; i+=(long long int)1){
+        int temp = indicies[i + (long long int)top_N * j];
+        omp_set_lock(locks + temp);
+        rank[temp] += (float)(1.0 / ((float)i));
+        omp_unset_lock(locks + temp);
+      }
+    }
+  }
+
+  #ifdef _OPENMP
+    free(locks);
+  #endif
+
+  if(0) LOG("finished call to cpu_rank_appearances") ;
+  gettimeofday(&program_end, NULL);
+  program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
+  if(print) LOG("cpu_rank_appearances run time : "<<readable_time(program_time));
+}
+
 
 
 
@@ -2196,7 +2429,7 @@ long long int from_below_diag_to_whole(long long int below_diag_index, long long
 
 long long int from_below_diag_to_whole_faster(long long int below_diag_index, long long int dimension)
 {
-  bool debug = true;
+  bool debug = false;
   const long long int num_below_diag = (dimension * (dimension - (long long int)1)) / (long long int)2;
   if( below_diag_index < (long long int)0 || below_diag_index > num_below_diag - (long long int)(1)){
     if(debug){
@@ -2209,8 +2442,8 @@ long long int from_below_diag_to_whole_faster(long long int below_diag_index, lo
   long long int inverted_number = num_below_diag - below_diag_index;
   float n_float = ((float)1.0 + sqrt((float)1.0 + (float)8.0 * (float)inverted_number)) / (float)2.0;
   long long int n = (long long int)round(n_float);
-  long long int row;
-  long long int col;
+  long long int row = (long long int)(-1);
+  long long int col = (long long int)(0);
 
   long long int one_less = ((n - (long long int)1) * (n - (long long int)2)) / (long long int)2;
   long long int on_it = (n * (n - (long long int)1)) / (long long int)2;
@@ -2227,12 +2460,7 @@ long long int from_below_diag_to_whole_faster(long long int below_diag_index, lo
   }
 
 
-  if(one_more < inverted_number){
-    if(debug) LOG("one_more < inverted_number");
-    return (long long int)(-1);
-    // col = dimension - n;
-    // row = col + (inverted_number - one_more);
-  }else if(one_less < inverted_number && inverted_number < on_it){
+  if(one_less < inverted_number && inverted_number < on_it){
     if(debug) LOG("one_less < inverted_number && inverted_number < on_it");
     col = dimension - n;
     row = dimension -  (inverted_number - one_less);
@@ -2246,12 +2474,16 @@ long long int from_below_diag_to_whole_faster(long long int below_diag_index, lo
     row = dimension - (inverted_number - on_it);
   }else if(inverted_number == one_more){
     if(debug) LOG("inverted_number == one_more");
-    return (long long int)(-1);
-    // col = dimension - n;
-    // row = dimension - (long long int)1;
+    //return (long long int)(-7);
+    col = dimension - n - (long long int)1;
+    row = col + (long long int)1;
+  }else if(inverted_number == one_less){
+    if(debug) LOG("inverted_number == one_less");
+    //return (long long int)(-8);
+    col = dimension - n + (long long int)1;
+    row = col + (long long int)1;
   } else {
-    if(debug) LOG("inverted_number <= one_less");
-    return (long long int)(-1);
+    return (long long int)(-2);
     // col = dimension - n + (long long int)1;
     // row = dimension - (inverted_number - (n * (n - (long long int)1)) / (long long int)2);
   }
@@ -2265,9 +2497,9 @@ long long int from_below_diag_to_whole_faster(long long int below_diag_index, lo
       LOG("col : "<<col);
       LOG("row : "<<row);
     }
-    return (long long int)(-1); 
+    return (long long int)(-3); 
   }
-  if( col < (long long int)0 || col >= dimension){
+  if( col < (long long int)0 || col >= dimension - (long long int)1){
     if(debug){
       LOG("below_diag_index : "<<below_diag_index);
       LOG("dimension : "<<dimension);
@@ -2276,7 +2508,7 @@ long long int from_below_diag_to_whole_faster(long long int below_diag_index, lo
       LOG("col : "<<col);
       LOG("row : "<<row);
     }
-    return (long long int)(-1);
+    return (long long int)(-4);
   }
   if( row < (long long int)1 || row >= dimension){
     if(debug){
@@ -2287,9 +2519,13 @@ long long int from_below_diag_to_whole_faster(long long int below_diag_index, lo
       LOG("col : "<<col);
       LOG("row : "<<row);
     }
-    return (long long int)(-1);
+    return (long long int)(-5);
   }
-  return row + dimension * col;
+  long long int return_val = row + dimension * col;
+  if( return_val < (long long int)0 || return_val >= (dimension * dimension)){
+    return (long long int)(-6);
+  }
+  return return_val;
 }
 
 
@@ -2880,6 +3116,67 @@ void cpu_center_rows(const long long int rows, const long long int cols,
   if(1) LOG("cpu_center_rows run time : "<<readable_time(program_time)<<std::endl);
 }
 
+template<typename Dtype>
+__global__ void gpu_logarithmic_histogram_abs_val_kernel(const long long int n, Dtype* error, Dtype* probability, 
+                                                          int min_pow, int max_pow, int non_zero_count)
+{
+
+}
+
+template <typename Dtype>
+void cpu_logarithmic_histogram_abs_val(const int rows_A, const int cols, const Dtype* dense_mtx_A, 
+                                       const int rows_B, const int num_sparse_entries, 
+                                       const int* csr_rows_B, const int* coo_cols_B,
+                                       const Dtype* coo_entries_B, int* selection, 
+                                       int min_pow, int max_pow, Dtype* probability)
+{
+  cpu_set_all(probability, (long long int)(max_pow - min_pow + 1), (Dtype)0.0);
+
+  const int row_skip = csr_rows_B[0];
+  int nthreads = 1;
+  #ifdef _OPENMP
+    int nProcessors = omp_get_max_threads();
+    nthreads = (int)std::min(nProcessors, rows_B);
+    omp_set_num_threads(nthreads);
+  #endif
+  #pragma omp parallel shared(nthreads)
+  {
+    int th_id = 0;
+    #ifdef _OPENMP
+      th_id = omp_get_thread_num();
+    #endif
+    for(long long int row_B = (long long int)th_id; row_B < (long long int)rows_B; row_B += (long long int)nthreads){
+      for(long long int coo_index = (long long int)(csr_rows_B[row_B]); coo_index < (long long int)(csr_rows_B[row_B + 1]); coo_index+=(long long int)1){
+        int col = coo_cols_B[coo_index - row_skip];
+        Dtype error_temp = std::abs(dense_mtx_A[(long long int)(selection[row_B])  * (long long int)cols + (long long int)col] - coo_entries_B[coo_index - row_skip]);
+        if( (Dtype)0.0 <= error_temp && error_temp < (Dtype)pow((Dtype)10.0, (Dtype)min_pow) ) {
+          probability[0] += (Dtype)1.0 / (Dtype)num_sparse_entries;
+        }else{
+          int count = 1;
+          for(int j = min_pow + 1; j <= max_pow; j++){
+            if( (Dtype)pow((Dtype)10.0, (Dtype)(j - 1))<= error_temp && error_temp < (Dtype)pow((Dtype)10.0, (Dtype)j) ) {
+              probability[count] += (Dtype)1.0 / (Dtype)num_sparse_entries;
+              break;
+            }else{
+              count++;
+            }
+          }
+        }
+      }
+    }
+  }
+  // for(int i = 0; i < (max_pow - min_pow + 1), i++){
+
+  // }
+}
+
+template void cpu_logarithmic_histogram_abs_val<float>(const int rows_A, const int cols, const float* dense_mtx_A, 
+                                       const int rows_B, const int num_sparse_entries, 
+                                       const int* csr_rows_B, const int* coo_cols_B,
+                                       const float* coo_entries_B, int* selection, 
+                                       int min_pow, int max_pow, float* probability);
+
+
 template <typename Dtype>
 void cpu_sparse_nearest_row(const int rows_A, const int cols, const Dtype* dense_mtx_A, 
  const int rows_B, const int num_sparse_entries, const int* csr_rows_B, const int* coo_cols_B,
@@ -2918,9 +3215,11 @@ void cpu_sparse_nearest_row(const int rows_A, const int cols, const Dtype* dense
         for(long long int coo_index = (long long int)(csr_rows_B[row_B]); coo_index < (long long int)(csr_rows_B[row_B + 1]); coo_index+=(long long int)1){
           int col = coo_cols_B[coo_index - row_skip];
           count += (long long int)1;
-          cpu_incremental_average<Dtype>(count, &temp, (Dtype)pow(dense_mtx_A[row_A  * (long long int)cols + (long long int)col] - coo_entries_B[coo_index - row_skip], (Dtype)2.0));
+          //cpu_incremental_average<Dtype>(count, &temp, (Dtype)pow(dense_mtx_A[row_A  * (long long int)cols + (long long int)col] - coo_entries_B[coo_index - row_skip], (Dtype)2.0));
+          cpu_incremental_average<Dtype>(count, &temp, std::abs(dense_mtx_A[row_A  * (long long int)cols + (long long int)col] - coo_entries_B[coo_index - row_skip]));
           //temp += pow(dense_mtx_A[row_A  * (long long int)cols + (long long int)col] - coo_entries_B[coo_index - row_skip], (Dtype)2.0);
         }
+        temp *= ( ((Dtype)count) / ((Dtype)num_sparse_entries) );
         if(temp < closest_A_row_dist || row_A == (long long int)0){
           closest_A_row_dist = temp;
           closest_A_row      = (int)row_A;
@@ -3095,4 +3394,78 @@ void cpu_calculate_KM_error_and_update(const int rows_A, const int cols, Dtype* 
 
 template void cpu_calculate_KM_error_and_update<float>(const int rows_A, const int cols, float* dense_mtx_A, 
     const int rows_B, const float* dense_mtx_B, int* selection, float alpha, float lambda, float* checking);
+
+
+template<>
+void cpu_supplement_training_mtx_with_item_sim<float>(const long long int ratings_rows_training, 
+  const long long int ratings_cols_training, 
+  const bool row_major_ordering,
+  const int* csr_format_ratingsMtx_userID_training,
+  const int* coo_format_ratingsMtx_itemID_training,
+  const float* coo_format_ratingsMtx_rating_training,
+  float* full_training_ratings_mtx,
+  const int* top_N_most_sim_itemIDs,
+  const float* top_N_most_sim_item_similarity, const int top_N){
+
+  long long int total = ratings_rows_training * ratings_cols_training;
+  int nthreads = 1;
+  #ifdef _OPENMP
+    int nProcessors = omp_get_max_threads();
+    nthreads = (int)std::min((long long int)nProcessors, total);
+    omp_set_num_threads(nthreads);
+  #endif
+  #pragma omp parallel shared(nthreads)
+  {
+  int th_id = 0;
+  #ifdef _OPENMP
+    th_id = omp_get_thread_num();
+  #endif
+    for(long long int ind_ = (long long int)th_id; ind_ < total; ind_+=(long long int)nthreads){
+      if(full_training_ratings_mtx[ind_] == (float)0.0){
+        //user have not rated the item, has user rated similar items?
+        //walk through the items user HAS rated and calculate a weighted average of ratings for similar items
+        int item; 
+        int user;
+        if(row_major_ordering){
+          item = (int)(ind_ / ratings_cols_training);
+          user = (int)(ind_ % ratings_cols_training);
+        }else{
+          item = (int)(ind_ % ratings_rows_training);
+          user = (int)(ind_ / ratings_rows_training);
+        }
+        int   count_micro   = 0;
+        float num_micro    = (float)0.0;
+        float denom_micro = (float)0.0;
+        //float user_rating = (float)0.0;
+        int start = 0;
+        for(int i = csr_format_ratingsMtx_userID_training[user]; i < csr_format_ratingsMtx_userID_training[user + 1]; i++){
+          int user_itemID_other = coo_format_ratingsMtx_itemID_training[i];
+          for(int k = start; k < top_N; k++){
+            int _other_similar_item_index = top_N_most_sim_itemIDs[(long long int)k + (long long int)item * (long long int)top_N];
+            if( user_itemID_other == _other_similar_item_index){
+              count_micro += 1;
+              num_micro += coo_format_ratingsMtx_rating_training[i] * top_N_most_sim_item_similarity[(long long int)k + (long long int)item * (long long int)top_N];
+              denom_micro += top_N_most_sim_item_similarity[(long long int)k + (long long int)item * (long long int)top_N] ; 
+              start = k + 1;
+              break;
+            }else if(user_itemID_other < _other_similar_item_index){
+              start = k;
+              break;
+            }
+          }
+        }
+        if(count_micro > 0){
+          float user_rating = num_micro / denom_micro;
+          full_training_ratings_mtx[ind_] = user_rating;
+          if (::isinf(user_rating) || ::isnan(user_rating)){
+            ABORT_IF_EQ(1,1,"bad");
+          }
+        }
+      }
+    }
+  }
+}
+
+
+
 

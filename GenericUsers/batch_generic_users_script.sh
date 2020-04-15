@@ -2,17 +2,16 @@
 #SBATCH -N 1
 #SBATCH -p GPU-shared
 #SBATCH --ntasks-per-node 7
-#SBATCH -t 48:00:00
+#SBATCH -t 12:00:00
 #SBATCH --gres=gpu:p100:2
 #SBATCH --mail-type=ALL
-#SBTACH -e /home/nesky/REC_SYS/GenericUsers
 #echo commands to stdout
 
 #echo commands to stdout
 set -x
 
 
-# load modules    #SBATCH -p GPU-shared  #SBATCH -A ac560rp 
+# load modules    #SBATCH -p GPU-shared  #SBATCH -A ac560rp   #SBTACH -e /home/nesky/REC_SYS/GenericUsers
 
 
 #module load hdf5/1.8.16_gnu

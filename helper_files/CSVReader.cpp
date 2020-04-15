@@ -194,9 +194,10 @@ std::vector<std::vector<std::string> > CSVReader::getData()
 * in array.
 */
 template < typename Dtype>
-void CSVReader::getData(Dtype* data, const int rows, const int cols)
+void CSVReader::getData(Dtype* data, const int rows, const int cols, bool row_major_ordering )
 {
 	struct timeval program_start, program_end;
+	bool Debug = true;
     double program_time;
     gettimeofday(&program_start, NULL);
 	std::cout<<"CSVReader::getData() on "<<fileName.c_str()<<std::endl;
@@ -208,34 +209,51 @@ void CSVReader::getData(Dtype* data, const int rows, const int cols)
 
 		std::string line = "";
 		// Iterate through each line and split the content using delimeter
-		int row = 0;
+		long long int row = (long long int)0;
 		while (getline(file, line))
 		{
-			//std::cout<<line<<std::endl;
+			if(Debug && 0) std::cout<<line<<std::endl;
 			std::vector<std::string> vec;
 			boost::algorithm::split(vec, line, boost::is_any_of(delimeter));
+
+			if(vec.size() < cols){
+				LOG("row : "<<row)
+				LOG("lines size : " <<vec.size());
+				LOG("expected number of columns : " <<cols);
+				ABORT_IF_EQ(0, 0, "vec.size() < cols");
+			}
 
 			// if(first){
 			// 	first = 0;
 			// 	// userID, itemID, rating, timestamp
 			// }else{
-				for(int col = 0; col < cols; col++)
+				for(long long int col = 0; col < cols; col+=(long long int)1)
 		        {
 		        	if (typeid(data[0]) == typeid(int)){
-		        		data[row + col * rows] = ::atoi(vec[col].c_str());
+		        		if(row_major_ordering){
+		        			data[row * static_cast<long long int>(cols) + col] = ::atoi(vec[col].c_str());
+		        		}else{
+		        			data[row + col * static_cast<long long int>(rows)] = ::atoi(vec[col].c_str());
+		        		}
 		        	}
 		        	if (typeid(data[0]) == typeid(float)){
-		        		data[row + col * rows] = ::atof(vec[col].c_str());
+		        		if(row_major_ordering){
+		        			data[row * static_cast<long long int>(cols) + col] = ::atof(vec[col].c_str());
+		        		}else{
+		        			data[row + col * static_cast<long long int>(rows)] = ::atof(vec[col].c_str());
+		        		}
 		        	}
 		            
-		            // std::cout<<data[row + col * rows]<< " , ";
+		            if(Debug && 0) {
+		            	std::cout<<data[row + col * rows]<< " , ";
 
-		            //std::cout << "column ["<<col<<"] :" <<vec[col]<<std::endl;
-		            //std::cout<<vec[col]<< " , ";
+			            //std::cout << "column ["<<col<<"] :" <<vec[col]<<std::endl;
+			            //std::cout<<vec[col]<< " , ";
+		            }
 		        }
-		        // std::cout<<std::endl;
+		        
 
-		        row++;
+		        row+=(long long int)1;
 		    	// std::cout << "Press Enter to continue." ;
 	 	 		// std::cin.ignore();
 			//};
@@ -243,7 +261,7 @@ void CSVReader::getData(Dtype* data, const int rows, const int cols)
 			
 		}
 
-		  
+		if(Debug) std::cout<<"Here!"<<std::endl;
 
 		// Close the File
 		file.close();
@@ -258,8 +276,8 @@ void CSVReader::getData(Dtype* data, const int rows, const int cols)
 	//std::cout<<std::endl;
 }
 
-template void CSVReader::getData(int* data, const int rows, const int cols);
-template void CSVReader::getData(float* data, const int rows, const int cols);
+template void CSVReader::getData(int* data, const int rows, const int cols, bool row_major_ordering );
+template void CSVReader::getData(float* data, const int rows, const int cols, bool row_major_ordering );
 
 
 /*
@@ -325,6 +343,7 @@ void CSVReader::getData(int* coo_format_ratingsMtx_userID_host,
 				LOG("total_items : "<<total_items) ;
 				save_map(items_dictionary, "items_dictionary_before_shuffle");
 			}
+			LOG("SHUFFLING RATINGS MATRIX COLUMN INDICIES!!") ;
 			cpu_shuffle_map_second((long long int)total_items,  items_dictionary );
 			if(Debug){
 				save_map(items_dictionary, "items_dictionary_after_shuffle");

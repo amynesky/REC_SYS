@@ -37,7 +37,7 @@ class CSVReader
 
 	// Function to fetch data from a CSV File
 	template < typename Dtype>
-	void getData(Dtype* data, const int rows, const int cols);
+	void getData(Dtype* data, const int rows, const int cols, bool row_major_ordering = false);
 
 	// Function to fetch data from a CSV File
 	void getData(int* coo_format_ratingsMtx_userID_host,

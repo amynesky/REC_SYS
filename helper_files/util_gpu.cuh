@@ -409,7 +409,7 @@ template<typename Dtype>
 void gpu_msq_nonzero(const long long int n, const Dtype* x, Dtype* y, bool Debug = false);
 
 template<typename Dtype>
-void gpu_mean_abs_nonzero(const long long int n, const Dtype* x, Dtype* y, bool Debug = false);
+void gpu_mean_abs_nonzero(const long long int n, const Dtype* x, Dtype* y, bool Debug = false, std::string vect_name = "");
 
 template<typename Dtype>
 Dtype gpu_sum_of_squares(const long long int n, const Dtype* x);
@@ -594,7 +594,10 @@ void get_cosine_similarity_host(const long long int ratings_rows,
     const int* csr_format_ratingsMtx_userID_dev,
     const int* coo_format_ratingsMtx_itemID_dev,
     const float* coo_format_ratingsMtx_rating_dev,
-    float* cosine_similarity_host);
+    float* cosine_similarity_host, bool compare_values = false, 
+    int* top_N_most_sim_itemIDs_dev = NULL,
+    float* top_N_most_sim_item_similarity_dev = NULL, 
+    const long long int ratings_cols = (long long int)0, const int Top_N = 0);
 
 void get_cosine_similarity_host_experiment(const long long int ratings_rows, 
     const int* csr_format_ratingsMtx_userID_dev,

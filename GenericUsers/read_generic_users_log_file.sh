@@ -9,22 +9,22 @@ FILENAME=generic_users_log.txt
 START=$(date +%s)
 
 
-# grep "TRAINING ERROR :" "$OBSERVATIONS/$FILENAME" 2>&1 | tee $OBSERVATIONS/generic_users_training_MSQER_3.txt
-# awk 'BEGIN { FS="ERROR" }{ print $2 }' "$OBSERVATIONS/generic_users_training_MSQER_3.txt" 2>&1 | tee $OBSERVATIONS/generic_users_training_MSQER_2.txt
-# awk '{ print $2 }' "$OBSERVATIONS/generic_users_training_MSQER_2.txt" 2>&1 | tee $OBSERVATIONS/generic_users_training_MSQER.txt
+# grep "TRAINING ERROR :" "$OBSERVATIONS/$FILENAME" 2>&1 | tee $OBSERVATIONS/training_error_v_3.txt
+# awk 'BEGIN { FS="ERROR" }{ print $2 }' "$OBSERVATIONS/training_error_v_3.txt" 2>&1 | tee $OBSERVATIONS/training_error_v_2.txt
+# awk '{ print $2 }' "$OBSERVATIONS/training_error_v_2.txt" 2>&1 | tee $OBSERVATIONS/training_error_v.txt
 
 
-grep "gpu_R_error_training error :" "$OBSERVATIONS/$FILENAME" 2>&1 | tee $OBSERVATIONS/generic_users_training_MSQER_3.txt
-awk 'BEGIN { FS=" error :" }{ print $2 }' "$OBSERVATIONS/generic_users_training_MSQER_3.txt" 2>&1 | tee $OBSERVATIONS/generic_users_training_MSQER_2.txt
-awk '{ print $1 }' "$OBSERVATIONS/generic_users_training_MSQER_2.txt" 2>&1 | tee $OBSERVATIONS/generic_users_training_MSQER.txt
+grep "training error (used to update V):" "$OBSERVATIONS/$FILENAME" 2>&1 | tee $OBSERVATIONS/training_error_v_3.txt
+awk 'BEGIN { FS="V):" }{ print $2 }' "$OBSERVATIONS/training_error_v_3.txt" 2>&1 | tee $OBSERVATIONS/training_error_v_2.txt
+awk '{ print $1 }' "$OBSERVATIONS/training_error_v_2.txt" 2>&1 | tee $OBSERVATIONS/training_error_v.txt
 
-grep "gpu_R_error_testing MSQER on training entries:" "$OBSERVATIONS/$FILENAME" 2>&1 | tee $OBSERVATIONS/generic_users_testing_MSQER_on_training_entries_3.txt
-awk 'BEGIN { FS=" entries:" }{ print $2 }' "$OBSERVATIONS/generic_users_testing_MSQER_on_training_entries_3.txt" 2>&1 | tee $OBSERVATIONS/generic_users_testing_MSQER_on_training_entries_2.txt
-awk '{ print $1 }' "$OBSERVATIONS/generic_users_testing_MSQER_on_training_entries_2.txt" 2>&1 | tee $OBSERVATIONS/generic_users_testing_MSQER_on_training_entries.txt
+grep "testing error per training entry:" "$OBSERVATIONS/$FILENAME" 2>&1 | tee $OBSERVATIONS/testing_error_on_training_entries_3.txt
+awk 'BEGIN { FS=" entry:" }{ print $2 }' "$OBSERVATIONS/testing_error_on_training_entries_3.txt" 2>&1 | tee $OBSERVATIONS/testing_error_on_training_entries_2.txt
+awk '{ print $1 }' "$OBSERVATIONS/testing_error_on_training_entries_2.txt" 2>&1 | tee $OBSERVATIONS/testing_error_on_training_entries.txt
 
-grep "gpu_R_error_testing MSQER on testing entries:" "$OBSERVATIONS/$FILENAME" 2>&1 | tee $OBSERVATIONS/generic_users_testing_MSQER_on_testing_entries_3.txt
-awk 'BEGIN { FS=" entries:" }{ print $2 }' "$OBSERVATIONS/generic_users_testing_MSQER_on_testing_entries_3.txt" 2>&1 | tee $OBSERVATIONS/generic_users_testing_MSQER_on_testing_entries_2.txt
-awk '{ print $1 }' "$OBSERVATIONS/generic_users_testing_MSQER_on_testing_entries_2.txt" 2>&1 | tee $OBSERVATIONS/generic_users_testing_MSQER_on_testing_entries.txt
+grep "testing error per testing entry:" "$OBSERVATIONS/$FILENAME" 2>&1 | tee $OBSERVATIONS/testing_error_on_testing_entries_3.txt
+awk 'BEGIN { FS=" entry:" }{ print $2 }' "$OBSERVATIONS/testing_error_on_testing_entries_3.txt" 2>&1 | tee $OBSERVATIONS/testing_error_on_testing_entries_2.txt
+awk '{ print $1 }' "$OBSERVATIONS/testing_error_on_testing_entries_2.txt" 2>&1 | tee $OBSERVATIONS/testing_error_on_testing_entries.txt
 
 grep "Testing error norm over E" "$OBSERVATIONS/$FILENAME" 2>&1 | tee $OBSERVATIONS/generic_users_testing_normalized_over_rand_error_3.txt
 awk 'BEGIN { FS="|]:" }{ print $2 }' "$OBSERVATIONS/generic_users_testing_normalized_over_rand_error_3.txt" 2>&1 | tee $OBSERVATIONS/generic_users_testing_normalized_over_rand_error_2.txt
@@ -38,9 +38,9 @@ grep "gpu_R_error_training total iterations :" "$OBSERVATIONS/$FILENAME" 2>&1 | 
 awk 'BEGIN { FS="iterations" }{ print $2 }' "$OBSERVATIONS/generic_users_training_iterations_3.txt" 2>&1 | tee $OBSERVATIONS/generic_users_training_iterations_2.txt
 awk '{ print $2 }' "$OBSERVATIONS/generic_users_training_iterations_2.txt" 2>&1 | tee $OBSERVATIONS/generic_users_training_iterations.txt
 
-grep "gpu_R_error_testing total iterations :" "$OBSERVATIONS/$FILENAME" 2>&1 | tee $OBSERVATIONS/generic_users_testing_iterations_3.txt
-awk 'BEGIN { FS="iterations" }{ print $2 }' "$OBSERVATIONS/generic_users_testing_iterations_3.txt" 2>&1 | tee $OBSERVATIONS/generic_users_testing_iterations_2.txt
-awk '{ print $2 }' "$OBSERVATIONS/generic_users_testing_iterations_2.txt" 2>&1 | tee $OBSERVATIONS/generic_users_testing_iterations.txt
+grep "expected number of training iterations when testing:" "$OBSERVATIONS/$FILENAME" 2>&1 | tee $OBSERVATIONS/testing_iterations_3.txt
+awk 'BEGIN { FS="testing:" }{ print $2 }' "$OBSERVATIONS/testing_iterations_3.txt" 2>&1 | tee $OBSERVATIONS/testing_iterations_2.txt
+awk '{ print $2 }' "$OBSERVATIONS/testing_iterations_2.txt" 2>&1 | tee $OBSERVATIONS/testing_iterations.txt
 
 grep "num_latent_factors =" "$OBSERVATIONS/$FILENAME" 2>&1 | tee $OBSERVATIONS/generic_users_latent_factors_3.txt
 awk 'BEGIN { FS="=" }{ print $2 }' "$OBSERVATIONS/generic_users_latent_factors_3.txt" 2>&1 | tee $OBSERVATIONS/generic_users_latent_factors_2.txt
@@ -71,17 +71,17 @@ awk 'BEGIN { FS="clustering :" }{ print $2 }' "$OBSERVATIONS/generic_users_k_mea
 awk '{ print $1 }' "$OBSERVATIONS/generic_users_k_mean_MSQER_2.txt" 2>&1 | tee $OBSERVATIONS/generic_users_k_mean_MSQER.txt
 
 
-rm $OBSERVATIONS/generic_users_training_MSQER_3.txt
-rm $OBSERVATIONS/generic_users_training_MSQER_2.txt
+rm $OBSERVATIONS/training_error_v_3.txt
+rm $OBSERVATIONS/training_error_v_2.txt
 rm $OBSERVATIONS/generic_users_training_iterations_3.txt
 rm $OBSERVATIONS/generic_users_training_iterations_2.txt
 
-rm $OBSERVATIONS/generic_users_testing_iterations_3.txt
-rm $OBSERVATIONS/generic_users_testing_iterations_2.txt
-rm $OBSERVATIONS/generic_users_testing_MSQER_on_testing_entries_3.txt
-rm $OBSERVATIONS/generic_users_testing_MSQER_on_testing_entries_2.txt
-rm $OBSERVATIONS/generic_users_testing_MSQER_on_training_entries_3.txt
-rm $OBSERVATIONS/generic_users_testing_MSQER_on_training_entries_2.txt
+rm $OBSERVATIONS/testing_iterations_3.txt
+rm $OBSERVATIONS/testing_iterations_2.txt
+rm $OBSERVATIONS/testing_error_on_testing_entries_3.txt
+rm $OBSERVATIONS/testing_error_on_testing_entries_2.txt
+rm $OBSERVATIONS/testing_error_on_training_entries_3.txt
+rm $OBSERVATIONS/testing_error_on_training_entries_2.txt
 rm $OBSERVATIONS/generic_users_testing_normalized_over_rand_error_3.txt
 rm $OBSERVATIONS/generic_users_testing_normalized_over_rand_error_2.txt
 rm $OBSERVATIONS/generic_users_testing_normalized_error_3.txt
