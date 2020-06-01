@@ -6,6 +6,7 @@
 #include <sstream>
 #include <vector>
 #include <map>
+#include <set>
 #include <iterator>
 #include <string>
 #include <algorithm>
@@ -197,6 +198,9 @@ void  fillupMatrix(Dtype *A , int lda , int rows, int cols);
 template <typename Dtype>
 void host_rng_uniform(const long long int n, const Dtype a, const Dtype b, Dtype* r);
 
+template <typename Dtype>
+void host_rng_gaussian(const long long int n, const Dtype a, const Dtype b, Dtype* r);
+
 void getRandIntsBetween(int *A , int lower_bd , int upper_bd, int num);
 //============================================================================================
 // prints
@@ -259,9 +263,6 @@ void cpu_fill_training_mtx(const long long int ratings_rows_training, const long
 template < typename Dtype>
 void cpu_shuffle_array(const long long int n,  Dtype* x);
 
-void cpu_shuffle_mtx_rows_or_cols(cublasHandle_t dn_handle, const long long int M, const long long int N, 
-  bool row_major_ordering, float* x, bool shuffle_rows);
-
 void cpu_shuffle_map_second(const long long int M, std::map<int, int>* items_dictionary );
 
 template <typename Dtype>
@@ -270,11 +271,42 @@ void cpu_set_all(Dtype* x, const long long int N, Dtype alpha);
 template <typename Dtype>
 void cpu_set_as_index(Dtype* x, const long long int rows, const long long int cols);
 
+void cpu_shuffle_mtx_rows_or_cols(const long long int M, const long long int N, 
+                                  bool row_major_ordering, float* x,
+                                  bool shuffle_rows);
+
 void cpu_get_cosine_similarity(const long long int ratings_rows, 
                               const int* csr_format_ratingsMtx_userID_host,
                               const int* coo_format_ratingsMtx_itemID_host,
                               const float* coo_format_ratingsMtx_rating_host,
                               float* cosine_similarity);
+
+long long int cpu_compute_hidden_values (const long long int ratings_rows, 
+  const long long int ratings_cols, const int Top_N, const long long int num_entries,
+  const int* csr_format_ratingsMtx_userID_host,
+  const int* coo_format_ratingsMtx_itemID_host,
+  const float* coo_format_ratingsMtx_rating_host,
+  const std::vector<std::vector<int> >* top_N_most_sim_itemIDs_host,
+  const std::vector<std::vector<float> >* top_N_most_sim_item_similarity_host,
+  int**   coo_format_ratingsMtx_userID_host_new,
+  int**   coo_format_ratingsMtx_itemID_host_new,
+  float** coo_format_ratingsMtx_rating_host_new);
+
+template<typename Dtype, typename Itype>
+void quickSort_by_key(Dtype* x, int low_index, int high_index, Itype* indicies);
+
+template <typename Dtype>
+void cpu_sort_csr_colums(const long long int ratings_rows, 
+                                const int *csr_format_ratingsMtx_userID_host,
+                                int* coo_format_ratingsMtx_itemID_host,
+                                Dtype* coo_format_ratingsMtx_rating_host, 
+                                long long int num_entries_ = (long long int)0,
+                                std::string preprocessing_path = "");
+
+void cpu_sort_csr_colums_test();
+
+template<typename Dtype, typename Itype>
+void naiveSort_by_key(Dtype* x, int total, int num_sorted, Itype* indicies, Itype* indicies_sorted = NULL, Dtype* x_sorted = NULL);
 
 template <typename Dtype, typename Itype>
 void cpu_sort_index_by_max(const long long int rows, const long long int cols,  Dtype* x, Itype* indicies);
@@ -295,12 +327,18 @@ long long int from_below_diag_to_whole(long long int below_diag_index, long long
 
 long long int from_below_diag_to_whole_faster(long long int below_diag_index, long long int dimension);
 
+void from_below_diag_to_whole_test();
+
 long long int from_whole_to_below_diag(long long int whole_index, long long int dimension);
 
 
 template <typename Dtype>
 void cpu_get_num_latent_factors(const long long int m, Dtype* S_host, 
                                 long long int* num_latent_factors, const Dtype percent);
+
+template <typename Dtype>
+void cpu_get_latent_factor_mass(const long long int m, Dtype* S_host, 
+  const long long int num_latent_factors, Dtype *percent);
 
 template <typename Dtype>
 void cpu_orthogonal_decomp(const long long int m, const long long int n, const bool row_major_ordering,

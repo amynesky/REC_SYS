@@ -36,11 +36,12 @@ const bool Debug = 1;
 
 bool Content_Based = 0;
 bool Conserve_GPU_Mem = 1;
-bool load_from_preprocessing = 0;
+bool load_from_preprocessing = 1;
 std::string preprocessing_path = "";
 bool consider_item_cosine_similarity = true;
-bool user_cosine_similarity_incorporates_ratings = true;
-bool frequency_based = true;
+    bool CU_ratingsMtx_has_hidden_values = false;
+bool user_cosine_similarity_incorporates_ratings = true; // do you just count the intersection or do you us actual ratings?
+bool frequency_based = false; // otherwise rank_based
 
 #define update_Mem(new_mem) \
     allocatedMem += static_cast<long long int>(new_mem); \
@@ -88,7 +89,20 @@ int main(int argc, char *argv[])
     std::string blank = "";
 
     long long int allocatedMem = (long long int)0; 
+
+
+
+    // gpu_sort_csr_colums_test();
+    // return 0;
+    
+
+
     /*
+
+        from_below_diag_to_whole_test();
+        return 0;
+
+
         const long long int dimension = (long long int)131262; //138493
         const long long int num_below_diag = (dimension * (dimension - (long long int)1)) / (long long int)2;
 
@@ -272,14 +286,38 @@ int main(int argc, char *argv[])
             ABORT_IF_EQ(0, 1, "no valid dataset selected");
     }
 
+    if(consider_item_cosine_similarity){
+       preprocessing_path = (preprocessing_path + "consider_item_cosine_similarity/").c_str();
+    }else{
+        preprocessing_path = (preprocessing_path + "dont/").c_str();
+    }
+    if(user_cosine_similarity_incorporates_ratings){
+       preprocessing_path = (preprocessing_path + "user_cosine_similarity_incorporates_ratings/").c_str();
+    }else{
+        preprocessing_path = (preprocessing_path + "dont/").c_str();
+    }
+    if(frequency_based){
+       preprocessing_path = (preprocessing_path + "frequency_based/").c_str();
+    }else{
+        preprocessing_path = (preprocessing_path + "not/").c_str();
+    } 
+
     LOG("Training using the "<< Dataset_Name <<" dataset");
     LOG("csv_Ratings_Path : "<< csv_Ratings_Path);
     LOG("csv_keyWords_path : "<< csv_keyWords_path <<" dataset");
     LOG("Content_Based : "<< Content_Based<<std::endl);
-    LOG("consider_item_cosine_similarity : "<< consider_item_cosine_similarity<<std::endl);
+    LOG("consider_item_cosine_similarity : "<< consider_item_cosine_similarity);
+    if(consider_item_cosine_similarity){
+        LOG("CU_ratingsMtx_has_hidden_values : "<< CU_ratingsMtx_has_hidden_values<<std::endl);
+    }else{
+        CU_ratingsMtx_has_hidden_values = false;
+        LOG("");
+    }
     LOG("user_cosine_similarity_incorporates_ratings : "<< user_cosine_similarity_incorporates_ratings<<std::endl);
     LOG("frequency_based : "<< frequency_based<<std::endl);
     LOG("load_from_preprocessing : "<< load_from_preprocessing<<std::endl);
+    LOG("preprocessing_path : "<< preprocessing_path<<std::endl);
+
 
 
 
@@ -600,12 +638,11 @@ int main(int argc, char *argv[])
         // std::cin.ignore();
     }
 
-    checkCudaErrors(cudaMemcpy(coo_format_ratingsMtx_userID_host,  csr_format_ratingsMtx_userID_dev,  (ratings_rows + 1) * SIZE_OF(int), cudaMemcpyDeviceToHost));
+    //checkCudaErrors(cudaMemcpy(coo_format_ratingsMtx_userID_host,  csr_format_ratingsMtx_userID_dev,  (ratings_rows + 1) * SIZE_OF(int), cudaMemcpyDeviceToHost));
     checkCudaErrors(cudaMemcpy(coo_format_ratingsMtx_itemID_host,  coo_format_ratingsMtx_itemID_dev,  num_entries * SIZE_OF(int), cudaMemcpyDeviceToHost));
     checkCudaErrors(cudaMemcpy(coo_format_ratingsMtx_rating_host,  coo_format_ratingsMtx_rating_dev,  num_entries * SIZE_OF(float), cudaMemcpyDeviceToHost));
     
-
-
+    free(coo_format_ratingsMtx_userID_host);
     //============================================================================================
     // split the data into core users and testing data
     //============================================================================================
@@ -645,6 +682,8 @@ int main(int argc, char *argv[])
 
     int top_N = std::min((int)((float)ratings_rows / (float)10.0), 50);
     LOG("Compute the top-"<<top_N<<" most similar neighbors of each user based on the cosine similarities.");
+    int top_N_items = std::min((int)((float)ratings_cols / (float)10.0), 50);
+    if(consider_item_cosine_similarity) LOG("Compute the top-"<<top_N_items<<" most similar neighbors of each item based on the cosine similarities.");
 
 
 
@@ -653,17 +692,23 @@ int main(int argc, char *argv[])
     checkErrors(top_users);
     int* count = NULL;
     float* rank = NULL;
-    if(frequency_based){
-        count= (int *)malloc(ratings_rows * SIZE_OF(int));
-        checkErrors(count);
-    }else{
-        rank= (float *)malloc(ratings_rows * SIZE_OF(float));
+    count = (int *)malloc(ratings_rows * SIZE_OF(int));
+    checkErrors(count);
+    if(!frequency_based){
+        rank = (float *)malloc(ratings_rows * SIZE_OF(float));
         checkErrors(rank);
     }
     int*   top_N_most_sim_itemIDs         = NULL;
     float* top_N_most_sim_item_similarity = NULL;
-    if(!load_from_preprocessing){
-        float* item_cosine_similarity         = NULL;
+    int*   csr_format_ratingsMtx_userID_dev_with_hidden_values = NULL;
+    int*   coo_format_ratingsMtx_userID_dev_with_hidden_values = NULL;
+    int*   coo_format_ratingsMtx_itemID_dev_with_hidden_values = NULL;
+    float* coo_format_ratingsMtx_rating_dev_with_hidden_values = NULL;
+    long long int num_entries_with_hidden_values;
+
+    
+    float* item_cosine_similarity         = NULL;
+    if(CU_ratingsMtx_has_hidden_values || !load_from_preprocessing){
         if(consider_item_cosine_similarity){
             LOG("consider_item_cosine_similarity is TRUE");
             int*   csc_format_ratingsMtx_itemID_dev;
@@ -676,40 +721,42 @@ int main(int argc, char *argv[])
             update_Mem( num_entries * SIZE_OF(int) );
             update_Mem( num_entries * SIZE_OF(float) );
 
-            // int bufferSize;
-            // float* buffer;
-            // cusparse_status = cusparseCsr2cscEx2_bufferSize(sp_handle, ratings_rows, ratings_cols, num_entries,
-            //            coo_format_ratingsMtx_rating_dev,
-            //            csr_format_ratingsMtx_userID_dev,
-            //            coo_format_ratingsMtx_itemID_dev,
-            //            csc_format_ratingsMtx_rating_dev,
-            //            csc_format_ratingsMtx_itemID_dev,
-            //            csc_format_ratingsMtx_userID_dev,
-            //              CUDA_R_32F,
-            //              CUSPARSE_ACTION_NUMERIC,
-            //              CUSPARSE_INDEX_BASE_ZERO,
-            //              CUSPARSE_CSR2CSC_ALG1,
-            //              &bufferSize);
+            /*
+                int bufferSize;
+                float* buffer;
+                cusparse_status = cusparseCsr2cscEx2_bufferSize(sp_handle, ratings_rows, ratings_cols, num_entries,
+                           coo_format_ratingsMtx_rating_dev,
+                           csr_format_ratingsMtx_userID_dev,
+                           coo_format_ratingsMtx_itemID_dev,
+                           csc_format_ratingsMtx_rating_dev,
+                           csc_format_ratingsMtx_itemID_dev,
+                           csc_format_ratingsMtx_userID_dev,
+                             CUDA_R_32F,
+                             CUSPARSE_ACTION_NUMERIC,
+                             CUSPARSE_INDEX_BASE_ZERO,
+                             CUSPARSE_CSR2CSC_ALG1,
+                             &bufferSize);
 
-            // if (cusparse_status != CUSPARSE_STATUS_SUCCESS) { 
-            //     fprintf(stdout, "Conversion from CSR to CSC format failed\n");
-            //     return 1; 
-            // } 
+                if (cusparse_status != CUSPARSE_STATUS_SUCCESS) { 
+                    fprintf(stdout, "Conversion from CSR to CSC format failed\n");
+                    return 1; 
+                } 
 
-            // CUDA_CHECK(cudaMalloc((void**)&buffer , SIZE_OF(float) * bufferSize));
-            
-            // cusparse_status = cusparseCsr2cscEx2(sp_handle, ratings_rows, ratings_cols, num_entries,
-            //            coo_format_ratingsMtx_rating_dev,
-            //            csr_format_ratingsMtx_userID_dev,
-            //            coo_format_ratingsMtx_itemID_dev,
-            //            csc_format_ratingsMtx_rating_dev,
-            //            csc_format_ratingsMtx_itemID_dev,
-            //            csc_format_ratingsMtx_userID_dev,
-            //            CUDA_R_32F,
-            //            CUSPARSE_ACTION_NUMERIC,
-            //            CUSPARSE_INDEX_BASE_ZERO,
-            //            CUSPARSE_CSR2CSC_ALG1,
-            //            buffer);
+                CUDA_CHECK(cudaMalloc((void**)&buffer , SIZE_OF(float) * bufferSize));
+                
+                cusparse_status = cusparseCsr2cscEx2(sp_handle, ratings_rows, ratings_cols, num_entries,
+                           coo_format_ratingsMtx_rating_dev,
+                           csr_format_ratingsMtx_userID_dev,
+                           coo_format_ratingsMtx_itemID_dev,
+                           csc_format_ratingsMtx_rating_dev,
+                           csc_format_ratingsMtx_itemID_dev,
+                           csc_format_ratingsMtx_userID_dev,
+                           CUDA_R_32F,
+                           CUSPARSE_ACTION_NUMERIC,
+                           CUSPARSE_INDEX_BASE_ZERO,
+                           CUSPARSE_CSR2CSC_ALG1,
+                           buffer);
+            */
 
             cusparse_status = cusparseScsr2csc(sp_handle, ratings_rows, ratings_cols, num_entries,
                        coo_format_ratingsMtx_rating_dev,
@@ -735,32 +782,25 @@ int main(int argc, char *argv[])
 
             item_cosine_similarity  = (float *)malloc(num_below_diag * SIZE_OF(float));
             checkErrors(item_cosine_similarity);
-
-
-            /*
-            cpu_get_cosine_similarity(ratings_rows, 
-                                      coo_format_ratingsMtx_userID_host,
-                                      coo_format_ratingsMtx_itemID_host,
-                                      coo_format_ratingsMtx_rating_host,
-                                      item_cosine_similarity);
-                                      */
+            LOG("num_below_diag : "<< num_below_diag);  
 
             
             get_cosine_similarity_host(ratings_cols, 
                                       csc_format_ratingsMtx_itemID_dev,
                                       csc_format_ratingsMtx_userID_dev,
                                       csc_format_ratingsMtx_rating_dev,
-                                      item_cosine_similarity, true);
+                                      item_cosine_similarity, true); 
+
             cudaFree(csc_format_ratingsMtx_itemID_dev);
             cudaFree(csc_format_ratingsMtx_userID_dev);
             cudaFree(csc_format_ratingsMtx_rating_dev);                                      
-                                      
+                                     
 
             //cpu_set_as_index(col_index, ratings_rows, ratings_rows);
             //gpu_set_as_index_host(col_index, ratings_rows, ratings_rows);
 
-            top_N_most_sim_itemIDs  = (int *)malloc((long long int)top_N * ratings_cols * SIZE_OF(int));
-            top_N_most_sim_item_similarity  = (float *)malloc((long long int)top_N * ratings_cols * SIZE_OF(float));
+            top_N_most_sim_itemIDs          = (int *)  malloc((long long int)top_N_items * ratings_cols * SIZE_OF(int));
+            top_N_most_sim_item_similarity  = (float *)malloc((long long int)top_N_items * ratings_cols * SIZE_OF(float));
             checkErrors(top_N_most_sim_itemIDs);
             checkErrors(top_N_most_sim_item_similarity);
             /*
@@ -768,28 +808,155 @@ int main(int argc, char *argv[])
                 excluding the row index itself
             */
             //cpu_sort_index_by_max(ratings_rows, ratings_rows,  cosine_similarity, col_index);
-            cpu_sort_index_by_max<float>(ratings_cols, item_cosine_similarity, top_N_most_sim_itemIDs, top_N, top_N_most_sim_item_similarity);
-            if(item_cosine_similarity) free(item_cosine_similarity);
-            if(Debug && 0){
-                save_host_mtx_to_file<float>(top_N_most_sim_item_similarity, 2, ratings_cols, "cosine_similarity_chunk");
-                save_host_mtx_to_file<int>(top_N_most_sim_itemIDs, 2, ratings_cols, "row_index_sorted");
-            }
-            cpu_sort_index_by_max<int, float>(top_N, ratings_cols, top_N_most_sim_itemIDs, top_N_most_sim_item_similarity);
+
+            cpu_sort_index_by_max<float>(ratings_cols, item_cosine_similarity, top_N_most_sim_itemIDs, top_N_items, top_N_most_sim_item_similarity);
             
+            free(item_cosine_similarity);
             if(1){
-                save_host_mtx_to_file<float>(top_N_most_sim_item_similarity, top_N, ratings_cols, preprocessing_path + "top_N_most_sim_item_similarity");
-                save_host_mtx_to_file<int>(top_N_most_sim_itemIDs, top_N, ratings_cols, preprocessing_path + "top_N_most_sim_itemIDs");
+                save_host_mtx_to_file<float>(top_N_most_sim_item_similarity, top_N_items, ratings_cols, preprocessing_path + "top_N_most_sim_item_similarity", false, strPreamble(blank));
+                save_host_mtx_to_file<int>(top_N_most_sim_itemIDs, top_N_items, ratings_cols, preprocessing_path + "top_N_most_sim_itemIDs", false, strPreamble(blank));
             }
+
+            std::vector<std::vector<int> > top_N_most_sim_itemIDs_vectors;
+            std::vector<std::vector<float> > top_N_most_sim_item_similarity_vectors;
+            for(long long int j = (long long int)0; j < ratings_cols; j+=(long long int)1){
+                std::vector<int> int_vec;
+                top_N_most_sim_itemIDs_vectors.push_back(int_vec);
+                std::vector<float> float_vec;
+                top_N_most_sim_item_similarity_vectors.push_back(float_vec);
+            }
+            // for each item, find which other items list it as a most simmilar item
+            for(long long int j = (long long int)0; j < ratings_cols; j+=(long long int)1){
+                for(long long int i = (long long int)0; i < (long long int)top_N_items; i+=(long long int)1){
+                    int item_ID = top_N_most_sim_itemIDs[i + j * (long long int)top_N_items];
+                    float rating_ = top_N_most_sim_item_similarity[i + j * (long long int)top_N_items];
+                    if(std::abs(rating_) > 0.001 ){
+                        top_N_most_sim_itemIDs_vectors[item_ID].push_back(j);
+                        top_N_most_sim_item_similarity_vectors[item_ID].push_back(rating_);
+                    }
+                }
+            }
+            free(top_N_most_sim_itemIDs);
+            free(top_N_most_sim_item_similarity);        
+            //cpu_sort_index_by_max<int, float>(top_N_items, ratings_cols, top_N_most_sim_itemIDs, top_N_most_sim_item_similarity);
             
+
             
-        } // end if csc_
+            int* csr_format_ratingsMtx_userID_host  = NULL;
+            csr_format_ratingsMtx_userID_host = (int *)  malloc((ratings_rows + (long long int)1) *  SIZE_OF(int)); 
+            checkErrors(csr_format_ratingsMtx_userID_host);
+            checkCudaErrors(cudaMemcpy(csr_format_ratingsMtx_userID_host,  csr_format_ratingsMtx_userID_dev,  (ratings_rows + (long long int)1) *  SIZE_OF(int), cudaMemcpyDeviceToHost));
+            
+            int*   coo_format_ratingsMtx_userID_host_with_hidden_values;
+            int*   coo_format_ratingsMtx_itemID_host_with_hidden_values;
+            float* coo_format_ratingsMtx_rating_host_with_hidden_values;              
+            
+
+                       
+            num_entries_with_hidden_values = cpu_compute_hidden_values(ratings_rows, ratings_cols, top_N_items, num_entries,
+                                                                          csr_format_ratingsMtx_userID_host,
+                                                                          coo_format_ratingsMtx_itemID_host,
+                                                                          coo_format_ratingsMtx_rating_host,
+                                                                          &top_N_most_sim_itemIDs_vectors,
+                                                                          &top_N_most_sim_item_similarity_vectors,
+                                                                          &coo_format_ratingsMtx_userID_host_with_hidden_values,
+                                                                          &coo_format_ratingsMtx_itemID_host_with_hidden_values,
+                                                                          &coo_format_ratingsMtx_rating_host_with_hidden_values); 
+             
+            LOG("num_entries_with_hidden_values : "<<num_entries_with_hidden_values); 
+
+            free(coo_format_ratingsMtx_itemID_host);
+            free(coo_format_ratingsMtx_rating_host);
+
+
+            checkCudaErrors(cudaDeviceSynchronize());
+
+            free(csr_format_ratingsMtx_userID_host);  
+
+            checkCudaErrors(cudaMalloc((void**)&coo_format_ratingsMtx_userID_dev_with_hidden_values,  num_entries_with_hidden_values * SIZE_OF(int)));
+            checkCudaErrors(cudaMemcpy(coo_format_ratingsMtx_userID_dev_with_hidden_values,  coo_format_ratingsMtx_userID_host_with_hidden_values,  num_entries_with_hidden_values * SIZE_OF(int), cudaMemcpyHostToDevice));
+            checkCudaErrors(cudaMalloc((void**)&csr_format_ratingsMtx_userID_dev_with_hidden_values, (ratings_rows + (long long int)1) * SIZE_OF(int)));
+            update_Mem( (ratings_rows + 1) * SIZE_OF(int) );            
+            cusparse_status = cusparseXcoo2csr(sp_handle, coo_format_ratingsMtx_userID_dev_with_hidden_values, num_entries_with_hidden_values, 
+                                               ratings_rows, csr_format_ratingsMtx_userID_dev_with_hidden_values, CUSPARSE_INDEX_BASE_ZERO); 
+
+            if (cusparse_status != CUSPARSE_STATUS_SUCCESS) { 
+                fprintf(stdout, "Conversion from COO to CSR format failed\n");
+                return 1; 
+            }
+            checkCudaErrors(cudaMemcpy(coo_format_ratingsMtx_userID_host_with_hidden_values,  csr_format_ratingsMtx_userID_dev_with_hidden_values,  (ratings_rows + (long long int)1) * SIZE_OF(int), cudaMemcpyDeviceToHost));
+
+            
+            checkCudaErrors(cudaDeviceSynchronize());
+            
+
+            int ran_ind = 0;
+            getRandIntsBetween(&ran_ind, 0, (int)ratings_rows - 2, 1);
+            int first_place = (coo_format_ratingsMtx_userID_host_with_hidden_values[ran_ind]);
+            int last_place = (coo_format_ratingsMtx_userID_host_with_hidden_values[ran_ind + 2]);
+
+            if(Debug && 0){
+                LOG("random row index : "<<ran_ind);
+                LOG("first coo index : "<<first_place);
+                LOG("last coo index : "<<last_place - 1);
+                LOG("number of entries to print : "<<last_place - first_place);
+                save_host_array_to_file<int>(coo_format_ratingsMtx_userID_host_with_hidden_values + ran_ind, 3, preprocessing_path + "csr_format_ratingsMtx_userID_host_with_hidden_values", strPreamble(blank));
+                save_host_array_to_file<int>(coo_format_ratingsMtx_itemID_host_with_hidden_values + first_place, last_place - first_place, preprocessing_path + "coo_format_ratingsMtx_itemID_host_with_hidden_values_unsorted",strPreamble(blank));
+                save_host_array_to_file<float>(coo_format_ratingsMtx_rating_host_with_hidden_values + first_place, last_place - first_place, preprocessing_path + "coo_format_ratingsMtx_rating_host_with_hidden_values_unsorted",strPreamble(blank));
+            }
+            //columns need to be sorted
+            
+            cpu_sort_csr_colums<float>(ratings_rows, 
+                                       coo_format_ratingsMtx_userID_host_with_hidden_values,
+                                       coo_format_ratingsMtx_itemID_host_with_hidden_values,
+                                       coo_format_ratingsMtx_rating_host_with_hidden_values,
+                                       num_entries_with_hidden_values, preprocessing_path);
+            if(Debug && 0){
+                save_host_array_to_file<int>(coo_format_ratingsMtx_userID_host_with_hidden_values + ran_ind, 3, preprocessing_path + "csr_format_ratingsMtx_userID_host_with_hidden_values",strPreamble(blank));
+                save_host_array_to_file<int>(coo_format_ratingsMtx_itemID_host_with_hidden_values + first_place, last_place - first_place, preprocessing_path + "coo_format_ratingsMtx_itemID_host_with_hidden_values",strPreamble(blank));
+                save_host_array_to_file<float>(coo_format_ratingsMtx_rating_host_with_hidden_values + first_place, last_place - first_place, preprocessing_path + "coo_format_ratingsMtx_rating_host_with_hidden_values",strPreamble(blank));
+            } 
+
+            checkCudaErrors(cudaMalloc((void**)&coo_format_ratingsMtx_itemID_dev_with_hidden_values,  num_entries_with_hidden_values * SIZE_OF(int)));
+            checkCudaErrors(cudaMalloc((void**)&coo_format_ratingsMtx_rating_dev_with_hidden_values,  num_entries_with_hidden_values * SIZE_OF(float)));
+            checkCudaErrors(cudaMemcpy(coo_format_ratingsMtx_itemID_dev_with_hidden_values,  coo_format_ratingsMtx_itemID_host_with_hidden_values,  num_entries_with_hidden_values * SIZE_OF(int), cudaMemcpyHostToDevice));
+            checkCudaErrors(cudaMemcpy(coo_format_ratingsMtx_rating_dev_with_hidden_values,  coo_format_ratingsMtx_rating_host_with_hidden_values,  num_entries_with_hidden_values * SIZE_OF(float), cudaMemcpyHostToDevice));
+
+
+            update_Mem(2 * num_entries_with_hidden_values * SIZE_OF(int) + num_entries_with_hidden_values * SIZE_OF(float));
+
+
+
+            free(coo_format_ratingsMtx_userID_host_with_hidden_values);
+            free(coo_format_ratingsMtx_itemID_host_with_hidden_values);
+            free(coo_format_ratingsMtx_rating_host_with_hidden_values);            
+
+             
+
+            //columns need to be sorted
+            // gpu_sort_csr_colums<float>(ratings_rows, 
+            //                            csr_format_ratingsMtx_userID_dev_with_hidden_values,
+            //                            coo_format_ratingsMtx_itemID_dev_with_hidden_values,
+            //                            coo_format_ratingsMtx_rating_dev_with_hidden_values,
+            //                            num_entries_with_hidden_values, preprocessing_path);
+
+            if(0){
+                save_device_array_to_file<int>(coo_format_ratingsMtx_itemID_dev_with_hidden_values + first_place, last_place - first_place, preprocessing_path + "coo_format_ratingsMtx_itemID_dev_with_hidden_values");
+                save_device_array_to_file<float>(coo_format_ratingsMtx_rating_dev_with_hidden_values + first_place, last_place - first_place, preprocessing_path + "coo_format_ratingsMtx_rating_dev_with_hidden_values");
+            }
+
+            
+        } // end if consider_item_cosine_similarity
+    }
+    if(!load_from_preprocessing){
         int*   top_N_most_sim_itemIDs_dev         = NULL;
         float* top_N_most_sim_item_similarity_dev = NULL;
-        if(top_N_most_sim_itemIDs){
-            checkCudaErrors(cudaMalloc((void**)&top_N_most_sim_itemIDs_dev, (long long int)top_N * ratings_cols * SIZE_OF(int)));
-            checkCudaErrors(cudaMalloc((void**)&top_N_most_sim_item_similarity_dev, (long long int)top_N * ratings_cols * SIZE_OF(float)));  
-            checkCudaErrors(cudaMemcpy(top_N_most_sim_itemIDs_dev,  top_N_most_sim_itemIDs,  (long long int)top_N * ratings_cols * SIZE_OF(int), cudaMemcpyHostToDevice));
-            checkCudaErrors(cudaMemcpy(top_N_most_sim_item_similarity_dev,  top_N_most_sim_item_similarity,  (long long int)top_N * ratings_cols * SIZE_OF(float), cudaMemcpyHostToDevice));  
+
+        if(top_N_most_sim_itemIDs && 0){
+            checkCudaErrors(cudaMalloc((void**)&top_N_most_sim_itemIDs_dev, (long long int)top_N_items * ratings_cols * SIZE_OF(int)));
+            checkCudaErrors(cudaMalloc((void**)&top_N_most_sim_item_similarity_dev, (long long int)top_N_items * ratings_cols * SIZE_OF(float)));  
+            checkCudaErrors(cudaMemcpy(top_N_most_sim_itemIDs_dev,  top_N_most_sim_itemIDs,  (long long int)top_N_items * ratings_cols * SIZE_OF(int), cudaMemcpyHostToDevice));
+            checkCudaErrors(cudaMemcpy(top_N_most_sim_item_similarity_dev,  top_N_most_sim_item_similarity,  (long long int)top_N_items * ratings_cols * SIZE_OF(float), cudaMemcpyHostToDevice));  
             //if(item_cosine_similarity) free(item_cosine_similarity);       
         }
 
@@ -809,14 +976,25 @@ int main(int argc, char *argv[])
                                   cosine_similarity);
                                   */
 
-        
-        get_cosine_similarity_host(ratings_rows, 
-                                  csr_format_ratingsMtx_userID_dev,
-                                  coo_format_ratingsMtx_itemID_dev,
-                                  coo_format_ratingsMtx_rating_dev,
-                                  cosine_similarity, user_cosine_similarity_incorporates_ratings,
-                                  top_N_most_sim_itemIDs_dev, 
-                                  top_N_most_sim_item_similarity_dev, ratings_cols, top_N);
+
+        if(csr_format_ratingsMtx_userID_dev_with_hidden_values){
+            LOG("Incorporating hidden values into user cosine similarity!");
+            get_cosine_similarity_host(ratings_rows, 
+                                      csr_format_ratingsMtx_userID_dev_with_hidden_values,
+                                      coo_format_ratingsMtx_itemID_dev_with_hidden_values,
+                                      coo_format_ratingsMtx_rating_dev_with_hidden_values,
+                                      cosine_similarity, user_cosine_similarity_incorporates_ratings/*, top_N_most_sim_itemIDs_dev, 
+                                      top_N_most_sim_item_similarity_dev, ratings_cols, top_N*/);
+
+        }else{
+            get_cosine_similarity_host(ratings_rows, 
+                                      csr_format_ratingsMtx_userID_dev,
+                                      coo_format_ratingsMtx_itemID_dev,
+                                      coo_format_ratingsMtx_rating_dev,
+                                      cosine_similarity, user_cosine_similarity_incorporates_ratings/*, top_N_most_sim_itemIDs_dev, 
+                                      top_N_most_sim_item_similarity_dev, ratings_cols, top_N*/);
+        }
+
                                   
         if(top_N_most_sim_itemIDs_dev) cudaFree(top_N_most_sim_itemIDs_dev); 
         if(top_N_most_sim_item_similarity_dev) cudaFree(top_N_most_sim_item_similarity_dev);                                   
@@ -832,6 +1010,8 @@ int main(int argc, char *argv[])
         */
         //cpu_sort_index_by_max(ratings_rows, ratings_rows,  cosine_similarity, col_index);
         cpu_sort_index_by_max<float>(ratings_rows, cosine_similarity, col_index, top_N);
+
+        // NOTE: higher similarity has higher row index
 
         if(Debug && 0){
             save_host_array_to_file<float>(cosine_similarity, static_cast<int>(5*ratings_rows), "cosine_similarity_chunk");
@@ -862,14 +1042,15 @@ int main(int argc, char *argv[])
         cpu_set_as_index<int>(top_users, ratings_rows, 1);
 
         if(frequency_based){
-            cpu_sort_index_by_max(ratings_rows, 1, count, top_users);
+            cpu_sort_index_by_max<int>(ratings_rows, 1, count, top_users);
         }else{
-            cpu_sort_index_by_max(ratings_rows, 1, rank, top_users);
+            cpu_sort_index_by_max<float>(ratings_rows, 1, rank, top_users);
+            free(rank);
         }
         
-        if(Debug && 0){
-            save_host_array_to_file<int>(top_users, ratings_rows, preprocessing_path + "top_users");
-        }
+        
+        save_host_array_to_file<int>(top_users, ratings_rows, preprocessing_path + "top_users");
+        
     }else{
         LOG("Load top_users from saved file in "<<preprocessing_path);
         // Load top_users from saved file
@@ -881,10 +1062,13 @@ int main(int argc, char *argv[])
         LOG("top_users[0] : "<<top_users[0]);
         LOG("top_users[ratings_rows - 1] : "<<top_users[ratings_rows - 1]);
     }
+    LOG("here!");
+
     /*
         The ratings_rows_CU core users indicies are the indicies 
         in the last ratings_rows_CU entries of top_users 
     */
+    
     cpu_set_all<int>(count, ratings_rows, 1);
     cpu_mark_CU_users(ratings_rows_CU, ratings_rows, top_users, count );
     free(top_users);
@@ -893,10 +1077,6 @@ int main(int argc, char *argv[])
         //LOG("Press Enter to continue.") ;
         //std::cin.ignore();
     }
-
-    free(coo_format_ratingsMtx_userID_host);
-    free(coo_format_ratingsMtx_itemID_host);
-    free(coo_format_ratingsMtx_rating_host);
 
 
 
@@ -907,7 +1087,7 @@ int main(int argc, char *argv[])
     checkCudaErrors(cudaMalloc((void**)&group_indicies, ratings_rows * SIZE_OF(int)));
     update_Mem( ratings_rows * SIZE_OF(int) );
     
-    checkCudaErrors(cudaMemcpy(group_indicies,  count,  ratings_rows * SIZE_OF(int), cudaMemcpyHostToDevice));
+    checkCudaErrors(cudaMemcpy(group_indicies, count, ratings_rows * SIZE_OF(int), cudaMemcpyHostToDevice));
     free(count);
 
     int* group_sizes = NULL;
@@ -915,8 +1095,19 @@ int main(int argc, char *argv[])
     checkErrors(group_sizes);  
 
     count_each_group_from_coo(num_groups, group_indicies, num_entries, coo_format_ratingsMtx_userID_dev, group_sizes);
-    const long long int num_entries_CU   = group_sizes[0];
+    long long int num_entries_CU_temp   = group_sizes[0];
     const long long int num_entries_testing  = group_sizes[1];
+
+    if(coo_format_ratingsMtx_userID_dev_with_hidden_values && CU_ratingsMtx_has_hidden_values){
+        LOG("CONSTRUCTING CU RATINGS MTX USING HIDDEN VALUES!");
+        count_each_group_from_coo(num_groups, group_indicies, num_entries_with_hidden_values, coo_format_ratingsMtx_userID_dev_with_hidden_values, group_sizes);
+        cudaFree(coo_format_ratingsMtx_userID_dev_with_hidden_values);  
+        num_entries_CU_temp = group_sizes[0];
+        LOG("num testing user ratings with hidden values : " <<group_sizes[1]);
+        LOG("total ratings with hidden values : " <<group_sizes[0] + group_sizes[1]);
+    }
+
+    const long long int num_entries_CU = num_entries_CU_temp;
 
     // count_each_group(ratings_rows, group_indicies, group_sizes, num_groups);
     // const long long int ratings_rows_CU  = group_sizes[0];
@@ -927,7 +1118,8 @@ int main(int argc, char *argv[])
     LOG("num CU entries : "      <<num_entries_CU<<std::endl);
     
     ABORT_IF_NEQ(ratings_rows_testing  + ratings_rows_CU, ratings_rows, "The number of rows does not add up correctly.");
-    ABORT_IF_NEQ(num_entries_testing   + num_entries_CU,  num_entries, "The number of entries does not add up correctly.");
+    if(!CU_ratingsMtx_has_hidden_values)
+        ABORT_IF_NEQ(num_entries_testing   + num_entries_CU,  num_entries, "The number of entries does not add up correctly.");
 
     if(Debug && 0){
         // LOG("coo_format_ratingsMtx_userID_dev : ");
@@ -960,7 +1152,7 @@ int main(int argc, char *argv[])
     checkCudaErrors(cudaMalloc((void**)&coo_format_ratingsMtx_rating_dev_CU,  num_entries_CU        * SIZE_OF(float)));
     update_Mem(  (ratings_rows_testing + 1)  * SIZE_OF(int) + num_entries_testing  * SIZE_OF(int) + num_entries_testing  * SIZE_OF(float)
                + (ratings_rows_CU + 1)       * SIZE_OF(int) + num_entries_CU       * SIZE_OF(int) + num_entries_CU       * SIZE_OF(float)  );
-    
+
     int*   csr_format_ratingsMtx_userID_dev_by_group_host  [num_groups] = { csr_format_ratingsMtx_userID_dev_CU,  csr_format_ratingsMtx_userID_dev_testing  };
     int*   coo_format_ratingsMtx_itemID_dev_by_group_host  [num_groups] = { coo_format_ratingsMtx_itemID_dev_CU,  coo_format_ratingsMtx_itemID_dev_testing  };
     float* coo_format_ratingsMtx_rating_dev_by_group_host  [num_groups] = { coo_format_ratingsMtx_rating_dev_CU,  coo_format_ratingsMtx_rating_dev_testing  };
@@ -989,21 +1181,22 @@ int main(int argc, char *argv[])
                    coo_format_ratingsMtx_itemID_dev_by_group,
                    coo_format_ratingsMtx_rating_dev_by_group,
                    ratings_rows_by_group); 
-    if(Debug && 0){
-        save_device_array_to_file<int>  (csr_format_ratingsMtx_userID_dev_CU,        (int)ratings_rows_CU + 1,       "csr_format_ratingsMtx_userID_dev_CU");
-        save_device_array_to_file<int>  (coo_format_ratingsMtx_itemID_dev_CU,        (int)num_entries_CU,            "coo_format_ratingsMtx_itemID_dev_CU");
-        save_device_array_to_file<float>(coo_format_ratingsMtx_rating_dev_CU,        (int)num_entries_CU,            "coo_format_ratingsMtx_rating_dev_CU");
-        save_device_array_to_file<int>  (csr_format_ratingsMtx_userID_dev_testing,   (int)ratings_rows_testing + 1,  "csr_format_ratingsMtx_userID_dev_testing");
-        save_device_array_to_file<int>  (coo_format_ratingsMtx_itemID_dev_testing,   (int)num_entries_testing,       "coo_format_ratingsMtx_itemID_dev_testing");
-        save_device_array_to_file<float>(coo_format_ratingsMtx_rating_dev_testing,   (int)num_entries_testing,       "coo_format_ratingsMtx_rating_dev_testing");
-        // LOG("csr_format_ratingsMtx_userID_dev_testing : ");
-        // print_gpu_mtx_entries<int>(csr_format_ratingsMtx_userID_dev_testing, ratings_rows_testing + 1, 1 );
-        // LOG("csr_format_ratingsMtx_userID_dev_CU : ");
-        // print_gpu_mtx_entries<int>(csr_format_ratingsMtx_userID_dev_CU, ratings_rows_CU + 1, 1 );
-        // LOG("Press Enter to continue.") ;
-        // std::cin.ignore();
-        //return 0;
+    if(csr_format_ratingsMtx_userID_dev_with_hidden_values && CU_ratingsMtx_has_hidden_values){
+        LOG("CONSTRUCTING CU RATINGS MTX USING HIDDEN VALUES!");
+        gpu_split_data(csr_format_ratingsMtx_userID_dev_with_hidden_values,
+                       coo_format_ratingsMtx_itemID_dev_with_hidden_values,
+                       coo_format_ratingsMtx_rating_dev_with_hidden_values, 
+                       ratings_rows, group_indicies,
+                       csr_format_ratingsMtx_userID_dev_by_group,
+                       coo_format_ratingsMtx_itemID_dev_by_group,
+                       coo_format_ratingsMtx_rating_dev_by_group,
+                       ratings_rows_by_group, true);  
+        cudaFree(csr_format_ratingsMtx_userID_dev_with_hidden_values);
+        cudaFree(coo_format_ratingsMtx_itemID_dev_with_hidden_values);
+        cudaFree(coo_format_ratingsMtx_rating_dev_with_hidden_values);       
     }
+
+
 
 
     
@@ -1019,7 +1212,21 @@ int main(int argc, char *argv[])
     free(group_sizes);
 
 
-
+    if(Debug && 0){
+        save_device_array_to_file<int>  (csr_format_ratingsMtx_userID_dev_CU,        (int)ratings_rows_CU + 1,       preprocessing_path + "csr_format_ratingsMtx_userID_dev_CU");
+        save_device_array_to_file<int>  (coo_format_ratingsMtx_itemID_dev_CU,        (int)num_entries_CU,            preprocessing_path + "coo_format_ratingsMtx_itemID_dev_CU");
+        save_device_array_to_file<float>(coo_format_ratingsMtx_rating_dev_CU,        (int)num_entries_CU,            preprocessing_path + "coo_format_ratingsMtx_rating_dev_CU");
+        save_device_array_to_file<int>  (csr_format_ratingsMtx_userID_dev_testing,   (int)ratings_rows_testing + 1,  preprocessing_path + "csr_format_ratingsMtx_userID_dev_testing");
+        save_device_array_to_file<int>  (coo_format_ratingsMtx_itemID_dev_testing,   (int)num_entries_testing,       preprocessing_path + "coo_format_ratingsMtx_itemID_dev_testing");
+        save_device_array_to_file<float>(coo_format_ratingsMtx_rating_dev_testing,   (int)num_entries_testing,       preprocessing_path + "coo_format_ratingsMtx_rating_dev_testing");
+        // LOG("csr_format_ratingsMtx_userID_dev_testing : ");
+        // print_gpu_mtx_entries<int>(csr_format_ratingsMtx_userID_dev_testing, ratings_rows_testing + 1, 1 );
+        // LOG("csr_format_ratingsMtx_userID_dev_CU : ");
+        // print_gpu_mtx_entries<int>(csr_format_ratingsMtx_userID_dev_CU, ratings_rows_CU + 1, 1 );
+        // LOG("Press Enter to continue.") ;
+        // std::cin.ignore();
+        //return 0;
+    }
 
 
 
@@ -1079,7 +1286,7 @@ int main(int argc, char *argv[])
                               coo_format_ratingsMtx_rating_host_CU,
                               full_ratingsMtx_host_CU);
 
-        if(consider_item_cosine_similarity && load_from_preprocessing){
+        if(0 && consider_item_cosine_similarity && load_from_preprocessing){
             top_N_most_sim_itemIDs  = (int *)malloc((long long int)top_N * ratings_cols * SIZE_OF(int));
             top_N_most_sim_item_similarity  = (float *)malloc((long long int)top_N * ratings_cols * SIZE_OF(float));
             checkErrors(top_N_most_sim_itemIDs);
@@ -1094,16 +1301,13 @@ int main(int argc, char *argv[])
             LOG("Sanity Check : ");
             LOG("top_N_most_sim_item_similarity[0] : "<<top_N_most_sim_item_similarity[0]);
         }
-
-        if(top_N_most_sim_itemIDs) free(top_N_most_sim_itemIDs); 
-        if(top_N_most_sim_item_similarity) free(top_N_most_sim_item_similarity); 
         
         free(csr_format_ratingsMtx_userID_host_CU);
         free(coo_format_ratingsMtx_itemID_host_CU);
         free(coo_format_ratingsMtx_rating_host_CU);       
 
         
-        cpu_shuffle_mtx_rows_or_cols(dn_handle, ratings_rows_CU, ratings_cols, 
+        cpu_shuffle_mtx_rows_or_cols(ratings_rows_CU, ratings_cols, 
                                      row_major_ordering, full_ratingsMtx_host_CU, 1);
 
         LOG("full_ratingsMtx_host_CU filled and shuffled") ;
@@ -1119,6 +1323,11 @@ int main(int argc, char *argv[])
                               coo_format_ratingsMtx_itemID_dev_CU,
                               coo_format_ratingsMtx_rating_dev_CU,
                               full_ratingsMtx_dev_CU);
+
+        if(csr_format_ratingsMtx_userID_dev_with_hidden_values)    cudaFree(csr_format_ratingsMtx_userID_dev_with_hidden_values);
+        if(csr_format_ratingsMtx_userID_dev_with_hidden_values)    cudaFree(coo_format_ratingsMtx_itemID_dev_with_hidden_values);
+        if(csr_format_ratingsMtx_userID_dev_with_hidden_values)    cudaFree(coo_format_ratingsMtx_rating_dev_with_hidden_values);
+
         if(Content_Based){
             gpu_supplement_training_mtx_with_content_based(ratings_rows_CU, 
                                                             ratings_cols, 
@@ -1217,7 +1426,9 @@ int main(int argc, char *argv[])
 
     long long int num_latent_factors = (long long int)((float)ratings_rows_CU * (float)0.95);
     long long int max_num_latent_factors = (long long int)12000;
-    const float percent              = (float)0.99;
+    float percent_sv_mass              = (float)0.80;     // numbber of singular values to use
+    
+    const float percent              = (float)0.20;     // numbber of singular values to use
 
 
     float * U_CU;       // U_CU is ratings_rows_CU * ratings_rows_CU
@@ -1334,7 +1545,15 @@ int main(int argc, char *argv[])
     cpu_set_all<float>(logarithmic_histogram_km, 7 * num_batches_testing , (float)0.0);
 
     float running_avg_testing_error_on_testing_entries = 0.0;
+    float running_avg_testing_error_on_training_entries = 0.0;
 
+    float min_training_error = 10000.0;
+    float max_training_error = 0.0;
+
+    gettimeofday(&program_end, NULL);
+    program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
+    //printf("program_time: %f\n", program_time);   
+    LOG("program_time so far: "<<readable_time(program_time));
 
     //============================================================================================
     // Begin Testing
@@ -1383,16 +1602,22 @@ int main(int argc, char *argv[])
         
         gpu_block_orthogonal_decomp_from_host<float>(dn_handle, dn_solver_handle,
                                                      ratings_rows_CU, ratings_cols,
-                                                     &num_latent_factors, percent,
+                                                     &num_latent_factors, percent_sv_mass,
                                                      full_ratingsMtx_host_CU, U_CU, 
                                                      V_host, batch_size_CU, SV_with_U, SV);
-        LOG("largest singular value = "<< SV[0]);                                             
-                                                     
-        LOG("num_latent_factors = "<< num_latent_factors << " ( / "<< ratings_rows_CU<< " )");
+        LOG("largest singular value = "<< SV[0]<<std::endl);                                             
+                                                    
+        //LOG("num_latent_factors with percent mass = "<< num_latent_factors << " ( / "<< ratings_rows_CU<< " )");
+        //LOG("percent singular vectors with mass = "<< (((float)num_latent_factors) / ((float)ratings_rows_CU)) <<std::endl);   
 
+        num_latent_factors = static_cast<long long int>(percent * (float)ratings_rows_CU);
         num_latent_factors = std::min(num_latent_factors, std::min(ratings_rows_CU , max_num_latent_factors));
 
         LOG("num_latent_factors = "<< num_latent_factors << " ( / "<< ratings_rows_CU<< " )");
+        LOG("percent singular vectors = "<< (((float)num_latent_factors) / ((float)ratings_rows_CU)) );
+        
+        cpu_get_latent_factor_mass<float>(ratings_rows_CU, SV, num_latent_factors, &percent_sv_mass);
+        LOG("percent singular value mass = "<< percent_sv_mass<<std::endl);  
 
         checkCudaErrors(cudaMemcpy(V_dev, V_host, ratings_cols * (compress ? num_latent_factors : ratings_rows_CU) * SIZE_OF(float), cudaMemcpyHostToDevice));
         //if(Debug) {checkCudaErrors(cudaDeviceSynchronize()); LOG("Here");}
@@ -1477,10 +1702,11 @@ int main(int argc, char *argv[])
     update_Mem(batch_size_testing  * (compress ? num_latent_factors : ratings_rows_CU)  * SIZE_OF(float));
     update_Mem(batch_size_testing  * ratings_cols                        * SIZE_OF(float));
 
-    for(int batch__ = 0; batch__ < std::min(50, (int)num_batches_testing); batch__++){
+    int real_num_batches = 75;
+    for(int batch__ = 0; batch__ < std::min(real_num_batches, (int)num_batches_testing); batch__++){
         //for(int batch = 0; batch < num_batches_testing; batch++){
 
-        LOG(std::endl<<"                                          ~~~ TESTING Batch "<<batch__<<" ( / "<<num_batches_testing<<" ) ~~~ "); 
+        LOG(std::endl<<"                                          ~~~ TESTING Batch "<<batch__<<" ( / "<<(std::min(real_num_batches, (int)num_batches_testing))<<" ) ~~~ "); 
         int batch = 0;
         getRandIntsBetween(&batch , 0 , (int)num_batches_testing - 1, 1);
         LOG("batch id : "<<batch);
@@ -1593,7 +1819,7 @@ int main(int argc, char *argv[])
                            csr_format_ratingsMtx_userID_dev_testing_batch, 
                            coo_format_ratingsMtx_itemID_dev_testing_batch,
                            V_dev, U_testing, R_testing, NULL, NULL,
-                           training_rate, regularization_constant, batch__, 0,
+                           training_rate, regularization_constant, 0, 0,
                            testing_error_on_training_entries + num_tests, testing_error_on_testing_entries + num_tests, 
                            testing_iterations + num_tests, SV_with_U, SV_dev, logarithmic_histogram + 7 * num_tests);
 
@@ -1603,6 +1829,8 @@ int main(int argc, char *argv[])
 
         //testing_error_temp += gpu_sum_of_squares<float>(nnz_testing, coo_testing_errors);
         
+        
+
         checkCudaErrors(cudaFree(coo_testing_errors));
         checkCudaErrors(cudaFree(testing_entries));
         update_Mem(2 * nnz_testing * SIZE_OF(float) * (-1));  
@@ -1622,9 +1850,16 @@ int main(int argc, char *argv[])
             // LOG("Press Enter to continue.") ;
             // std::cin.ignore();
         }
-        float min_error_so_far = std::min(min_error_so_far, testing_error_on_testing_entries[num_tests]);
+        min_training_error = std::min(min_training_error, testing_error_on_training_entries[num_tests]);
+        max_training_error = std::max(max_training_error, testing_error_on_training_entries[num_tests]);
         cpu_incremental_average((long long int)(num_tests + 1), &running_avg_testing_error_on_testing_entries, testing_error_on_testing_entries[num_tests]);
-        LOG("running_avg_testing_error_on_testing_entries :  "<<running_avg_testing_error_on_testing_entries);
+        cpu_incremental_average((long long int)(num_tests + 1), &running_avg_testing_error_on_training_entries, testing_error_on_training_entries[num_tests]);
+        
+        LOG("running_avg_testing_error_on_TESTING_entries :  "<<running_avg_testing_error_on_testing_entries<<std::endl);
+
+        LOG("min_training_error :  "<<min_training_error);
+        LOG("running_avg_testing_error_on_training_entries :  "<<running_avg_testing_error_on_training_entries);
+        LOG("max_training_error :  "<<max_training_error<<std::endl);
         num_tests++;
     }//for loop on test batches
 
@@ -1659,7 +1894,7 @@ int main(int argc, char *argv[])
     //============================================================================================ 
 
 
-    if(1){
+    if(0){
         float* errors;
         int* selection;
         if(Conserve_GPU_Mem){

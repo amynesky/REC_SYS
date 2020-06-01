@@ -78,7 +78,7 @@ static const char *getCudaErrorEnum(cublasStatus_t error)
     case CUBLAS_STATUS_EXECUTION_FAILED:
         return "CUBLAS_STATUS_EXECUTION_FAILED";
 
-    case CUBLAS_STATUS_INTERNAL_ERROR:
+    case CUBLAS_STATUS_INTERNAL_ERROR: 
         return "CUBLAS_STATUS_INTERNAL_ERROR";
 
     case CUBLAS_STATUS_NOT_SUPPORTED:
@@ -253,6 +253,14 @@ static const char *getCuSparseErrorEnum(cusparseStatus_t error)
 template < typename Dtype>
 bool gpu_isBad(const Dtype* A, long long int size);
 
+const long long int CUDA_NUM_BLOCKS = (long long int)65535;
+
+// use 512 threads per block
+const long long int CUDA_NUM_THREADS = (long long int)512;
+
+// number of blocks for threads.
+//long long int GET_BLOCKS(const long long int N, long long int num_threads = CUDA_NUM_THREADS);
+
 //============================================================================================
 // Device information utilities
 //============================================================================================
@@ -328,36 +336,6 @@ void gpu_scale(cublasHandle_t dn_handle, const long long int n, const Dtype alph
 
 template <typename Dtype>
 void gpu_scale(cublasHandle_t dn_handle, const long long int n, const Dtype alpha, const Dtype *x, Dtype *y);
-
-//============================================================================================
-// CURAND INITIALIZATION
-//============================================================================================
-
-template < typename Dtype>
-void gpu_get_rand_bools(const long long int n,  Dtype* x, float probability_of_success);
-
-void gpu_mark_GU_users(const int ratings_rows_GU, const int ratings_rows, const int* x_host, int* y );
-
-void gpu_get_rand_groups(const long long int n,  int* x, float* probability_of_success, const int num_groups);
-
-template < typename Dtype>
-void gpu_reverse_bools(const long long int n,  Dtype* x);
-
-template <typename Dtype>
-void gpu_rng_uniform(cublasHandle_t handle, const long long int n, const Dtype a, const Dtype b, Dtype* r);
-
-template <typename Dtype>
-void gpu_rng_gaussian(const long long int n, const Dtype mu, const Dtype sigma, Dtype* r);
-
-template <typename Dtype>
-void gpu_shuffle_array(cublasHandle_t handle, const long long int n,  Dtype* x);
-
-template <typename Dtype>
-void gpu_sort_index_by_max(cublasHandle_t handle, const long long int n,  Dtype* x, Dtype* indicies);
-
-template <typename Dtype>
-void gpu_sort_index_by_max(cublasHandle_t handle, const long long int rows, const long long int cols,  
-                            Dtype* x, Dtype* indicies);
 
 
 //============================================================================================
@@ -488,7 +466,45 @@ void cublasCSCSparseXgemm(cusparseHandle_t handle,int m, int n, int k,
                        const Dtype *cscValB, const int *cscColPtrB, const int *cscRowIndB, const Dtype *beta, 
                        Dtype *C, int ldc);
 
+//============================================================================================
+// CURAND INITIALIZATION
+//============================================================================================
 
+template < typename Dtype>
+void gpu_get_rand_bools(const long long int n,  Dtype* x, float probability_of_success);
+
+void gpu_mark_GU_users(const int ratings_rows_GU, const int ratings_rows, const int* x_host, int* y );
+
+void gpu_get_rand_groups(const long long int n,  int* x, float* probability_of_success, const int num_groups);
+
+template < typename Dtype>
+void gpu_reverse_bools(const long long int n,  Dtype* x);
+
+template <typename Dtype>
+void gpu_rng_uniform(cublasHandle_t handle, const long long int n, const Dtype a, const Dtype b, Dtype* r);
+
+template <typename Dtype>
+void gpu_rng_gaussian(const long long int n, const Dtype mu, const Dtype sigma, Dtype* r, bool add = false, cublasHandle_t handle = NULL);
+
+template <typename Dtype>
+void gpu_shuffle_array(cublasHandle_t handle, const long long int n,  Dtype* x);
+
+template <typename Dtype>
+void gpu_sort_csr_colums(const long long int ratings_rows, 
+                                const int *csr_format_ratingsMtx_userID_dev,
+                                int* coo_format_ratingsMtx_itemID_dev,
+                                Dtype* coo_format_ratingsMtx_rating_dev, 
+                                long long int num_entries_ = (long long int)0,
+                                std::string preprocessing_path = "");
+
+void gpu_sort_csr_colums_test();
+
+template <typename Dtype>
+void gpu_sort_index_by_max(cublasHandle_t handle, const long long int n,  Dtype* x, Dtype* indicies);
+
+template <typename Dtype>
+void gpu_sort_index_by_max(cublasHandle_t handle, const long long int rows, const long long int cols,  
+                            Dtype* x, Dtype* indicies);
 
 //============================================================================================
 // me-made math
@@ -526,7 +542,7 @@ void gpu_split_data(const int* csr_format_ratingsMtx_userID_dev,
                         int** csr_format_ratingsMtx_userID_dev_by_group,
                         int** coo_format_ratingsMtx_itemID_dev_by_group,
                         float** coo_format_ratingsMtx_rating_dev_by_group,
-                        const int* ratings_rows_by_group);
+                        const int* ratings_rows_by_group, bool set_only_first_group = false);
 
 
 
@@ -595,8 +611,8 @@ void get_cosine_similarity_host(const long long int ratings_rows,
     const int* coo_format_ratingsMtx_itemID_dev,
     const float* coo_format_ratingsMtx_rating_dev,
     float* cosine_similarity_host, bool compare_values = false, 
-    int* top_N_most_sim_itemIDs_dev = NULL,
-    float* top_N_most_sim_item_similarity_dev = NULL, 
+    const int* top_N_most_sim_itemIDs_dev = NULL,
+    const float* top_N_most_sim_item_similarity_dev = NULL, 
     const long long int ratings_cols = (long long int)0, const int Top_N = 0);
 
 void get_cosine_similarity_host_experiment(const long long int ratings_rows, 
@@ -630,6 +646,10 @@ void gpu_mult_US_in_SVD(const long long int m, const long long int num_latent_fa
 template <typename Dtype>
 void gpu_get_num_latent_factors(cublasHandle_t dn_handle, const long long int m, Dtype* S, 
                                   long long int* num_latent_factors, const Dtype percent);
+
+template <typename Dtype>
+void gpu_get_latent_factor_mass(cublasHandle_t dn_handle, const long long int m, Dtype* S, 
+  const long long int num_latent_factors, Dtype *percent);
 
 template <typename Dtype>
 void preserve_first_m_rows(const long long int old_lda, const long long int new_lda, const long long int sda,
@@ -705,7 +725,7 @@ void gpu_R_error(cublasHandle_t dn_handle, const cusparseHandle_t sp_handle, con
                 const long long int batch_size_t, const long long int batch_size_GU, 
                 const long long int num_latent_factors, const long long int ratings_cols,
                 const int nnz, const int first_coo_ind, const bool compress, 
-                Dtype* testing_entries, Dtype* coo_errors, const Dtype testing_fraction,
+                Dtype* training_entries, Dtype* coo_errors, const Dtype testing_fraction,
                 const Dtype *coo_format_ratingsMtx_rating_dev_batch, 
                 const int *csr_format_ratingsMtx_userID_dev_batch, 
                 const int *coo_format_ratingsMtx_itemID_dev_batch,

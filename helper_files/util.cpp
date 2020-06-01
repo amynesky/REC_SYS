@@ -3,6 +3,7 @@
 #include <sstream>
 #include <vector>
 #include <map>
+#include <set>
 #include <iterator> 
 #include <string>
 #include <algorithm>
@@ -241,13 +242,22 @@ void cpu_incremental_average_array<float>(const long long int increment_index, f
 
 template<typename Dtype>
 void cpu_incremental_average(const long long int increment_index, Dtype* old_avg, Dtype new_val) {
+  bool Debug = false;
   if(increment_index < (long long int)1){
     ABORT_IF_EQ(0, 0, "oops!");
   }
   if(increment_index == (long long int)1){
     old_avg[0] = new_val;
   }else{
-    old_avg[0] += (new_val - old_avg[0]) / ((Dtype)(increment_index));
+    if(Debug){
+      LOG("old avg : "<< old_avg[0]);
+      LOG("new value : "<< new_val);
+      LOG("(new_val - old_avg[0]) : "<< (new_val - old_avg[0]));
+      LOG("(Dtype)(increment_index) : "<< (Dtype)(increment_index));
+      LOG("( (new_val - old_avg[0]) / ((Dtype)(increment_index)) ) : "<< ( (new_val - old_avg[0]) / ((Dtype)(increment_index)) ));
+    }
+    old_avg[0] += ( (new_val - old_avg[0]) / ((Dtype)(increment_index)) );
+    if(Debug)LOG("new avg : "<< old_avg[0]);
   }
 }
 
@@ -305,6 +315,20 @@ Dtype cpu_asum(const long long int n, const Dtype* x) {
 template int cpu_asum<int>(const long long int n, const int* x);
 template float cpu_asum<float>(const long long int n, const float* x);
 template double cpu_asum<double>(const long long int n, const double* x);
+
+template <typename Dtype>
+void cum_asum(const long long int n, Dtype* x) {
+  Dtype s = (Dtype)0.0;
+  for (long long int k = (long long int)0; k < n; k+=(long long int)1){
+    s += abs(x[k]);
+    x[k] = s;
+    //LOG(INFO) << x[k];
+  };
+}
+
+template void cum_asum<int>(const long long int n, int* x);
+template void cum_asum<float>(const long long int n, float* x);
+template void cum_asum<double>(const long long int n, double* x);
 
 // template <>
 // float cpu_asum<float>(const long long int n, const float* x) {
@@ -1130,6 +1154,61 @@ void host_rng_uniform(const long long int n, const Dtype a, const Dtype b, Dtype
 template void host_rng_uniform<float>(const long long int n, const float a, const float b, float* r);
 template void host_rng_uniform<double>(const long long int n, const double a, const double b, double* r);
 
+
+template <typename Dtype>
+void host_rng_gaussian(const long long int n, const Dtype a, const Dtype b, Dtype* r) {
+  //ABORT_IF_NEQ(0, 1, "host_rng_gaussian not yet supported");
+  //if(too_big(n) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
+  bool Debug = false;
+  if(Debug){
+    LOG("a : "<<a);
+    LOG("b : "<<b);
+  }
+
+  ABORT_IF_LESS(n, 1, "host_rng_gaussian has n < 0");
+  ABORT_IF_EQ((Dtype)0.0, b, "host_rng_gaussian has variance 0");
+  ABORT_IF_LESS(b, (Dtype)0.0, "host_rng_gaussian has b < 0");
+
+  base_generator_type generator(static_cast<unsigned int>(cluster_seedgen()));
+
+  // Define a uniform random number distribution which produces "double"
+  // values between 0 and 1 (0 inclusive, 1 exclusive).
+  boost::normal_distribution<> nd(static_cast<double>(a), static_cast<double>(b));
+  boost::variate_generator<base_generator_type&, boost::normal_distribution<> > uni(generator, nd);
+
+  std::cout.setf(std::ios::fixed);
+  // You can now retrieve random numbers from that distribution by means
+  // of a STL Generator interface, i.e. calling the generator as a zero-
+  // argument function.
+  long long int zero_count = (long long int)0;
+  for(long long int i = (long long int)0; i < n; i+=(long long int)1){
+    r[i] = static_cast<Dtype>(uni()) ;
+    if(r[i] == (Dtype)0.0){
+      zero_count+=(long long int)1;
+      //LOG("r["<<i<<"] = 0");
+    }
+  }
+  if(zero_count > (long long int)0){
+    LOG(zero_count <<" out of "<< n<<" entries are zero in submitted vector.");
+    LOG(((float)zero_count) / ((float)n)  <<" of the entries are zero in submitted vector.");
+  }
+  if(Debug){
+    save_host_array_to_file<Dtype>(r, static_cast<int>(n), "random_array");
+  }
+  // boost::uniform_real<Dtype> random_distribution(a, nextafter<Dtype>(b));
+  // boost::variate_generator<rng_t*, boost::uniform_real<Dtype> >
+  //     variate_generator(_rng(), random_distribution);
+  // for (int i = 0; i < n; ++i) {
+  //   r[i] = variate_generator();
+  // }
+}
+
+template void host_rng_gaussian<float>(const long long int n, const float a, const float b, float* r);
+template void host_rng_gaussian<double>(const long long int n, const double a, const double b, double* r);
+
+
+
+
 //============================================================================================
 // Old
 //============================================================================================
@@ -1329,6 +1408,8 @@ extern "C" std::string readable_time(double ms){
     ms_int = ms_int % 60000;
     int seconds = ms_int / 1000;
     ms_int = ms_int % 1000;
+
+    if(hours == 7) ABORT_IF_GT(minutes, 45, "Stopping early to prevent saving incomplete data.");
 
     return (ToString<int>(hours) + ":" +ToString<int>(minutes) + ":" + ToString<int>(seconds) + ":" + ToString<int>(ms_int));
   }else{
@@ -1631,30 +1712,39 @@ void save_host_mtx_to_file(const Dtype* A_host, const int rows, const int cols, 
   std::stringstream filename;
   filename << title<< ".txt";
   std::ofstream entries (filename.str().c_str());
+
+  std::streamsize ss = std::cout.precision();
+  std::cout << "Initial precision = " << ss << '\n';
+
   //entries<<"[ ";
   if(row_major_order){
     for (int i = 0; i < rows; i++){
       for (int j = 0; j < cols; j++){
         //entries<<A_host[i + j * rows];
-        entries<<A_host[((long long int)i) * ((long long int)cols) + ((long long int)j)];
+        entries<<std::setprecision(8)<<A_host[((long long int)i) * ((long long int)cols) + ((long long int)j)];
         if(j < cols - 1){
           entries<<", ";
         }
       }
-      entries<<"\r\n";
       entries.flush();
-      //entries<<"; ";
+      if(i < rows - 1){
+        entries<<"\r\n";
+        //entries<<"; ";
+      }
     }
   }else{
     for (int i = 0; i < rows; i++){
       for (int j = 0; j < cols; j++){
-        entries<<A_host[((long long int)i) + ((long long int)rows) * ((long long int)j)];
+        entries<<std::setprecision(8)<<A_host[((long long int)i) + ((long long int)rows) * ((long long int)j)];
         if(j < cols - 1){
           entries<<", ";
         }
       }
-      entries<<"\r\n";
       entries.flush();
+      if(i < rows - 1){
+        entries<<"\r\n";
+        //entries<<"; ";
+      }
     }    
   }
   entries.close();
@@ -1690,9 +1780,11 @@ void append_host_mtx_to_file(const Dtype* A_host, const int rows, const int cols
           entries<<", ";
         }
       }
-      entries<<"\r\n";
       entries.flush();
-      //entries<<"; ";
+      //entries<<"\r\n";
+      if(i < rows - 1){
+        entries<<"; ";
+      }
     }
   }else{
     for (int i = 0; i < rows; i++){
@@ -1702,8 +1794,11 @@ void append_host_mtx_to_file(const Dtype* A_host, const int rows, const int cols
           entries<<", ";
         }
       }
-      entries<<"\r\n";
       entries.flush();
+      //entries<<"\r\n";
+      if(i < rows - 1){
+        entries<<"; ";
+      }
     }    
   }
   entries.close();
@@ -1781,75 +1876,50 @@ void cpu_fill_training_mtx(const long long int ratings_rows_training, const long
   LOG("cpu_fill_training_mtx finished...");
 }
 
+/*
+  template < typename Dtype>
+  void cpu_shuffle_array(const long long int n,  Dtype* x)
+  {
+    bool Debug = false;
+    if(too_big(n) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
+    double* order = (double *)malloc(n * SIZE_OF(double));
+    checkErrors(order);
+    host_rng_uniform<double>(n, (double)0.0, (double)1.0, order);
+    if(Debug){
+      save_host_array_to_file<Dtype>(x, static_cast<int>(n), "before_shuffle");
+    }
+    thrust::sort_by_key(thrust::host, order, order + n, x);
+    if(Debug){
+      save_host_array_to_file<Dtype>(x, static_cast<int>(n), "after_shuffle");
+    }
+    free(order);
+
+  }
+
+*/
+
 template < typename Dtype>
 void cpu_shuffle_array(const long long int n,  Dtype* x)
 {
-  bool Debug = false;
   if(too_big(n) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
-  double* order = (double *)malloc(n * SIZE_OF(double));
+  float* order = NULL;
+  order  = (float *)malloc(n * SIZE_OF(float));
   checkErrors(order);
-  host_rng_uniform<double>(n, (double)0.0, (double)1.0, order);
-  if(Debug){
-    save_host_array_to_file<Dtype>(x, static_cast<int>(n), "before_shuffle");
-  }
-  thrust::sort_by_key(thrust::host, order, order + n, x);
-  if(Debug){
-    save_host_array_to_file<Dtype>(x, static_cast<int>(n), "after_shuffle");
-  }
+
+  host_rng_uniform<float>(n, (float)0.0, (float)1.0, order);
+
+  quickSort_by_key<float,Dtype>(order, 0, n - 1, x);
+
+
   free(order);
 
 }
 
+template void cpu_shuffle_array<float>(const long long int n,  float* x);
+template void cpu_shuffle_array<int>(const long long int n,  int* x);
 
-void cpu_shuffle_mtx_rows_or_cols(cublasHandle_t dn_handle, const long long int M, const long long int N, bool row_major_ordering, float* x, bool shuffle_rows)
-{
 
-  if(too_big(M) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
-  if(too_big(N) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
 
-  bool Debug = false;
-  int * indicies_host = NULL;
-  int * indicies_dev;
-
-  /*
-    A in row major ordering is equivalent to A^T in column major ordering
-    A in column major ordering is equivalent to A^T in row major ordering
-  */
-
-  if(Debug) LOG("cpu_shuffle_mtx_rows_or_cols called") ;
-  if(shuffle_rows){
-    if(Debug) LOG("shuffle_rows is true") ;
-    CUDA_CHECK(cudaMalloc((void**)&indicies_dev, M * SIZE_OF(int)));
-    indicies_host = (int *)malloc(M * SIZE_OF(int));
-    checkErrors(indicies_host);
-    gpu_set_as_index(indicies_dev, M);
-    gpu_shuffle_array<int>(dn_handle, M, indicies_dev);
-    CUDA_CHECK(cudaMemcpy(indicies_host, indicies_dev, M * SIZE_OF(int), cudaMemcpyDeviceToHost));
-    if(row_major_ordering){
-      if(Debug) LOG("row_major_ordering is true") ;
-      cpu_permute<float>(x, indicies_host, N, M, false); 
-    }else{
-      cpu_permute<float>(x, indicies_host, M, N, true); 
-    };
-    checkCudaErrors(cudaFree(indicies_dev));
-    free(indicies_host);
-  }else{
-    // shuffle columns
-    CUDA_CHECK(cudaMalloc((void**)&indicies_dev, N * SIZE_OF(int)));
-    indicies_host = (int *)malloc(N * SIZE_OF(int));
-    checkErrors(indicies_host);
-    gpu_set_as_index(indicies_dev, N);
-    gpu_shuffle_array<int>(dn_handle, N, indicies_dev);
-    CUDA_CHECK(cudaMemcpy(indicies_host, indicies_dev, N * SIZE_OF(int), cudaMemcpyDeviceToHost));
-    if(row_major_ordering){
-      cpu_permute<float>(x, indicies_host, N, M, true); 
-    }else{
-      cpu_permute<float>(x, indicies_host, M, N, false); 
-    };
-    checkCudaErrors(cudaFree(indicies_dev));
-    free(indicies_host);
-  }
-} 
 
 void cpu_shuffle_map_second(const long long int M, std::map<int, int>* items_dictionary )
 {
@@ -1933,7 +2003,55 @@ void cpu_set_as_index<int>(int* x, const long long int rows, const long long int
   if(print) LOG("cpu_set_as_index run time : "<<readable_time(program_time));
 }
 
+void cpu_shuffle_mtx_rows_or_cols(const long long int M, const long long int N, bool row_major_ordering, float* x, bool shuffle_rows)
+{
+  bool Debug = true;
+  int * indicies_host = NULL;
 
+  // A in row major ordering is equivalent to A^T in column major ordering
+  //  A in column major ordering is equivalent to A^T in row major ordering
+  
+  if(Debug) LOG("cpu_shuffle_mtx_rows_or_cols called") ;
+  if(too_big(M) ) {
+    ABORT_IF_NEQ(0, 1,"Long long long int too big");
+  }
+  if(too_big(N) ) {
+    ABORT_IF_NEQ(0, 1,"Long long long int too big");
+  }
+
+  if(shuffle_rows){
+    if(Debug) LOG("shuffle_rows is true") ;
+    
+    indicies_host = (int *)malloc(M * SIZE_OF(int));
+    checkErrors(indicies_host);
+    cpu_set_as_index(indicies_host, M, (long long int)1);
+    cpu_shuffle_array<int>(M, indicies_host);
+
+    if(row_major_ordering){
+      if(Debug) LOG("row_major_ordering is true") ;
+      cpu_permute<float>(x, indicies_host, N, M, false); 
+    }else{
+      if(Debug) LOG("col major ordering") ;
+      cpu_permute<float>(x, indicies_host, M, N, true); 
+    };
+  }else{// shuffle columns
+    if(Debug) LOG("shuffle columns") ;
+
+    indicies_host = (int *)malloc(N * SIZE_OF(int));
+    checkErrors(indicies_host);
+    cpu_set_as_index(indicies_host, N, (long long int)1);
+    cpu_shuffle_array<int>( N, indicies_host);
+
+    if(row_major_ordering){
+      if(Debug) LOG("row_major_ordering is true") ;
+      cpu_permute<float>(x, indicies_host, N, M, true); 
+    }else{
+      if(Debug) LOG("col major ordering") ;
+      cpu_permute<float>(x, indicies_host, M, N, false); 
+    };
+  }
+  free(indicies_host);
+} 
 
 
 void cpu_get_cosine_similarity(const long long int ratings_rows,
@@ -2017,66 +2135,621 @@ void cpu_get_cosine_similarity(const long long int ratings_rows,
 }
 
 
+long long int cpu_compute_hidden_values (const long long int ratings_rows, 
+  const long long int ratings_cols, const int Top_N, const long long int num_entries,
+  const int* csr_format_ratingsMtx_userID_host,
+  const int* coo_format_ratingsMtx_itemID_host,
+  const float* coo_format_ratingsMtx_rating_host,
+  const std::vector<std::vector<int> >* top_N_most_sim_itemIDs_host,
+  const std::vector<std::vector<float> >* top_N_most_sim_item_similarity_host,
+  int**   coo_format_ratingsMtx_userID_host_new,
+  int**   coo_format_ratingsMtx_itemID_host_new,
+  float** coo_format_ratingsMtx_rating_host_new)
+{
+  bool print = true;
+  bool Global_Debug = false;
+  struct timeval program_start, program_end;
+  double program_time;
+  gettimeofday(&program_start, NULL);
+  if(print) {
+    LOG("called cpu_compute_hidden_values") ;
+  }
+
+  int nthreads = 1;
+  #ifdef _OPENMP
+    int nProcessors = omp_get_max_threads();
+    //if(!Global_Debug) 
+      nthreads = (int)std::min((long long int)nProcessors, ratings_rows);
+    omp_set_num_threads(nthreads);
+    omp_lock_t printlock, worklock;
+    omp_init_lock(&printlock);
+    omp_init_lock(&worklock);
+  #endif
+  if(0) {
+    LOG("ratings_rows : "<< ratings_rows) ;
+    LOG("ratings_cols : "<< ratings_cols) ;
+    LOG("num_entries : "<< num_entries) ;
+    LOG("Top_N : "<< Top_N) ;
+    LOG("nthreads : "<< nthreads) ;
+  }
+  int new_num_ratings[ratings_rows];
+
+  int max_num_new_ratings = 0;
+  int user_with_max_num_new_ratings = 0;
+  #pragma omp parallel shared(nthreads)
+  {
+    int th_id = 0;
+    #ifdef _OPENMP
+      th_id = omp_get_thread_num();
+    #endif
+    for(long long int user = (long long int)th_id; user < ratings_rows; user += (long long int)nthreads)
+    {
+      if(Global_Debug && 0) {
+        //omp_set_lock(&printlock);
+        LOG("user : "<<user);
+        //omp_unset_lock(&printlock);
+      }
+      std::set<int> really_rated_itemIDS;
+      std::set<int> hidden_rated_itemIDS;
+      for(int i = csr_format_ratingsMtx_userID_host[user]; i < csr_format_ratingsMtx_userID_host[user + 1]; i++){
+        int user_itemID = coo_format_ratingsMtx_itemID_host[i];
+        really_rated_itemIDS.insert(user_itemID);
+      }
+      if(Global_Debug && 0) {
+        //omp_set_lock(&printlock);
+        LOG("really_rated_itemIDS.size() : "<<really_rated_itemIDS.size());
+        //omp_unset_lock(&printlock);
+      }
+      for(int i = csr_format_ratingsMtx_userID_host[user]; i < csr_format_ratingsMtx_userID_host[user + 1]; i++){
+        int user_itemID = coo_format_ratingsMtx_itemID_host[i];
+        //which items have item user_itemID listed as a similar item? 
+        int vec_length = (*top_N_most_sim_itemIDs_host)[user_itemID].size();
+        if(Global_Debug && 0) {
+          //omp_set_lock(&printlock);
+          LOG("   user_itemID : "<<user_itemID);
+          LOG("   vec_length : "<<vec_length);
+          //omp_unset_lock(&printlock);
+        }
+        for(long long int j = (long long int)0; j < (long long int)vec_length; j+=(long long int)1){
+          int other_similar_itemID = (*top_N_most_sim_itemIDs_host)[user_itemID][j];
+            if(Global_Debug && 0) {
+              //omp_set_lock(&printlock);
+              LOG("      j : "<<j);
+              LOG("      other_similar_itemID : "<<other_similar_itemID);
+              //omp_unset_lock(&printlock);
+            }
+            // make sure the user didn't actually rate the item
+            if(really_rated_itemIDS.find(other_similar_itemID) == really_rated_itemIDS.end()){
+              if(hidden_rated_itemIDS.find(other_similar_itemID) == hidden_rated_itemIDS.end()){
+                hidden_rated_itemIDS.insert(other_similar_itemID);
+                if(Global_Debug && 0) {
+                  //omp_set_lock(&printlock);
+                  //LOG("th_id : "<<th_id);
+                  LOG("            new! adding..");
+                  //omp_unset_lock(&printlock);
+                }
+              }else{
+                if(Global_Debug && 0) {
+                  //omp_set_lock(&printlock);
+                  //LOG("th_id : "<<th_id);
+                  LOG("            already added to hidden ratings");
+                  //omp_unset_lock(&printlock);
+                }              
+              }
+            }else{
+              if(Global_Debug && 0) {
+                //omp_set_lock(&printlock);
+                //LOG("th_id : "<<th_id);
+                LOG("         already rated");
+                //omp_unset_lock(&printlock);
+              }
+            }
+          }
+        
+        if(Global_Debug && 0) {
+          omp_set_lock(&printlock);
+          LOG("th_id : "<<th_id);
+          LOG("user : "<<user);
+          LOG("user_itemID : "<<user_itemID);
+          LOG("really_rated_itemIDS["<<user<<"].size() : "<<really_rated_itemIDS.size());
+          LOG("hidden_rated_itemIDS["<<user<<"].size() : "<<hidden_rated_itemIDS.size());
+          LOG("new_num_ratings["<<user<<"] : "<<new_num_ratings[user]);
+
+          gettimeofday(&program_end, NULL);
+          program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
+          LOG("cpu_compute_hidden_values run time so far: "<<readable_time(program_time));
+          omp_unset_lock(&printlock);
+        }
+      }
+      new_num_ratings[user] = static_cast<int>(really_rated_itemIDS.size()) + static_cast<int>(hidden_rated_itemIDS.size());
+
+      omp_set_lock(&worklock);
+      int temp = max_num_new_ratings;
+      max_num_new_ratings = std::max(static_cast<int>(hidden_rated_itemIDS.size()),max_num_new_ratings);
+      if(temp != max_num_new_ratings)
+        user_with_max_num_new_ratings = (int)user;
+      omp_unset_lock(&worklock);
+
+      really_rated_itemIDS.erase ( really_rated_itemIDS.begin(), really_rated_itemIDS.end() );
+      hidden_rated_itemIDS.erase ( hidden_rated_itemIDS.begin(), hidden_rated_itemIDS.end() );
+    }// end for user
+
+  }// end parallel
+  
+  //now build new crs arrays
+  int new_coo_count = cpu_asum<int>(ratings_rows, new_num_ratings);
+  if(Global_Debug){
+    save_host_array_to_file<int>(new_num_ratings, ratings_rows, "new_num_ratings");
+  }
+  if(print){
+    LOG("old coo count : "<<num_entries);
+    LOG("new_coo_count : "<<new_coo_count);
+    LOG("maximum hidden ratings added for a given user : "<<max_num_new_ratings);
+    LOG("user with maximum hidden ratings added : "<<user_with_max_num_new_ratings);
+  }
+  cum_asum<int>(ratings_rows, new_num_ratings);
+  if(Global_Debug){
+    save_host_array_to_file<int>(new_num_ratings, ratings_rows, "cummulative_new_num_ratings");
+  }
+  (*coo_format_ratingsMtx_userID_host_new) = (int *)  malloc(new_coo_count *  SIZE_OF(int)); 
+  (*coo_format_ratingsMtx_itemID_host_new) = (int *)  malloc(new_coo_count *  SIZE_OF(int)); 
+  (*coo_format_ratingsMtx_rating_host_new) = (float *)malloc(new_coo_count *  SIZE_OF(float)); 
+  checkErrors((*coo_format_ratingsMtx_userID_host_new));
+  checkErrors((*coo_format_ratingsMtx_itemID_host_new));
+  checkErrors((*coo_format_ratingsMtx_rating_host_new));
+
+  //gettimeofday(&program_start, NULL);
+  //Global_Debug = true;
+  // #ifdef _OPENMP
+  //   nthreads = 1;
+  //   omp_set_num_threads(nthreads);
+  // #endif
+  #pragma omp parallel shared(nthreads)
+  {
+    int th_id = 0;
+    #ifdef _OPENMP
+      th_id = omp_get_thread_num();
+    #endif
+    for(long long int user = (long long int)th_id; user < ratings_rows; user += (long long int)nthreads){
+      //for(long long int user = (long long int)0; user < ratings_rows; user += (long long int)1){
+      bool thread_debug = false;
+      if(Global_Debug) {
+        //omp_set_lock(&printlock);
+        LOG("th_id : "<<th_id);
+        LOG("user : "<<user);
+        thread_debug = true;
+        //omp_unset_lock(&printlock);
+      }
+      long long int first_place = (long long int)0;
+      if(user != (long long int)0){
+        first_place = new_num_ratings[user - 1];
+      }
+      long long int place_ = first_place;
+
+      std::set<int> really_rated_itemIDS;
+      std::map<int, std::pair <float,float> > hidden_rated_itemIDS;
+      // std::set<int> hidden_rated_itemIDS;
+      for(int i = csr_format_ratingsMtx_userID_host[user]; i < csr_format_ratingsMtx_userID_host[user + 1]; i++){
+        int user_itemID = coo_format_ratingsMtx_itemID_host[i];
+        really_rated_itemIDS.insert(user_itemID);
+        (*coo_format_ratingsMtx_userID_host_new)[place_] = user;
+        (*coo_format_ratingsMtx_itemID_host_new)[place_] = user_itemID;
+        (*coo_format_ratingsMtx_rating_host_new)[place_] = coo_format_ratingsMtx_rating_host[i];
+        place_ +=(long long int)1;  
+      }
+      int vec_length = 0;
+      for(int i = csr_format_ratingsMtx_userID_host[user]; i < csr_format_ratingsMtx_userID_host[user + 1]; i++){
+        int user_itemID = coo_format_ratingsMtx_itemID_host[i];
+        //which items have item user_itemID listed as a similar item? 
+        vec_length = (*top_N_most_sim_itemIDs_host)[user_itemID].size();
+        if(Global_Debug || thread_debug) {
+          omp_set_lock(&printlock);
+          LOG("   user_itemID : "<<user_itemID);
+          LOG("   vec_length : "<<vec_length);
+          omp_unset_lock(&printlock);
+        }
+        for(long long int j = (long long int)0; j < (long long int)vec_length; j+=(long long int)1){
+          int other_similar_itemID = (*top_N_most_sim_itemIDs_host)[user_itemID][j];
+          // make sure the user didn't actually rate the item
+          if(really_rated_itemIDS.find(other_similar_itemID) == really_rated_itemIDS.end()){
+            float add_to_num = coo_format_ratingsMtx_rating_host[i] * (*top_N_most_sim_item_similarity_host)[user_itemID][j];
+            float add_to_denom = (*top_N_most_sim_item_similarity_host)[user_itemID][j]; 
+            //check if you have already added this hidden rating
+            std::map<int, std::pair <float,float> >::iterator it = hidden_rated_itemIDS.find(other_similar_itemID);
+            if(it == hidden_rated_itemIDS.end()){
+              std::pair <float,float> product1; 
+              product1 = std::make_pair(add_to_num, add_to_denom);
+              hidden_rated_itemIDS[other_similar_itemID] = product1;
+              if((Global_Debug || thread_debug) && 0) {
+                //omp_set_lock(&printlock);
+                //LOG("th_id : "<<th_id);
+                LOG("   user_itemID : "<<user_itemID);
+                LOG("   other_similar_itemID : "<<other_similar_itemID);
+                LOG("   num : "<<add_to_num);
+                LOG("   denom : "<<add_to_denom);
+                //omp_unset_lock(&printlock);
+              }
+            }else{
+              // std::pair <float,float> num_denum = it->second;
+              // num_denum.first += add_to_num;
+              // num_denum.second += add_to_denom; 
+              // hidden_rated_itemIDS[other_similar_itemID] = num_denum;
+              it->second.first += add_to_num;
+              it->second.second += add_to_denom;
+              if((Global_Debug || thread_debug) && 0) {
+                //omp_set_lock(&printlock);
+                //LOG("th_id : "<<th_id);
+                LOG("   user_itemID : "<<user_itemID);
+                LOG("   other_similar_itemID : "<<other_similar_itemID);
+                LOG("   num : "<<it->second.first);
+                LOG("   denom : "<<it->second.second);
+                //omp_unset_lock(&printlock);
+              }
+            }
+          } //if not really rated
+        } //for j
+      } // for i item
+      really_rated_itemIDS.erase ( really_rated_itemIDS.begin(), really_rated_itemIDS.end() );
+      for (std::map<int, std::pair <float,float> >::iterator it = hidden_rated_itemIDS.begin(); it != hidden_rated_itemIDS.end(); it++ )
+      {
+        (*coo_format_ratingsMtx_userID_host_new)[place_] = user;
+
+        int user_itemID = it->first;
+        if(user_itemID < 0 || user_itemID >= (int)ratings_cols){
+          ABORT_IF_EQ(0, 0, "Item ID is out of bounds");
+        }
+        (*coo_format_ratingsMtx_itemID_host_new)[place_] = user_itemID;
+
+        float new_rating = (float)0.0;
+        if(std::abs(it->second.second) > 0.0001){
+         new_rating = (it->second.first) / (it->second.second);
+        }
+        if (::isinf(new_rating) || ::isnan(new_rating)){
+          ABORT_IF_EQ(0, 0, "new rating is bad");
+        }
+        (*coo_format_ratingsMtx_rating_host_new)[place_] = new_rating;
+        place_ +=(long long int)1;            
+      }
+      hidden_rated_itemIDS.erase ( hidden_rated_itemIDS.begin(), hidden_rated_itemIDS.end() );
+      // sort
+      // thrust::sort_by_key(thrust::host, 
+      //   (*coo_format_ratingsMtx_itemID_host_new) + first_place, 
+      //   (*coo_format_ratingsMtx_itemID_host_new) + place_ , 
+      //   (*coo_format_ratingsMtx_rating_host_new) + first_place);
+
+      // quickSort_by_key<int,float>((*coo_format_ratingsMtx_itemID_host_new) + first_place, 0, place_ - 1, 
+      //                  (*coo_format_ratingsMtx_rating_host_new) + first_place);
+
+      if(Global_Debug || thread_debug ) {
+        omp_set_lock(&printlock);
+        //LOG("th_id : "<<th_id);
+        LOG("user : "<<user);
+        // LOG("first_place : "<<first_place);
+        // LOG("last_place : "<<place_ - 1);
+        LOG("num to sort : "<<place_ - first_place);
+
+        gettimeofday(&program_end, NULL);
+        program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
+        LOG("cpu_compute_hidden_values run time so far: "<<readable_time(program_time));
+        omp_unset_lock(&printlock);
+      }
+    }// end for user
+  }// end parallel
+  if(Global_Debug){
+      int ran_ind = 0;
+      //getRandIntsBetween(&ran_ind, 0, (int)ratings_rows - 2, 1);
+      int first_place = ((*coo_format_ratingsMtx_userID_host_new)[ran_ind]);
+      int last_place = ((*coo_format_ratingsMtx_userID_host_new)[ran_ind + 2]);
+      LOG("random row index : "<<ran_ind);
+      LOG("first coo index : "<<first_place);
+      LOG("last coo index : "<<last_place - 1);
+      LOG("number of entries to print : "<<last_place - first_place);
+      save_host_array_to_file<int>((*coo_format_ratingsMtx_userID_host_new) + ran_ind, 3, "coo_format_ratingsMtx_userID_host_new");
+      save_host_array_to_file<int>((*coo_format_ratingsMtx_itemID_host_new) + first_place, last_place - first_place, "coo_format_ratingsMtx_itemID_host_new");
+      save_host_array_to_file<float>((*coo_format_ratingsMtx_rating_host_new) + first_place, last_place - first_place,  "coo_format_ratingsMtx_rating_host_new");
+  }
+  gettimeofday(&program_end, NULL);
+  program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
+  if(print) LOG("cpu_compute_hidden_values run time : "<<readable_time(program_time));
+  return (long long int)new_coo_count;
+}
+
+
 /* This function takes last element as pivot, places
    the pivot element at its correct position in sorted
     array, and places all smaller (smaller than pivot)
    to left of pivot and all greater elements to right
    of pivot */
-template<typename Dtype>
-int partition (Dtype* x, int low_index, int high_index, int* indicies)
+template<typename Dtype, typename Itype>
+int partition (Dtype* x, int low_index, int high_index, Itype* indicies)
 {
-    // pivot (Element to be placed at right position)
-    Dtype pivot = x[high_index];  
-    Dtype temp = 0.0;
-    int temp_ = 0;
-    int i = (low_index - 1);  // Index of smaller element
+  bool debug = false;
+  // pivot (Element to be placed at right position)
+  Dtype pivot = x[high_index];  
+  Dtype temp = 0.0;
+  Itype temp_ = 0;
+  int i = (low_index - 1);  // Index of smaller element
 
-    for (int j = low_index; j < high_index; j++)
-    {
-        // If current element is smaller than the pivot
-        if (x[j] < pivot)
-        {
-            i++;    // increment index of smaller element
-            temp = x[i];
-            x[i] = x[j];
-            x[j] = temp;
-            temp_ = indicies[i];
-            indicies[i] = indicies[j];
-            indicies[j] = temp_;
-        }
-    }
-    temp = x[i + 1];
-    x[i + 1] = x[high_index];
-    x[high_index] = temp;
-    temp_ = indicies[i + 1];
-    indicies[i + 1] = indicies[high_index];
-    indicies[high_index] = temp_;
-    return (i + 1);
+  for (int j = low_index; j < high_index; j++)
+  {
+      // If current element is smaller than the pivot
+      if (x[j] < pivot)
+      {
+          i++;    // increment index of smaller element
+          temp = x[i];
+          x[i] = x[j];
+          x[j] = temp;
+          temp_ = indicies[i];
+          indicies[i] = indicies[j];
+          indicies[j] = temp_;
+      }
+  }
+  temp = x[i + 1];
+  x[i + 1] = x[high_index];
+  x[high_index] = temp;
+  temp_ = indicies[i + 1];
+  indicies[i + 1] = indicies[high_index];
+  indicies[high_index] = temp_;
+  return (i + 1);
 }
 
-template int partition<int>(int* x, int low_index, int high_index, int* indicies);
-template int partition<float>(float* x, int low_index, int high_index, int* indicies);
+template int partition<int, int>(int* x, int low_index, int high_index, int* indicies);
+template int partition<float, int>(float* x, int low_index, int high_index, int* indicies);
+template int partition<int, float>(int* x, int low_index, int high_index, float* indicies);
 
 
 /* low  --> Starting index,  high  --> Ending index */
-template<typename Dtype>
-void quickSort_by_key(Dtype* x, int low_index, int high_index, int* indicies)
+template<typename Dtype, typename Itype>
+void quickSort_by_key(Dtype* x, int low_index, int high_index, Itype* indicies)
 {
-  ABORT_IF_NEQ(0, 1, "function not ready");
-  if (x[low_index] < x[high_index])
+  bool debug = false;
+  //ABORT_IF_NEQ(0, 1, "function not ready");
+  if (low_index < high_index)
   {
     /* pi is partitioning index, arr[pi] is now
        at right place */
-    int pi = partition<Dtype>(x, low_index, high_index, indicies);
-
-    quickSort_by_key<Dtype>(x, low_index, pi - 1, indicies);  // Before pi
-    quickSort_by_key<Dtype>(x, pi + 1, high_index, indicies); // After pi
+    int pi = partition<Dtype,Itype>(x, low_index, high_index, indicies);
+    if(debug){
+      LOG("pi : "<<pi);
+      if(low_index < 0 || high_index > 1316){
+        LOG("low_index : "<<low_index);
+        LOG("high_index : "<<high_index);
+        ABORT_IF_EQ(0, 0, "uh oh!");
+      }
+    }
+    quickSort_by_key<Dtype,Itype>(x, low_index, pi - 1, indicies);  // Before pi
+    quickSort_by_key<Dtype,Itype>(x, pi + 1, high_index, indicies); // After pi
   }
 }
 
-template void quickSort_by_key<int>(int* x, int low_index, int high_index, int* indicies);
-template void quickSort_by_key<float>(float* x, int low_index, int high_index, int* indicies);
+template void quickSort_by_key<int, int>(int* x, int low_index, int high_index, int* indicies);
+template void quickSort_by_key<float, int>(float* x, int low_index, int high_index, int* indicies);
+template void quickSort_by_key<int, float>(int* x, int low_index, int high_index, float* indicies);
 
+template<typename Dtype>
+void cpu_sort_csr_colums_kernel(long long int start, int num, 
+                                const int *csr_format_ratingsMtx_userID_dev,
+                                int* coo_format_ratingsMtx_itemID_dev,
+                                Dtype* coo_format_ratingsMtx_rating_dev) 
+{
+  bool debug = false;
+
+  struct timeval program_start, program_end;
+  double program_time;
+  gettimeofday(&program_start, NULL);
+
+  int nthreads = 1;
+  #ifdef _OPENMP
+    int nProcessors = omp_get_max_threads();
+    nthreads = std::min(nProcessors, num);
+    omp_set_num_threads(nthreads);
+    omp_lock_t printlock;
+    omp_init_lock(&printlock);
+  #endif
+
+  #pragma omp parallel shared(nthreads)
+  {
+    int th_id = 0;
+    #ifdef _OPENMP
+      th_id = omp_get_thread_num();
+    #endif
+    for(int i = th_id; i < num; i += nthreads){
+
+      long long int j = (long long int)i + start;
+      int first_place = (csr_format_ratingsMtx_userID_dev[j]);
+      int last_place = (csr_format_ratingsMtx_userID_dev[j + (long long int)1] - 1);
+
+      quickSort_by_key<int,Dtype>(coo_format_ratingsMtx_itemID_dev, first_place, last_place, coo_format_ratingsMtx_rating_dev);
+
+      if(debug && th_id == 0){
+        omp_set_lock(&printlock);
+        LOG("i : "<<i);
+        LOG("first_place : "<<first_place);
+        LOG("last_place : "<<last_place);
+        gettimeofday(&program_end, NULL);
+        program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
+        LOG("run time so far : "<<readable_time(program_time)<<std::endl);  
+        omp_unset_lock(&printlock);
+      }    
+    }
+  }
+}
+
+template <>
+void cpu_sort_csr_colums<float>(const long long int ratings_rows, 
+                                const int *csr_format_ratingsMtx_userID_host,
+                                int* coo_format_ratingsMtx_itemID_host,
+                                float* coo_format_ratingsMtx_rating_host, 
+                                long long int num_entries_,
+                                std::string preprocessing_path)
+{
+  if(1) LOG("called cpu_sort_csr_colums");
+  bool debug = true;
+
+  struct timeval program_start, program_end;
+  double program_time;
+  gettimeofday(&program_start, NULL);
+
+  long long int CUDA_NUM_BLOCKS_TEMP = CUDA_NUM_BLOCKS;
+  long long int CUDA_NUM_THREADS_TEMP = CUDA_NUM_THREADS;
+  if(0){
+    if(debug) LOG(" changing CUDA_NUM_BLOCKS_TEMP, and CUDA_NUM_THREADS_TEMP values") ;
+    CUDA_NUM_BLOCKS_TEMP = (long long int)1;
+    CUDA_NUM_THREADS_TEMP = (long long int)1;
+  }
+
+  long long int num_cpu_blocks = (ratings_rows + CUDA_NUM_THREADS_TEMP - (long long int)1) / CUDA_NUM_THREADS_TEMP;
+
+  if(debug){
+    LOG("CUDA_NUM_BLOCKS_TEMP : "<<CUDA_NUM_BLOCKS_TEMP);
+    LOG("CUDA_NUM_THREADS_TEMP : "<<CUDA_NUM_THREADS_TEMP);
+  }
+
+  if ( 0 /*num_cpu_blocks > CUDA_NUM_BLOCKS_TEMP*/){
+    long long int num_loops = (long long int)0;
+    long long int num_entries = (long long int)(CUDA_NUM_BLOCKS_TEMP * CUDA_NUM_THREADS_TEMP);
+    long long int spot = (long long int)0;
+    if(too_big(num_entries) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
+
+    while (num_cpu_blocks > CUDA_NUM_BLOCKS_TEMP){
+      if(debug){
+        LOG("num_cpu_blocks : "<<num_cpu_blocks);
+        LOG("num_loops : "<<num_loops);
+        LOG("spot : "<<spot);
+        LOG("num_entries : "<<num_entries);
+
+        int first_place = (csr_format_ratingsMtx_userID_host[spot]);
+        int last_place = (csr_format_ratingsMtx_userID_host[spot + num_entries]); 
+        LOG("first_place : "<<first_place);
+        LOG("last_place : "<<last_place - 1);
+        LOG("num_entries : "<<last_place - first_place);
+        save_host_array_to_file<int>(csr_format_ratingsMtx_userID_host + spot, (int)num_entries + 1, preprocessing_path + "csr_format_ratingsMtx_userID_host");
+        save_host_array_to_file<int>(coo_format_ratingsMtx_itemID_host + first_place, last_place - first_place, preprocessing_path + "coo_format_ratingsMtx_itemID_host");
+        save_host_array_to_file<float>(coo_format_ratingsMtx_rating_host + first_place, last_place - first_place, preprocessing_path + "coo_format_ratingsMtx_rating_host");
+      }
+      cpu_sort_csr_colums_kernel<float>(spot, (int)num_entries,
+                                                                                        csr_format_ratingsMtx_userID_host,
+                                                                                        coo_format_ratingsMtx_itemID_host,
+                                                                                        coo_format_ratingsMtx_rating_host);
+      
+      num_cpu_blocks = num_cpu_blocks - (long long int)CUDA_NUM_BLOCKS_TEMP;
+      num_loops += (long long int)1;
+      spot = num_loops * num_entries;
+      if(debug){
+        int first_place = (csr_format_ratingsMtx_userID_host[spot]);
+        int last_place = (csr_format_ratingsMtx_userID_host[spot + num_entries]);
+        save_host_array_to_file<int>(csr_format_ratingsMtx_userID_host + spot, (int)num_entries + 1, preprocessing_path + "csr_format_ratingsMtx_userID_host");
+        save_host_array_to_file<int>(coo_format_ratingsMtx_itemID_host + first_place, last_place - first_place, preprocessing_path + "coo_format_ratingsMtx_itemID_host");
+        save_host_array_to_file<float>(coo_format_ratingsMtx_rating_host + first_place, last_place - first_place, preprocessing_path + "coo_format_ratingsMtx_rating_host");
+
+        gettimeofday(&program_end, NULL);
+        program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
+        LOG("cpu_sort_csr_colums run time loop "<<num_loops<<" : "<<readable_time(program_time)<<std::endl);              
+      }
+    }
+    // spot is the number of entries done so far
+    // total - (done) = left to go 
+    cpu_sort_csr_colums_kernel<float>(spot, (int)(ratings_rows - spot),
+                                                                            csr_format_ratingsMtx_userID_host,
+                                                                            coo_format_ratingsMtx_itemID_host,
+                                                                            coo_format_ratingsMtx_rating_host);
+
+  }else{
+    if(too_big(ratings_rows) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
+    if(debug){
+      LOG("num_cpu_blocks : "<<num_cpu_blocks);
+    }
+    cpu_sort_csr_colums_kernel<float>((long long int)0, (int)ratings_rows,
+                                      csr_format_ratingsMtx_userID_host,
+                                      coo_format_ratingsMtx_itemID_host,
+                                      coo_format_ratingsMtx_rating_host);
+  }
+  if(1) LOG("finished call to cpu_sort_csr_colums") ;
+  gettimeofday(&program_end, NULL);
+  program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
+  if(1) LOG("cpu_sort_csr_colums run time : "<<readable_time(program_time)<<std::endl);
+}
+
+void cpu_sort_csr_colums_test()
+{
+
+  int num_rows = 1;
+  int num_entries = 1317;
+
+  int csr_format_ratingsMtx_userID_host[num_rows + 1] = {0, num_entries};
+  int coo_format_ratingsMtx_itemID_host[num_entries] = {0, 8, 18, 35, 55, 59, 86, 94, 103, 109, 110, 125, 149, 152, 157, 159, 160, 162, 164, 167, 172, 179, 184, 207, 229, 230, 234, 248, 257, 265, 279, 281, 287, 315, 316, 343, 348, 352, 355, 376, 379, 392, 404, 433, 441, 456, 470, 473, 474, 479, 493, 499, 526, 545, 550, 552, 554, 557, 585, 586, 589, 591, 598, 607, 609, 672, 677, 732, 735, 740, 744, 749, 761, 777, 779, 783, 785, 787, 809, 831, 840, 857, 860, 884, 898, 902, 903, 907, 909, 911, 912, 919, 921, 922, 939, 952, 967, 968, 990, 1006, 1009, 1010, 1012, 1013, 1015, 1017, 1018, 1026, 1027, 1029, 1030, 1031, 1034, 1072, 1083, 1085, 1087, 1100, 1125, 1126, 1134, 1147, 1174, 1177, 1196, 1198, 1202, 1203, 1205, 1206, 1208, 1209, 1211, 1212, 1217, 1219, 1220, 1222, 1223, 1224, 1227, 1232, 1233, 1236, 1240, 1241, 1244, 1246, 1247, 1249, 1251, 1252, 1253, 1254, 1255, 1256, 1259, 1262, 1264, 1269, 1271, 1273, 1274, 1275, 1281, 1282, 1283, 1284, 1287, 1289, 1296, 1300, 1302, 1306, 1319, 1338, 1339, 1344, 1346, 1355, 1358, 1370, 1371, 1372, 1374, 1375, 1379, 1384, 1387, 1393, 1395, 1406, 1407, 1428, 1484, 1494, 1498, 1516, 1526, 1537, 1543, 1550, 1551, 1555, 1561, 1572, 1582, 1586, 1590, 1591, 1605, 1607, 1609, 1616, 1624, 1638, 1644, 1652, 1675, 1680, 1681, 1701, 1703, 1706, 1720, 1730, 1731, 1747, 1783, 1821, 1830, 1857, 1861, 1866, 1880, 1881, 1910, 1916, 1917, 1918, 1920, 1922, 1951, 1952, 1953, 1960, 1964, 1967, 1981, 1999, 2000, 2001, 2002, 2004, 2009, 2010, 2011, 2013, 2015, 2016, 2018, 2027, 2032, 2033, 2037, 2042, 2049, 2050, 2052, 2053, 2057, 2075, 2077, 2087, 2090, 2091, 2094, 2104, 2113, 2114, 2115, 2133, 2136, 2138, 2143, 2152, 2159, 2160, 2161, 2185, 2211, 2244, 2267, 2272, 2299, 2310, 2316, 2323, 2328, 2337, 2353, 2354, 2365, 2372, 2380, 2381, 2401, 2403, 2405, 2406, 2411, 2412, 2413, 2419, 2420, 2421, 2428, 2448, 2449, 2454, 2466, 2469, 2470, 2487, 2501, 2527, 2528, 2548, 2550, 2565, 2570, 2615, 2632, 2639, 2641, 2642, 2653, 2659, 2661, 2693, 2698, 2700, 2705, 2709, 2716, 2719, 2725, 2727, 2734, 2787, 2788, 2790, 2794, 2796, 2797, 2806, 2807, 2809, 2857, 2866, 2870, 2875, 2878, 2879, 2904, 2914, 2915, 2923, 2947, 2948, 2950, 2952, 2984, 2985, 2986, 2990, 2992, 2996, 3017, 3021, 3032, 3038, 3043, 3051, 3061, 3069, 3073, 3074, 3086, 3090, 3104, 3107, 3113, 3133, 3146, 3189, 3195, 3197, 3199, 3242, 3252, 3253, 3256, 3272, 3274, 3299, 3347, 3362, 3363, 3364, 3395, 3396, 3399, 3408, 3420, 3434, 3438, 3439, 3447, 3470, 3480, 3507, 3526, 3549, 3550, 3577, 3592, 3622, 3623, 3634, 3637, 3638, 3653, 3670, 3675, 3680, 3685, 3698, 3702, 3703, 3704, 3705, 3726, 3735, 3739, 3741, 3744, 3762, 3770, 3784, 3792, 3801, 3806, 3825, 3827, 3831, 3835, 3876, 3878, 3916, 3929, 3945, 3947, 3948, 3955, 3958, 3971, 3976, 3980, 3983, 4014, 4021, 4033, 4039, 4080, 4084, 4103, 4123, 4131, 4197, 4209, 4213, 4214, 4222, 4261, 4269, 4274, 4309, 4326, 4342, 4343, 4366, 4368, 4382, 4387, 4395, 4396, 4404, 4436, 4437, 4439, 4443, 4530, 4532, 4541, 4543, 4545, 4551, 4552, 4557, 4579, 4586, 4590, 4620, 4635, 4637, 4642, 4657, 4672, 4677, 4680, 4700, 4717, 4733, 4734, 4811, 4826, 4847, 4854, 4859, 4864, 4875, 4885, 4886, 4901, 4908, 4928, 4962, 4965, 4967, 4968, 4972, 4973, 4978, 4994, 5026, 5037, 5040, 5042, 5049, 5059, 5061, 5071, 5085, 5088, 5092, 5093, 5099, 5104, 5155, 5180, 5181, 5192, 5217, 5218, 5245, 5246, 5253, 5280, 5290, 5293, 5307, 5308, 5312, 5348, 5377, 5393, 5410, 5417, 5418, 5426, 5432, 5437, 5440, 5444, 5451, 5458, 5462, 5480, 5488, 5497, 5501, 5506, 5555, 5567, 5608, 5617, 5629, 5648, 5689, 5704, 5711, 5780, 5781, 5783, 5809, 5832, 5852, 5949, 5961, 5963, 5970, 5973, 5994, 6015, 6053, 6061, 6077, 6098, 6103, 6137, 6139, 6141, 6156, 6173, 6228, 6249, 6263, 6272, 6273, 6282, 6300, 6322, 6349, 6364, 6376, 6382, 6439, 6502, 6529, 6533, 6536, 6540, 6563, 6600, 6663, 6668, 6702, 6720, 6726, 6730, 6733, 6747, 6750, 6765, 6784, 6799, 6856, 6873, 6906, 6933, 6951, 6966, 6986, 6995, 7003, 7012, 7021, 7062, 7089, 7098, 7114, 7115, 7122, 7146, 7190, 7230, 7253, 7256, 7307, 7309, 7312, 7321, 7359, 7360, 7361, 7396, 7418, 7447, 7457, 7563, 7568, 7586, 7697, 7702, 7757, 7765, 7791, 7801, 7819, 7837, 7882, 7886, 7921, 7923, 7924, 7925, 7981, 8015, 8018, 8041, 8124, 8238, 8268, 8359, 8360, 8370, 8386, 8490, 8520, 8530, 8591, 8639, 8643, 8665, 8669, 8672, 8692, 8741, 8750, 8762, 8765, 8805, 8809, 8814, 8816, 8830, 8860, 8873, 8884, 8888, 8893, 8956, 8971, 8975, 8982, 8983, 8984, 8987, 25748, 25749, 25759, 25793, 25797, 25804, 25824, 25889, 25941, 26073, 26121, 26171, 26286, 26337, 26429, 26506, 26584, 26661, 26709, 26766, 26775, 26834, 26864, 26945, 27092, 27104, 27191, 27316, 27433, 27659, 27667, 27727, 27771, 27800, 27838, 30792, 30809, 30893, 31037, 31269, 31426, 31430, 31657, 31749, 31792, 31877, 31949, 32010, 32229, 32360, 32550, 32586, 32934, 33492, 33678, 33793, 33833, 33939, 34047, 34149, 34318, 34658, 35720, 37728, 37948, 40814, 41563, 41565, 41568, 41819, 41879, 42542, 42737, 43674, 43918, 44154, 44902, 44971, 45080, 45446, 45498, 45721, 48393, 48515, 48773, 49081, 49662, 49751, 49768, 49816, 50357, 50797, 50871, 51076, 52107, 52282, 52547, 52580, 52703, 52721, 52999, 53372, 53463, 54000, 54009, 54048, 54825, 54832, 55342, 55468, 56547, 56873, 58558, 58609, 58769, 58880, 59314, 59614, 60068, 60283, 60355, 61239, 61933, 63780, 65467, 65681, 66050, 67297, 68156, 68532, 68589, 68953, 69301, 69608, 69752, 69843, 70750, 71026, 71279, 71932, 71985, 72275, 72303, 72335, 72652, 72924, 72935, 73161, 73358, 73474, 74160, 74316, 74477, 74856, 75976, 75978, 76021, 76694, 76828, 77537, 77775, 77807, 77943, 78024, 78412, 78695, 78859, 79105, 79423, 79635, 79766, 80205, 80423, 80567, 80679, 80718, 80824, 80949, 81392, 81833, 82122, 82303, 82752, 83050, 83670, 83772, 84831, 84988, 86203, 86307, 86398, 86714, 86755, 87030, 87050, 87357, 88098, 88124, 88165, 88328, 89013, 89515, 89548, 89550, 89669, 89766, 89796, 89832, 89871, 90085, 90379, 90534, 90650, 90774, 90776, 91066, 91153, 91418, 91424, 91557, 91559, 91609, 91691, 91708, 91767, 91895, 92084, 92470, 92675, 93036, 93195, 93329, 93392, 93483, 93655, 93784, 94432, 94834, 95587, 95694, 95764, 96293, 96761, 96844, 97767, 97818, 97909, 97947, 97970, 98594, 98765, 98804, 99011, 99053, 99084, 99269, 99272, 99924, 100069, 100495, 100945, 101225, 101286, 101445, 101733, 101824, 101943, 101951, 102011, 102089, 102398, 102424, 102589, 102597, 103102, 103379, 103436, 103518, 103562, 103636, 103662, 103670, 103744, 103812, 104090, 104098, 104639, 104812, 105307, 105480, 105812, 106140, 106396, 106526, 106701, 106867, 107182, 107294, 107381, 107483, 108011, 108047, 108075, 108523, 109031, 109054, 109061, 109105, 109152, 109324, 109572, 109770, 110045, 110115, 110176, 110178, 110228, 110319, 110351, 110534, 110556, 110817, 110896, 111232, 111289, 111311, 112061, 112331, 112394, 112484, 112600, 112930, 112958, 113015, 113219, 113231, 113357, 113605, 113848, 113905, 114279, 114281, 114419, 114576, 115163, 115290, 115378, 115621, 115928, 116856, 116926, 116932, 116988, 117361, 117569, 117581, 117929, 118176, 118197, 118707, 118773, 118853, 118859, 119146, 119311, 119423, 119431, 119795, 120431, 120854, 120933, 121321, 121323, 122287, 123406, 124301, 124536, 124561, 125530, 127629, 128168, 128172, 128444, 128519, 128633, 128861, 129067, 130070, 130348, 130473, 130957, 130983, 131010, 1, 28, 31, 46, 49, 111, 150, 222, 252, 259, 292, 295, 317, 336, 366, 540, 588, 592, 652, 918, 923, 1008, 1035, 1078, 1079, 1088, 1089, 1096, 1135, 1192, 1195, 1197, 1199, 1200, 1207, 1213, 1214, 1216, 1218, 1221, 1239, 1242, 1245, 1248, 1257, 1258, 1260, 1261, 1265, 1277, 1290, 1303, 1320, 1332, 1347, 1349, 1357, 1369, 1373, 1386, 1524, 1583, 1749, 1847, 1919, 1966, 1993, 1996, 2020, 2099, 2117, 2137, 2139, 2142, 2172, 2173, 2192, 2193, 2252, 2287, 2290, 2541, 2627, 2643, 2647, 2663, 2682, 2691, 2715, 2760, 2761, 2803, 2871, 2917, 2943, 2946, 2958, 2967, 2999, 3029, 3036, 3080, 3152, 3264, 3437, 3475, 3478, 3488, 3498, 3888, 3931, 3995, 3996, 4010, 4026, 4104, 4127, 4132, 4225, 4305, 4445, 4466, 4570, 4719, 4753, 4877, 4895, 4910, 4914, 4940, 4979, 4992, 5025, 5038, 5039, 5145, 5170, 5539, 5678, 5796, 5815, 5897, 5951, 5998, 6092, 6241, 6332, 6501, 6538, 6753, 6754, 6773, 6806, 6833, 6887, 7000, 7044, 7045, 7152, 7163, 7246, 7386, 7388, 7437, 7448, 7453, 7481, 7756, 8367, 8481, 8506, 8635, 8689, 8960, 31695};
+  float coo_format_ratingsMtx_rating_host[num_entries] = {0.177706, -0.637103, -0.637103, -0.637103, -1.17237, -0.637103, -0.637103, -1.146, -0.637103, -0.137473, -0.326808, -1.11048, -0.155476, -0.440858, 0.674579, -1.94879, 0.674579, -0.637103, -1.94879, -1.94879, -1.94879, 0.674579, -0.637103, -0.478419, 0.674579, -0.637103, -0.637103, 0.674579, -1.16705, 0.674579, 0.674579, 0.674579, 0.674579, 0.674579, -0.637103, -0.637103, 0.674579, 0.462651, -0.0602304, -0.861401, -1.94879, -0.637103, 0.674579, -0.637103, -1.94879, 0.0303579, 0.674579, 0.674579, -0.274926, -0.486803, -1.94879, -0.637103, 0.0359569, -1.00097, 0.674579, 0.674579, 0.674579, -0.637103, -0.469645, 0.674579, 0.674579, 0.67458, -0.637103, -0.0297566, 0.674579, -0.637103, 0.674579, -1.94879, -0.528783, -0.637103, -1.28711, -0.293823, -0.637103, -0.125956, -0.644179, -0.637103, -1.19001, -0.670619, -0.637103, 0.674579, 3.29794, 0.0192334, -0.637103, -0.637103, -0.637103, 0.0426224, -0.251982, -0.274276, -0.0199693, -0.437627, -0.177032, -0.637103, -0.557999, -0.160624, 0.674579, -0.278596, -0.381082, -1.07516, 0.674579, -0.637103, -0.637103, -0.637103, -0.637103, -0.637103, -0.637103, -0.637103, 0.674579, 0.674579, -0.637103, -0.637103, -0.637103, 0.674579, -0.637103, 0.674579, 0.674579, 0.674579, 0.674579, -1.94879, -0.637103, -0.164661, 0.674579, -0.831809, -0.710015, -1.3044, 0.431595, -0.302686, -0.637103, -0.910546, -0.316508, -0.467197, -1.94879, 1.21624, -1.0206, -0.119223, -0.398339, -0.637103, -0.0200866, -1.94879, -1.94879, -0.193671, -0.247501, 0.674579, -0.117064, -0.637103, -0.4006, 0.0333618, -1.19973, -0.616105, -0.958377, -0.524093, -0.256905, -0.637103, -0.864431, -0.637103, 0.219958, 0.674579, -0.404372, -0.0602766, -0.272447, 0.473058, -0.673156, -0.426598, 0.674579, -0.844806, 0.674579, -1.94879, -0.637103, -0.623995, -0.280731, 0.674579, 0.67458, -0.215643, -0.637103, -0.0329604, 0.674579, 0.674579, -0.82628, -0.242388, -0.0664514, 0.362175, -0.637103, 0.674579, 0.674579, 0.674579, 0.674579, 0.674579, 0.674579, -1.94879, -0.637103, -0.0829305, -0.0604934, -0.637103, 0.674579, -0.637103, -0.637103, -1.94879, -0.637103, -0.637103, 0.67458, -1.94879, -0.428624, -0.637103, -1.94879, -0.637103, -0.415069, -1.94879, -1.01571, -0.435386, -0.637103, -0.637103, -1.94879, -1.94879, -0.120456, 0.00949191, -0.637103, 0.674579, 0.674579, -0.148218, 0.674579, -0.637103, 0.170818, -0.637103, 0.182678, -1.94879, 0.674579, -0.637103, 0.191381, 0.153274, -0.637103, -0.637103, -0.57337, -0.637103, 0.674579, -0.637103, -1.06701, -0.328279, -0.637103, -0.535967, -1.94879, -0.637103, -0.637103, -0.637103, -0.637103, -1.94879, 0.674579, 0.307902, 0.674579, -0.102854, -0.254629, -0.0436821, -1.12417, -1.94879, 0.255385, 0.674579, -0.830422, -0.521523, -1.94879, -0.637103, -0.637103, -0.637103, -0.778003, 0.791021, 0.674579, 0.195782, -0.637103, -0.637103, -0.637103, -0.637103, -0.637103, -0.406215, -1.94879, 0.143165, 0.674579, -0.0690882, -0.637103, -0.637103, -0.637103, 0.674579, 0.674579, -0.366569, 0.674579, 0.674579, 0.674579, 0.674579, 0.674579, -0.637103, -0.0551844, 0.67458, -1.27046, 0.129329, -0.637103, 0.674579, -0.637103, -0.637103, 0.674579, 0.674579, -1.94879, -0.637103, 0.0426347, -1.94879, -0.637103, -1.94879, -0.529162, -1.23139, -1.94879, -1.94879, -1.94879, -1.94879, 0.674579, 0.674579, -0.637103, 0.674579, 0.674579, 0.674579, -0.637103, -0.754389, -0.637103, -0.637103, -0.701621, 0.374468, 0.674579, 0.674579, -0.637103, 2.04119, -0.0594538, 0.674579, 0.372803, -0.0742494, 0.674579, -0.637103, 0.651898, -0.244879, -0.637103, 0.674579, -0.916603, -0.862378, -0.917509, -1.08289, -0.172581, -0.637103, 0.674579, -0.315244, -0.637103, -0.637103, -0.0161588, -0.637103, -0.637103, 0.674579, 0.674579, -0.301266, -0.637103, 0.674579, -0.637103, 0.674579, -0.637103, 0.674579, -0.637103, -0.637103, 0.0358773, 0.674579, -0.637103, -0.637103, -0.637103, -0.637103, -1.37229, 0.674579, -1.94879, -0.637103, -0.637103, -0.454708, -0.806231, -0.345035, 0.674579, -0.651668, -0.0316486, -0.637103, -0.637103, -0.253871, -0.637103, -1.16859, 0.674579, -0.637103, 0.674579, 0.674579, 0.674579, 0.674579, -0.637103, 0.674579, 0.674579, -1.23996, -0.637103, 0.674579, 0.148997, -1.94879, 0.277109, 0.674579, -0.103048, -0.637103, -0.637103, -0.637103, 0.202765, -0.272621, -0.0360244, -1.94879, 0.674579, 0.674579, -0.637103, -0.637103, -1.94879, -0.637103, 0.67458, 0.674579, -0.637103, -0.637103, -0.637103, -0.637103, -0.939542, -1.2072, -0.637103, 0.251636, 0.674579, 0.395388, 0.674579, 0.674579, 0.674579, 2.1697, 0.205222, 0.674579, -0.637103, -0.637103, 0.674579, -0.637103, 0.674579, 0.674579, 0.674579, -0.69779, 0.674579, 0.674579, 0.321634, 0.674579, 0.67458, -0.637103, 0.674579, -1.94879, 0.674579, -0.637103, -0.637103, 0.674579, 0.674579, -1.52034, 0.946077, -1.94879, 0.674579, -0.222471, 0.674579, 0.674579, 0.674579, -1.41221, 0.674579, -0.637103, -1.94879, 0.674579, -0.637103, -0.00356942, 0.674579, 0.674579, -0.637103, -0.272464, 0.223686, -0.637103, -1.41276, -0.637103, 0.674579, -0.637103, -1.94879, 0.674579, -0.637103, -1.94879, -1.29488, -0.637103, 0.674579, 0.674579, -1.94879, 0.674579, -1.94879, 0.20477, -1.12233, 0.195866, -0.383621, 0.674579, 0.674579, 0.178412, -0.637103, 0.674579, -1.6561, -0.786677, -1.94879, -0.637103, 0.338086, -1.94879, -1.94879, -1.94879, -1.94879, -0.637103, -1.94879, -1.50875, 0.00240074, 0.674579, -0.637103, -0.637103, -1.94879, -0.637103, 0.674579, 0.674579, -1.94879, -0.189671, 0.34467, 0.674579, -1.31835, 0.674579, 0.674579, -0.637103, -0.637103, 0.674579, -0.201652, -1.94879, -0.637103, -0.637103, -0.800606, -1.94879, 0.674579, 0.674579, 0.543248, 0.674579, -0.637103, -0.637103, -1.94879, 0.674579, -1.94879, -0.637103, -1.94879, -0.0160151, -1.94879, 0.674579, -0.182755, -1.94879, 0.674579, -0.637103, 0.674579, 0.674579, -0.75268, 0.674579, -0.637103, -0.637103, 0.674579, 0.674579, -0.637103, -0.637103, 0.674579, 0.674579, 0.674579, -0.637103, -1.94879, 0.674579, 0.318759, -0.637103, 0.674579, 0.67458, -0.637103, -1.36439, -0.0144304, 0.674579, -0.637103, -0.225503, 1.15468, 0.503029, -0.637103, -0.637103, 2.51199, -1.94879, -0.637103, -1.94879, -1.24546, -0.637103, 0.782777, -0.637103, -0.265776, 0.674579, -0.637103, -0.0997543, -1.94879, -0.637103, 0.345317, -0.637103, -0.637103, -0.637103, 0.448523, -0.637103, -0.637103, -0.637103, -0.637103, 0.674579, 0.674579, 0.674579, -0.637103, -0.637103, 0.67458, 0.674579, -0.637103, -0.637103, -0.637103, -0.637103, 0.674579, -0.637103, 0.210605, 0.674579, -0.637103, -1.94879, -0.637103, -0.637103, -0.637103, -0.637103, 0.674579, -0.137635, -0.637103, 0.674579, -0.637103, 0.674579, 3.29794, -0.637103, -0.637103, 0.674579, -0.637103, -0.637103, 0.674579, 1.39234, -1.94879, -0.637103, -0.198552, 0.674579, -0.547232, 0.674579, 0.330088, -0.451396, -0.637103, -1.94879, -1.39169, -0.637103, -1.94879, 0.67458, -0.348339, -0.637103, 0.674579, -0.637103, 0.674579, -0.637103, -1.94879, -1.11002, 0.393678, 0.674579, 0.418379, -0.637103, -0.637103, 1.03817, -0.768724, 0.674579, 2.35354, -0.637103, 0.67458, -0.0504983, -0.637103, 0.0784256, 3.29794, 0.67458, 0.674579, -0.637103, 0.674579, -0.637103, -0.637103, -1.94879, -1.94879, -0.637103, 0.674579, -0.637103, -0.0754003, -0.637103, -0.637103, -0.637103, -0.637103, 0.674579, 3.29794, -1.05553, 0.674579, -0.637103, -0.637103, 0.674579, -0.460676, -0.637103, -0.637103, 3.29794, -0.637103, 3.29795, -0.637103, 0.674579, -1.94879, -1.43924, -1.94879, -0.637103, -0.637103, -0.637103, -0.637103, 3.29794, 3.29794, -0.637103, 0.938161, 0.674579, 0.674579, -1.94879, -1.94879, -0.163584, -1.94879, -0.637103, 0.674579, 0.674579, 0.0920067, 3.29794, 0.674579, 0.674579, -0.637103, 3.29794, 0.674579, 0.674579, 0.674579, 0.674579, -0.637103, 0.674579, -0.637103, 0.674579, -0.616435, 0.674579, 0.674579, 0.674579, -0.637103, 0.674579, 0.674579, 0.674579, 0.674579, 0.674579, 0.674579, -1.94879, 3.29794, -0.637103, -1.94879, -1.94879, 3.29794, 3.29794, -0.637103, 0.674579, 0.674579, 3.29794, 3.29794, -0.637103, -0.637103, 0.674579, -0.637103, -0.637103, -0.637103, -0.637103, 0.674579, -0.637103, -0.637103, -1.17764, -0.637103, -0.637103, 0.674579, -0.637103, 0.074912, -0.637103, -0.637103, 0.674579, -0.637103, -0.637103, -1.94879, -0.637103, 0.674579, -0.637103, -0.637103, -0.637103, 0.674579, -0.637103, -0.637103, -0.637103, -0.637103, -0.637103, -1.94879, 0.674579, -0.637103, 0.674579, 0.674579, -0.637103, 0.316765, -0.637103, 0.979924, 0.674579, 1.88818, -0.637103, 0.674579, -0.637103, 0.674579, 0.674579, -0.637103, 0.674579, 0.674579, -0.637103, 0.764716, 0.674579, 0.674579, 1.98626, -0.637103, 0.674579, -0.637103, 0.674579, 0.674579, -1.94879, -0.637103, -0.637103, -1.94879, 0.674579, 0.674579, 0.674579, 0.674579, -0.271676, 0.674579, -0.637103, 0.674579, 0.674579, 0.674579, -0.637103, 0.674579, -0.637103, -1.94879, 0.674579, 0.674579, -0.637103, -0.637103, -0.637103, -0.637103, -0.637103, 1.98626, -0.637103, 0.674579, 0.674579, 0.674579, 0.674579, -0.637103, -0.637103, -1.94879, -0.637103, -0.637103, 0.674579, -1.94879, 2.54423, -0.637103, 0.674579, -0.637103, 1.02233, 0.674579, 0.674579, 0.674579, -0.637103, -0.637103, -0.637103, -0.637103, 0.674579, 0.674579, -0.637103, -0.637103, 0.674579, 0.674579, -0.637103, 0.674579, 0.674579, 0.674579, -0.637103, 0.674579, 0.674579, -0.637103, 0.674579, 0.674579, -0.637103, -0.637103, -0.637103, 0.674579, 0.674579, -0.637103, 0.674579, -1.94879, -0.637103, -1.94879, -0.637103, -1.94879, -0.637103, -0.637103, 0.674579, 0.674579, 0.674579, 0.674579, -0.637103, 0.674579, 0.674579, -0.637103, 0.674579, -0.637103, -0.637103, -1.94879, -0.637103, 0.674579, 0.674579, 0.674579, 0.674579, -0.637103, -0.637103, 0.674579, 0.674579, -0.637103, -0.637103, 0.674579, -0.637103, 0.674579, -0.637103, -0.637103, -0.637103, -0.637103, -0.637103, 0.674579, 0.674579, 0.674579, -0.637103, -0.637103, 0.674579, -0.637103, -0.637103, -0.637103, -0.637103, -0.637103, 0.674579, 0.674579, 0.674579, -0.637103, -0.637103, -1.94879, 0.674579, -0.637103, 0.674579, -0.637103, -0.637103, -0.637103, 0.674579, -0.637103, -0.637103, -1.94879, -1.94879, -0.637103, -0.637103, -0.637103, -0.637103, 0.67458, -0.637103, -0.637103, -0.637103, 0.674579, -0.637103, -0.637103, -0.637103, 0.674579, 0.674579, -0.637103, -0.637103, 0.674579, 0.674579, -0.637103, -0.637103, 0.674579, 0.674579, -0.637103, 0.674579, -0.637103, -0.637103, 0.674579, -0.637103, -0.637103, 0.674579, 0.67458, -0.637103, 0.674579, 0.674579, -0.637103, -0.637103, -0.637103, -0.637103, 0.674579, -0.637103, 0.674579, 0.674579, 0.674579, 0.674579, -0.637103, 0.674579, -0.637103, -0.637103, -0.637103, -0.637103, 0.674579, -0.637103, 0.674579, 0.674579, -0.637103, -0.637103, 0.674579, 0.674579, -0.637103, -0.637103, 0.674579, -0.637103, 0.674579, 0.674579, -0.637103, -0.637103, 0.674579, 0.674579, 0.674579, 0.674579, 0.674579, 0.67458, -0.637103, -0.637103, -0.637103, 0.674579, 0.674579, 0.674579, 0.674579, 0.674579, 0.674579, 0.674579, 0.674579, -0.637103, 0.674579, -0.637103, 0.674579, 0.674579, 0.674579, 0.674579, 0.674579, 0.674579, -0.637103, 0.674579, -0.637103, 0.674579, 0.674579, -0.637103, -0.637103, 0.674579, 0.674579, 0.674579, 0.674579, -0.637103, -0.637103, -0.637103, 0.674579, -0.637103, 0.674579, 0.674579, 0.674579, -0.637103, -1.94879, 0.674579, 0.674579, 0.674579, 0.674579, -0.637103, 0.674579, 0.674579, 0.674579, -0.637103, -0.637103, 0.674579, 0.674579, -0.637103, -0.637103, 0.674579, 0.674579, -0.637103, 0.674579, 0.674579, -0.637103, -0.637103, 0.674579, 0.674579, -0.637103, -0.637103, 0.674579, -0.637103, -0.637103, 0.674579, -0.637103, -0.637103, -0.637103, -0.637103, 0.674579, 0.674579, 0.674579, 0.674579, 0.674579, 0.674579, -0.637103, 0.674579, 0.674579, -0.637103, -0.637103, 0.674579, 0.674579, 0.674579, 0.674579, 0.674579, 0.674579, -0.637103, -0.637103, 0.674579, -0.637103, -0.637103, -0.637103, 0.674579, -0.637103, 0.674579, 0.674579, -0.637103, -0.637103, -0.637103, -0.637103, 0.674579, 0.674579, 0.674579, -0.637103, -0.637103, -0.637103, -0.637103, -0.637103, -0.637103, 0.674579, 0.674579, 0.674579, 0.674579, 0.674579, 0.674579, 0.674579, -0.637103, -0.637103, 0.674579, -0.637103, -0.637103, -1.94879, -0.637103, -0.637103, -0.637103, 0.674579, 0.674579, -0.637103, -0.637103, 0.674579, 0.674579, -0.637103, -0.637103, 1.98626, 1.98626, 0.674579, -1.94879, -0.637103, 0.674579, 0.674579, -0.637103, 0.674579, -0.637103, 0.674579, -1.94879, -0.637103, 0.674579, 0.674579, 0.674579, -0.637103, -0.637103, 0.674579, 0.674579, -0.637103, -1.94879, 0.674579, 0.674579, -0.637103, -0.637103, 0.674579, -1.94879, 0.674579, 0.674579, -1.94879, -0.637103, -0.637103, -0.637103, -0.637103, 0.674579, -0.637103, -0.637103, 0.674579, 0.674579, 0.674579, 0.674579, 0.674579, 0.674579, 0.674579, 0.674579, 0.674579, -0.637103, -0.637103, 0.674579, 0.674579, 0.674579, 0.674579, -0.637103, -0.637103, -0.637103, -0.637103, -0.637103, -0.637103, -1.94879, 0.674579, -0.637103, 0.674579, -0.637103, 0.674579, -0.637103, 0.674579, 0.674579, -0.637103, -1.94879, -0.637103, 0.674579, 0.674579, -0.637103, -0.637103, -0.637103, 0.674579, 0.674579, 0.674579, 0.674579, -1.94879, 0.674579, -0.637103, 0.674579, 0.674579, -0.637103, 0.674579, -1.94879, -0.637103, 0.674579, -0.637103, 0.674579, 0.674579, -0.637103, 0.674579, -0.637103, 0.674579, 0.674579, -1.94879, -0.637103, -0.637103, 3.29794, 0.674579, 0.674579, -1.94879, -0.637103, 0.674579, 0.674579, -0.637103, 0.674579, 0.674579, -0.637103, 3.29794, -0.637103, 0.674579, -0.637103, 0.674579, -0.637103, 0.674579, 0.674579, -0.637103, 0.674579, -0.637103, -0.637103, -1.94879, -0.637103, -0.637103, 0.674579, 3.29794, -0.637103, -0.637103, -0.637103, 0.674579, 0.674579, -0.637103, 0.674579, -1.94879, 0.674579, 0.674579, -0.637103, 3.29794, 1.98626, -0.637103, 0.674579, 0.674579};
+
+  print_host_array(csr_format_ratingsMtx_userID_host, num_rows + 1, "csr_format_ratingsMtx_userID_host");
+  print_host_array(coo_format_ratingsMtx_itemID_host, num_entries, "coo_format_ratingsMtx_itemID_host");
+  print_host_array(coo_format_ratingsMtx_rating_host, num_entries, "coo_format_ratingsMtx_rating_host");
+
+  cpu_sort_csr_colums<float>(num_rows, csr_format_ratingsMtx_userID_host, coo_format_ratingsMtx_itemID_host, coo_format_ratingsMtx_rating_host);
+
+  print_host_array(csr_format_ratingsMtx_userID_host, num_rows + 1, "csr_format_ratingsMtx_userID_host");
+  print_host_array(coo_format_ratingsMtx_itemID_host, num_entries, "coo_format_ratingsMtx_itemID_host");
+  print_host_array(coo_format_ratingsMtx_rating_host, num_entries, "coo_format_ratingsMtx_rating_host");
+}
+
+
+/* low  --> Starting index,  high  --> Ending index */
+template<typename Dtype, typename Itype>
+void naiveSort_by_key(Dtype* x, int total, int num_sorted, Itype* indicies, Itype* indicies_sorted, Dtype* x_sorted)
+{
+  bool Debug = false;
+  if (total < num_sorted){
+    ABORT_IF_NEQ(0, 1, "total < num_sorted");
+  }
+
+    // pivot (Element to be placed at right position)
+    Dtype temp = 0.0;
+    Itype temp_ = 0;
+    int count = 0;  // Index of smaller element
+
+    for (int j = total - 1; j >= total - num_sorted; j--)
+    {
+      if(Debug){
+        LOG("j : "<<j);
+      }
+      bool first_max_found = false;
+      Dtype max_so_far = (Dtype)0.0;
+      int max_so_far_index = 0;
+      for (int i = 0; i < total - count; i++){
+          if (!first_max_found){
+            max_so_far = x[i];
+            max_so_far_index = i;
+            first_max_found = true;
+          }else{
+            if(x[i] > max_so_far){
+              max_so_far = x[i];
+              max_so_far_index = i;
+            }
+          }  
+      }
+      temp = x[j];
+      if(x_sorted){
+        x_sorted[num_sorted - 1 - count] = max_so_far;
+      }else{
+        x[j] = max_so_far;
+      }
+      x[max_so_far_index] = temp;
+
+      temp_ = indicies[j];
+      if(indicies_sorted){
+        indicies_sorted[num_sorted - 1 - count] = indicies[max_so_far_index];
+      }else{
+        indicies[j] = indicies[max_so_far_index];
+      }
+      indicies[max_so_far_index] = temp_;
+
+      count++;
+    }
+    if(Debug) LOG("count : "<<count)
+}
+
+template void naiveSort_by_key<int, int>(int* x, int total, int num_sorted, int* indicies, int* indicies_sorted, int* x_sorted);
+template void naiveSort_by_key<float, int>(float* x, int total, int num_sorted, int* indicies, int* indicies_sorted, float* x_sorted);
+template void naiveSort_by_key<int, float>(int* x, int total, int num_sorted, float* indicies, float* indicies_sorted, int* x_sorted);
 
 template<typename Dtype, typename Itype>
 void cpu_sort_index_by_max(const long long int rows, const long long int cols,  Dtype* x, Itype* indicies)
@@ -2105,15 +2778,15 @@ void cpu_sort_index_by_max(const long long int rows, const long long int cols,  
     for(long long int i = (long long int)th_id; i < cols; i += (long long int)nthreads){
     //for(long long int i = (long long int)0; i < rows; i+=(long long int)1){
       //thrust::sort_by_key sorts indicies by x smallest to x largest
-      thrust::sort_by_key(thrust::host, x + i * rows, x + (i + 1) * rows , indicies + i * rows);
-      //quickSort_by_key<Dtype>(x + i * cols, 0, cols, indicies + i * cols);
+      //thrust::sort_by_key(thrust::host, x + i * rows, x + (i + 1) * rows , indicies + i * rows);
+      quickSort_by_key<Dtype, Itype>(x + i * rows, 0, (int)rows - 1, indicies + i * rows);
     }
   }
 
-  if(0) LOG("finished call to cpu_sort_index_by_max") ;
+  if(print) LOG("finished call to cpu_sort_index_by_max") ;
   gettimeofday(&program_end, NULL);
   program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
-  if(print) LOG("cpu_sort_index_by_max run time : "<<readable_time(program_time));
+  if(print) LOG( "cpu_sort_index_by_max run time : "  << readable_time(program_time) );
 }
 
 
@@ -2142,8 +2815,13 @@ void cpu_sort_index_by_max(const long long int dimension,  Dtype* x, int* indici
   int nthreads = 1;
   #ifdef _OPENMP
     int nProcessors = omp_get_max_threads();
-    nthreads = std::min(nProcessors, (int)dimension);
+    if(!debug)
+      nthreads = std::min(nProcessors, (int)dimension);
     omp_set_num_threads(nthreads);
+    omp_lock_t printlock;
+    omp_init_lock(&printlock);
+    omp_lock_t thrustlock;
+    omp_init_lock(&thrustlock);
     if(debug){
       LOG("max threads: "<<nProcessors)
       LOG("number of threads: "<<nthreads);
@@ -2185,41 +2863,71 @@ void cpu_sort_index_by_max(const long long int dimension,  Dtype* x, int* indici
         temp_x[((long long int)th_id) * (dimension - (long long int)1) + j - 1] = x[left_off];
         temp_indicies[((long long int)th_id) * (dimension - (long long int)1) + j - 1] = (int)j;
         left_off += (long long int)(1);
+
       }
 
-      if(i == 0 && debug) {
-        print_host_array((temp_x + th_id * (dimension - 1)), ((int)dimension - 1), ("temp_x"));
-        print_host_array((temp_indicies + th_id * (dimension - 1)), ((int)dimension - 1), ("temp_indicies"));
+      if(debug && th_id==0) {
+        omp_set_lock(&printlock);
+        LOG("th_id : "<<th_id);
+        LOG("i : "<<i);
+        gettimeofday(&program_end, NULL);
+        program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
+        LOG("cpu_sort_index_by_max average loop run time so far : "<<readable_time(program_time * (double)nthreads/ (double)i));  
+        //print_host_array((temp_x + th_id * (dimension - 1)), ((int)dimension - 1), ("temp_x"));
+        //print_host_array((temp_indicies + th_id * (dimension - 1)), ((int)dimension - 1), ("temp_indicies"));
+        save_host_array_to_file<Dtype>(temp_x + th_id * (dimension - 1), dimension - 1, "temp_x_before");
+        save_host_array_to_file<int>(temp_indicies + th_id * (dimension - 1), dimension - 1, "temp_indicies_before");
+        omp_unset_lock(&printlock);
       }
       //LOG("Hello from thread "<<th_id) ;
       //thrust::sort_by_key sorts temp_indicies by temp_x smallest to temp_x largest
-      thrust::sort_by_key(thrust::host, 
-        temp_x + ((long long int)th_id * (dimension - (long long int)1)), 
-        temp_x + ((long long int)(th_id + 1) * (dimension - (long long int)1)) , 
-        temp_indicies + ((long long int)th_id * (dimension - (long long int)1)));
-      //quickSort_by_key<Dtype>(temp_x + th_id * (dimension - 1), 0, dimension - 1, temp_indicies + th_id * (dimension - 1));
-      host_copy(top_N, 
-        temp_indicies + ((long long int)(th_id + 1) * (dimension - (long long int)1) - (long long int)top_N), 
-        indicies + (i * (long long int)top_N));
+      // omp_set_lock(&thrustlock);
+      // thrust::sort_by_key(thrust::host, 
+      //   temp_x + ((long long int)th_id * (dimension - (long long int)1)), 
+      //   temp_x + ((long long int)(th_id + 1) * (dimension - (long long int)1)) , 
+      //   temp_indicies + ((long long int)th_id * (dimension - (long long int)1)));
+      // omp_unset_lock(&thrustlock);
+      // quickSort_by_key<Dtype, int>(temp_x + ((long long int)th_id * (dimension - (long long int)1)), 0, (int)dimension - 2, 
+      //                              temp_indicies + ((long long int)th_id * (dimension - (long long int)1)) );
       if(x_sorted){
-        host_copy(top_N, 
-        temp_x + ((long long int)(th_id + 1) * (dimension - (long long int)1) - (long long int)top_N), 
-        x_sorted + (i * (long long int)top_N));
-      }
-      if(i == 0 && debug) {
-        print_host_array((temp_x + (long long int)th_id * (dimension - (long long int)1)), ((int)dimension - 1), ("temp_x"));
-        print_host_array((temp_indicies + (long long int)th_id * (dimension - (long long int)1)), ((int)dimension - 1), ("temp_indicies"));
-        print_host_array((indicies + i * (long long int)top_N), (top_N), ("indicies"));
+        naiveSort_by_key<Dtype, int>(temp_x + ((long long int)th_id * (dimension - (long long int)1)), (int)dimension - 1, top_N, 
+                                     temp_indicies + ((long long int)th_id * (dimension - (long long int)1)),
+                                     indicies + (i * (long long int)top_N), x_sorted + (i * (long long int)top_N));
+      }else{
+        naiveSort_by_key<Dtype, int>(temp_x + ((long long int)th_id * (dimension - (long long int)1)), (int)dimension - 1, top_N, 
+                                     temp_indicies + ((long long int)th_id * (dimension - (long long int)1)),
+                                     indicies + (i * (long long int)top_N));        
       }
 
-      if(th_id == 0 && debug){
+      // host_copy(top_N, 
+      //   temp_indicies + ((long long int)(th_id + 1) * (dimension - (long long int)1) - (long long int)top_N), 
+      //   indicies + (i * (long long int)top_N));
+      // if(x_sorted){
+      //   host_copy(top_N, 
+      //   temp_x + ((long long int)(th_id + 1) * (dimension - (long long int)1) - (long long int)top_N), 
+      //   x_sorted + (i * (long long int)top_N));
+      // }
+      if(debug && th_id==0) {
+        omp_set_lock(&printlock);
+        //LOG("th_id : "<<th_id);
+        LOG("i : "<<i);
+        // print_host_array((temp_x + (long long int)th_id * (dimension - (long long int)1)), ((int)dimension - 1), ("temp_x"));
+        // print_host_array((temp_indicies + (long long int)th_id * (dimension - (long long int)1)), ((int)dimension - 1), ("temp_indicies"));
+        // print_host_array((indicies + i * (long long int)top_N), (top_N), ("indicies"));
+
         //LOG("th_id * (dimension - 1) : "<<th_id * (dimension - 1));
-        //save_host_array_to_file<Dtype>(temp_x + th_id * (dimension - 1), dimension - 1, "temp_x");
-        //save_host_array_to_file<int>(temp_indicies + th_id * (dimension - 1), dimension - 1, "temp_indicies");
-        LOG("for loop index : "<<i);
+        save_host_array_to_file<Dtype>(temp_x + th_id * (dimension - 1), dimension - 1, "temp_x_after");
+        save_host_array_to_file<int>(temp_indicies + th_id * (dimension - 1), dimension - 1, "temp_indicies_after");
+        if(x_sorted){
+          save_host_array_to_file<Dtype>((x_sorted + i * (long long int)top_N), top_N, "x_sorted");
+        }
+        save_host_array_to_file<int>((indicies + i * (long long int)top_N), top_N, "indicies");
+
         gettimeofday(&program_end, NULL);
         program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
-        LOG("cpu_sort_index_by_max average loop run time so far : "<<readable_time(program_time / (double)i));      
+        LOG("cpu_sort_index_by_max average loop run time so far : "<<readable_time(program_time * (double)nthreads/ (double)i));  
+        ABORT_IF_NEQ(0,1,"returning");  
+        omp_unset_lock(&printlock);  
       }
     }
   }
@@ -2345,7 +3053,7 @@ void cpu_rank_appearances(const int top_N, const long long int dimension,
       for(long long int i = (long long int)0; i < (long long int)top_N; i+=(long long int)1){
         int temp = indicies[i + (long long int)top_N * j];
         omp_set_lock(locks + temp);
-        rank[temp] += (float)(1.0 / ((float)i));
+        rank[temp] += (float)(1.0 / ((float)(top_N - i)));
         omp_unset_lock(locks + temp);
       }
     }
@@ -2427,10 +3135,14 @@ long long int from_below_diag_to_whole(long long int below_diag_index, long long
   return (long long int)col * dimension + (dimension - num_in_col) + below_diag_index - num_so_far;
 }
 
+long long int num_below_diag_(long long int dimension){
+  return ( ( dimension * (dimension - (long long int)1) ) / ( (long long int)2 ) );
+}
+
 long long int from_below_diag_to_whole_faster(long long int below_diag_index, long long int dimension)
 {
   bool debug = false;
-  const long long int num_below_diag = (dimension * (dimension - (long long int)1)) / (long long int)2;
+  const long long int num_below_diag = num_below_diag_(dimension);
   if( below_diag_index < (long long int)0 || below_diag_index > num_below_diag - (long long int)(1)){
     if(debug){
       LOG("num_below_diag : "<<num_below_diag);
@@ -2445,9 +3157,9 @@ long long int from_below_diag_to_whole_faster(long long int below_diag_index, lo
   long long int row = (long long int)(-1);
   long long int col = (long long int)(0);
 
-  long long int one_less = ((n - (long long int)1) * (n - (long long int)2)) / (long long int)2;
-  long long int on_it = (n * (n - (long long int)1)) / (long long int)2;
-  long long int one_more = (n * (n + (long long int)1)) / (long long int)2;
+  long long int one_less = num_below_diag_(n - (long long int)1); // triangle has n - 2 columns
+  long long int on_it = num_below_diag_(n);                       // triangle has n - 1 columns
+  long long int one_more = num_below_diag_(n + (long long int)1); // triangle has n columns
   if(debug){
     LOG("below_diag_index : "<<below_diag_index);
     LOG("dimension : "<<dimension);
@@ -2526,6 +3238,69 @@ long long int from_below_diag_to_whole_faster(long long int below_diag_index, lo
     return (long long int)(-6);
   }
   return return_val;
+}
+
+void from_below_diag_to_whole_test(){
+  struct timeval program_start, program_end;
+  double program_time;
+  gettimeofday(&program_start, NULL);
+  LOG("from_below_diag_to_whole_test called.");
+
+  const long long int dimension = (long long int)131262; //138493
+  const long long int num_below_diag = (dimension * (dimension - (long long int)1)) / (long long int)2;
+  
+  int nthreads = 1;
+  #ifdef _OPENMP
+    int nProcessors = omp_get_max_threads();
+    nthreads = (int)std::min((long long int)nProcessors, num_below_diag);
+    omp_set_num_threads(nthreads);
+    omp_lock_t printlock;
+    omp_init_lock(&printlock);
+  #endif
+  LOG("nthreads : "<<nthreads);
+  #pragma omp parallel shared(nthreads)
+  {
+    int th_id = 0;
+    #ifdef _OPENMP
+      th_id = omp_get_thread_num();
+    #endif
+    for(long long int i = (long long int)th_id; i < num_below_diag; i += (long long int)nthreads){
+      
+      long long int whole_faster = from_below_diag_to_whole_faster(i, dimension);
+      if(whole_faster < (long long int)0){
+        omp_set_lock(&printlock);
+        LOG("th_id : "<<th_id);
+        LOG("below_diag_indicies "<<i<<" maps to -> whole_indicies "   << whole_faster );
+        omp_unset_lock(&printlock);        
+      }
+      // long long int whole_slow_way = from_below_diag_to_whole(i, dimension);
+      // if(whole_slow_way != whole_faster){
+      //   omp_set_lock(&printlock);
+      //   LOG("th_id : "<<th_id);
+      //   LOG("below_diag_indicies "<<i<<" maps to -> whole_indicies "   << whole_slow_way);
+      //   LOG("below_diag_indicies "<<i<<" maps to -> whole_indicies "   << whole_faster );
+      //   omp_unset_lock(&printlock);        
+      // }
+      // long long int below_after = from_whole_to_below_diag(whole_faster, dimension);
+      // if(below_after != i){
+      //   omp_set_lock(&printlock);
+      //   LOG("th_id : "<<th_id);
+      //   LOG("whole_indicies "<<whole_faster<<" maps to -> below_diag_indicies "   <<below_after );
+      //   omp_unset_lock(&printlock); 
+      // }
+      // below_after = from_whole_to_below_diag(whole_slow_way, dimension);
+      // if(below_after != i){
+      //   omp_set_lock(&printlock);
+      //   LOG("th_id : "<<th_id);
+      //   LOG("whole_indicies "<<whole_slow_way<<" maps to -> below_diag_indicies "   <<below_after );
+      //   omp_unset_lock(&printlock); 
+      // }
+    }
+  }
+  gettimeofday(&program_end, NULL);
+  program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
+  //printf("program_time: %f\n", program_time);   
+  LOG("from_below_diag_to_whole_test run time : "<<readable_time(program_time)<<std::endl);
 }
 
 
@@ -2646,6 +3421,20 @@ void cpu_get_num_latent_factors<float>(const long long int m, float* S_host,
     }
   }
 
+}
+
+template <>
+void cpu_get_latent_factor_mass<float>(const long long int m, float* S_host, 
+  const long long int num_latent_factors, float *percent) 
+{
+  bool Debug = false;
+  float sum = cpu_asum<float>( m, S_host);
+
+  float sum_so_far;
+  for(int j = 0; j < (int)num_latent_factors; j++){
+    sum_so_far += S_host[j];
+  }
+  percent[0] = sum_so_far / sum;
 }
 
 template<typename Dtype>
@@ -3190,7 +3979,7 @@ void cpu_sparse_nearest_row(const int rows_A, const int cols, const Dtype* dense
   gettimeofday(&program_start, NULL);
   /*
     subtract dense_mtx_A from sparse mtx B and put the sparse results in coo_errors
-    dense_mtx_A must be in column major ordering
+    dense_mtx_A must be in row major ordering
   */
   const int row_skip = csr_rows_B[0];
   int nthreads = 1;

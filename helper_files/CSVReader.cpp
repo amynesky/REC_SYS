@@ -305,50 +305,52 @@ void CSVReader::getData(int* coo_format_ratingsMtx_userID_host,
 		// Iterate through each line and split the content using delimeter
 		int row = 0;
 		int total_items = 0;
-		if(!all_items){
-			while (getline(file, line) && row < num_entries){
-				//std::cout<<line<<std::endl;
-				std::vector<std::string> vec;
-				boost::algorithm::split(vec, line, boost::is_any_of(delimeter));
+		
+		while (getline(file, line) && row < num_entries){
+			//std::cout<<line<<std::endl;
+			std::vector<std::string> vec;
+			boost::algorithm::split(vec, line, boost::is_any_of(delimeter));
 
-				if(first){
-					first = 0;
-					// userID, itemID, rating, timestamp
+			if(first){
+				first = 0;
+				// userID, itemID, rating, timestamp
+			}else{
+	            int col = (int)(::atof(vec[1].c_str())) - 1;
+	            
+	        	std::map<int, int >::iterator it = items_dictionary->find(col);
+
+				if( it == items_dictionary->end() ){
+					//add the new user
+					std::pair<int ,int > temp = std::pair<int ,int >(col, total_items);
+					items_dictionary->insert (temp);
+					total_items++;
+
 				}else{
-		            int col = (int)(::atof(vec[1].c_str())) - 1;
-		            
-		        	std::map<int, int >::iterator it = items_dictionary->find(col);
+					if(Debug){
+			            LOG("col : "<<col) ;
+			            LOG("total_items : "<<total_items) ;
+			            LOG("it->first : "<<it->first) ;
+			            LOG("it->second : "<<it->second) ;
+				        LOG("Press Enter to continue.") ;
+				        std::cin.ignore();
+			        }
+				}	
 
-					if( it == items_dictionary->end() ){
-						//add the new user
-						std::pair<int ,int > temp = std::pair<int ,int >(col, total_items);
-						items_dictionary->insert (temp);
-						total_items++;
-
-					}else{
-						if(Debug){
-				            LOG("col : "<<col) ;
-				            LOG("total_items : "<<total_items) ;
-				            LOG("it->first : "<<it->first) ;
-				            LOG("it->second : "<<it->second) ;
-					        LOG("Press Enter to continue.") ;
-					        std::cin.ignore();
-				        }
-					}	
-
-			        row++;
-				};				
-			}
-			if(Debug){
-				LOG("total_items : "<<total_items) ;
-				save_map(items_dictionary, "items_dictionary_before_shuffle");
-			}
+		        row++;
+			};				
+		}
+		if(Debug){
+			LOG("total_items : "<<total_items) ;
+			save_map(items_dictionary, "items_dictionary_before_shuffle");
+		}
+		if(!all_items){
 			LOG("SHUFFLING RATINGS MATRIX COLUMN INDICIES!!") ;
 			cpu_shuffle_map_second((long long int)total_items,  items_dictionary );
-			if(Debug){
-				save_map(items_dictionary, "items_dictionary_after_shuffle");
-			}
-		}	
+		}
+		if(Debug){
+			save_map(items_dictionary, "items_dictionary_after_shuffle");
+		}
+			
 
 		file.clear();
 		file.seekg(0, std::ios::beg);
@@ -369,9 +371,9 @@ void CSVReader::getData(int* coo_format_ratingsMtx_userID_host,
 	            coo_format_ratingsMtx_userID_host[row] = (int)(::atof(vec[0].c_str())) - 1; /*make the user index start at zero*/
 	            //coo_format_ratingsMtx_itemID_host[row] = (int)(::atof(vec[1].c_str())) - 1;/*make the movie index start at zero*/
 	            int col = (int)(::atof(vec[1].c_str())) - 1;
-	            if(all_items){
-		            coo_format_ratingsMtx_itemID_host[row] = col;
-		        }else{
+	            // if(all_items){
+		        //     coo_format_ratingsMtx_itemID_host[row] = col;
+		        // }else{
 		        	std::map<int, int >::iterator it = items_dictionary->find(col);
 		        	coo_format_ratingsMtx_itemID_host[row] = it->second;
 		        	if( it == items_dictionary->end() ){
@@ -387,7 +389,7 @@ void CSVReader::getData(int* coo_format_ratingsMtx_userID_host,
 					// }else{
 					// 	coo_format_ratingsMtx_itemID_host[row] = it->second;
 					// }		
-		        }
+		        //}
 		        coo_format_ratingsMtx_rating_host[row] = ::atof(vec[2].c_str());
 	            // std::cout<<data[row + col * rows]<< " , ";
 
@@ -409,28 +411,29 @@ void CSVReader::getData(int* coo_format_ratingsMtx_userID_host,
 			save_host_arrays_side_by_side_to_file_(coo_format_ratingsMtx_userID_host, coo_format_ratingsMtx_itemID_host, 
 	                                           		coo_format_ratingsMtx_rating_host, num_entries, "coo_before");
 		}
-		if(!all_items){
-			int first_index = 0;
-			int last_index = first_index + 1;
-			while(last_index < num_entries){
-				while(coo_format_ratingsMtx_userID_host[first_index] == coo_format_ratingsMtx_userID_host[last_index]){
-					if(last_index < num_entries - 1){
-						last_index++;
-					}else{
-						break;
-					}
-				}	
+		
+		LOG("Sort each row") ;
+		int first_index = 0;
+		int last_index = first_index + 1;
+		while(last_index < num_entries){
+			while(coo_format_ratingsMtx_userID_host[first_index] == coo_format_ratingsMtx_userID_host[last_index]){
 				if(last_index < num_entries - 1){
-					last_index--;
+					last_index++;
+				}else{
+					break;
 				}
-
-				thrust::sort_by_key(thrust::host, coo_format_ratingsMtx_itemID_host + first_index, coo_format_ratingsMtx_itemID_host + last_index + 1, coo_format_ratingsMtx_rating_host + first_index);
-				
-				first_index = last_index + 1;
-				last_index = first_index + 1;		
+			}	
+			if(last_index < num_entries - 1){
+				last_index--;
 			}
+
+			thrust::sort_by_key(thrust::host, coo_format_ratingsMtx_itemID_host + first_index, coo_format_ratingsMtx_itemID_host + last_index + 1, coo_format_ratingsMtx_rating_host + first_index);
+			
+			first_index = last_index + 1;
+			last_index = first_index + 1;		
 		}
-		if(0){
+		
+		if(Debug){
 			save_host_arrays_side_by_side_to_file_(coo_format_ratingsMtx_userID_host, coo_format_ratingsMtx_itemID_host, 
 	                                           coo_format_ratingsMtx_rating_host, num_entries, "coo_after");
 		}

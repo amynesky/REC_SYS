@@ -53,15 +53,19 @@
 // Kernel utilities
 //============================================================================================
 
-const long long int CUDA_NUM_BLOCKS = (long long int)65535;
-
-// use 512 threads per block
-const long long int CUDA_NUM_THREADS = (long long int)512;
-
 // number of blocks for threads.
-long long int GET_BLOCKS(const long long int N) 
+long long int GET_BLOCKS(const long long int N, long long int num_threads = CUDA_NUM_THREADS) 
 {
-  return (N + CUDA_NUM_THREADS - (long long int)1) / CUDA_NUM_THREADS;
+  return (N + num_threads - (long long int)1) / num_threads;
+}
+
+template <typename Dtype>
+__device__ Dtype gpu_abs(Dtype val) {
+  if(val < (Dtype)0.0){
+    return ((Dtype)(-1.0) * val);
+  }else{
+    return val;
+  }
 }
 
 
@@ -675,12 +679,12 @@ void save_device_mtx_to_file(const Dtype* A_dev, int lda, int sda, std::string t
         long long int index = ((long long int)i) + ((long long int)j) * ((long long int)lda);
         entries<<A_host[index];
         if(i < lda - 1){
-          //entries<<"\r\n";
           entries<<", ";
         };
       };
       if(j < sda - 1){
-        entries<<"; ";
+        entries<<"\r\n";
+        //entries<<"; ";
       };
       entries.flush();
     }; 
@@ -862,33 +866,56 @@ void gpu_get_rand_bools(const long long int n,  Dtype* x, float probability_of_s
 template  void gpu_get_rand_bools<bool>(const long long int n,  bool* x, float probability_of_success) ;
 template void gpu_get_rand_bools<float>(const long long int n,  float* x, float probability_of_success) ;
 
-__global__ void gpu_mark_GU_users_kernel(const int ratings_rows_GU, const int ratings_rows, const int* x_dev, int* y ) 
+__global__ void gpu_mark_GU_users_kernel(const int ratings_rows_GU, const int ratings_rows, const int* x_dev, int* y, bool *isBad) 
 {
   //int idx = threadIdx.x + blockIdx.x * blockDim.x;
   //a[idx] = curand_uniform(&state[idx]);
   CUDA_KERNEL_LOOP(i, ratings_rows_GU){
+    int temp = x_dev[ratings_rows - 1 - i];
+    if(temp >= ratings_rows){
+      isBad[0] = true;
+    }
     y[x_dev[ratings_rows - 1 - i]] = 2;
   }
 }
 
 void gpu_mark_GU_users(const int ratings_rows_GU, const int ratings_rows, const int* x_host, int* y ) 
 {
+  LOG("gpu_mark_GU_users called.")
+  bool Debug = false;
   if(too_big(ratings_rows_GU) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
+  ABORT_IF_LESS(ratings_rows, ratings_rows_GU, "oops!");
 
   const long long int num_gpu_blocks = GET_BLOCKS(ratings_rows_GU);
 
   if (num_gpu_blocks > CUDA_NUM_BLOCKS){
     ABORT_IF_NEQ(0, 1, "Max Blocks Exceeded");
   };
+  bool isBad_host = false;
+  bool* isBad;
+  CUDA_CHECK(cudaMalloc((void**)&isBad, SIZE_OF(bool)));
+  CUDA_CHECK(cudaMemcpy(isBad, &isBad_host, SIZE_OF(bool), cudaMemcpyHostToDevice));
 
   int* x_dev = NULL;
   checkCudaErrors(cudaMalloc((void**)&x_dev, ratings_rows * SIZE_OF(int)));
-  CUDA_CHECK(cudaMemcpy(x_dev, &x_host, ratings_rows * SIZE_OF(int), cudaMemcpyHostToDevice));
+  CUDA_CHECK(cudaMemcpy(x_dev, x_host, ratings_rows * SIZE_OF(int), cudaMemcpyHostToDevice));
 
-  gpu_mark_GU_users_kernel<<<num_gpu_blocks, CUDA_NUM_THREADS>>>(ratings_rows_GU, ratings_rows, x_dev, y );
+  gpu_mark_GU_users_kernel<<<num_gpu_blocks, CUDA_NUM_THREADS>>>(ratings_rows_GU, ratings_rows, x_dev, y, isBad);
+  if(Debug){
+    save_device_array_to_file(y, ratings_rows, "y");
+    save_device_array_to_file(x_dev, ratings_rows, "x_dev");
+  }
+
+  CUDA_CHECK(cudaMemcpy(&isBad_host, isBad, SIZE_OF(bool), cudaMemcpyDeviceToHost));
+  checkCudaErrors(cudaFree(isBad));
+  if ( isBad_host == true){
+    save_device_array_to_file(y, ratings_rows, "y");
+    save_device_array_to_file(x_dev, ratings_rows, "x_dev");
+    ABORT_IF_NEQ(0, 1, "failure");
+  };
 
   checkCudaErrors(cudaFree(x_dev));
-
+  LOG("gpu_mark_GU_users finished.")
 }
 
 __global__ void gpu_get_rand_groups_kernel(curandState *state, const int n,  int* x, float* probability_of_success, const int num_groups)
@@ -1041,10 +1068,62 @@ void gpu_rng_uniform<double>(cublasHandle_t handle, const long long int n, const
   CURAND_CHECK(curandDestroyGenerator(gen));
 }
 
-
+template <>
+void gpu_axpy<float>(cublasHandle_t dn_handle, const long long int N, const float alpha, const float* X,
+ float* Y) 
+{
+  if(too_big(N)) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
+  CUBLAS_CHECK(cublasSaxpy(dn_handle, N, &alpha, X, 1, Y, 1));
+  /*
+     cublasSaxpy multiplies the vector x by the scalar α and adds it
+     to the vector y overwriting the latest vector with the result. 
+     Hence, the performed operation is y [ j ] = α × x [ k ] + y [ j ] 
+     for i = 1 , … , n , k = 1 + ( i - 1 ) *  incx and j = 1 + ( i - 1 ) *  incy . 
+     Notice that the last two equations reflect 1-based indexing used 
+     for compatibility with Fortran.
+  */
+}
 
 template <>
-void gpu_rng_gaussian<float>(const long long int n, const float mu, const float sigma, float* r) 
+void gpu_axpy<double>(cublasHandle_t dn_handle, const long long int N, const double alpha, const double* X,
+double* Y) 
+{
+  if(too_big(N)) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
+  CUBLAS_CHECK(cublasDaxpy(dn_handle, N, &alpha, X, 1, Y, 1));
+  /*
+   cublasSaxpy multiplies the vector x by the scalar α and adds it
+   to the vector y overwriting the latest vector with the result. 
+   Hence, the performed operation is y [ j ] = α × x [ k ] + y [ j ] 
+   for i = 1 , … , n , k = 1 + ( i - 1 ) *  incx and j = 1 + ( i - 1 ) *  incy . 
+   Notice that the last two equations reflect 1-based indexing used 
+   for compatibility with Fortran.
+  */
+ }
+
+
+template <typename Dtype>
+void gpu_axpby(cublasHandle_t dn_handle, const long long int N, const Dtype alpha, const Dtype* X,
+const Dtype beta, Dtype* Y) 
+{
+  gpu_scale<Dtype>(dn_handle, N, beta, Y);
+  gpu_axpy<Dtype>(dn_handle, N, alpha, X, Y);
+  /*
+     cublasSaxpy multiplies the vector x by the scalar α and adds it
+     to the vector beta * y overwriting the latest vector with the result. 
+     Hence, the performed operation is y [ j ] = α × x [ k ] + beta * y [ j ] 
+     for i = 1 , … , n , k = 1 + ( i - 1 ) *  incx and j = 1 + ( i - 1 ) *  incy . 
+     Notice that the last two equations reflect 1-based indexing used 
+     for compatibility with Fortran.
+  */
+ }
+
+template void gpu_axpby<float>(cublasHandle_t dn_handle,const long long int N, const float alpha, const float* X,
+  const float beta, float* Y);
+template void gpu_axpby<double>(cublasHandle_t dn_handle,const long long int N, const double alpha, const double* X,
+  const double beta, double* Y);
+
+template <>
+void gpu_rng_gaussian<float>(const long long int n, const float mu, const float sigma, float* r, bool add, cublasHandle_t dn_handle) 
 {
   if(too_big(n) ) {ABORT_IF_NEQ(0, 1, "Long long long int too big");}
 
@@ -1058,21 +1137,34 @@ void gpu_rng_gaussian<float>(const long long int n, const float mu, const float 
     float* r_temp;
     checkCudaErrors(cudaMalloc((void**)&r_temp,  (n + (long long int)1) * SIZE_OF(float)));
     CURAND_CHECK(curandGenerateNormal(gen, r_temp, (n + (long long int)1), mu, sigma));
-    CURAND_CHECK(curandDestroyGenerator(gen));  
-    checkCudaErrors(cudaMemcpy(r,  r_temp, n * SIZE_OF(float), cudaMemcpyDeviceToDevice));
+    CURAND_CHECK(curandDestroyGenerator(gen)); 
+    if(add){
+      gpu_axpy(dn_handle, n, (float)1.0, r_temp, r);
+    }else{
+      checkCudaErrors(cudaMemcpy(r,  r_temp, n * SIZE_OF(float), cudaMemcpyDeviceToDevice));
+    } 
     checkCudaErrors(cudaFree(r_temp));
-  }else{
-    CURAND_CHECK(curandGenerateNormal(gen, r, n, mu, sigma));
-    CURAND_CHECK(curandDestroyGenerator(gen));    
+  }else{   
+    if(add){
+      float* r_temp;
+      checkCudaErrors(cudaMalloc((void**)&r_temp,  n * SIZE_OF(float)));
+      CURAND_CHECK(curandGenerateNormal(gen, r_temp, n, mu, sigma));
+      CURAND_CHECK(curandDestroyGenerator(gen)); 
+      gpu_axpy(dn_handle, n, (float)1.0, r_temp, r);
+      checkCudaErrors(cudaFree(r_temp));
+    }else{
+      CURAND_CHECK(curandGenerateNormal(gen, r, n, mu, sigma));
+      CURAND_CHECK(curandDestroyGenerator(gen)); 
+    } 
   }
 
 }
 
 template <>
-void gpu_rng_gaussian<double>(const long long int n, const double mu, const double sigma, double* r) 
+void gpu_rng_gaussian<double>(const long long int n, const double mu, const double sigma, double* r, bool add, cublasHandle_t dn_handle) 
 {
   if(too_big(n) ) {ABORT_IF_NEQ(0, 1, "Long long long int too big");}
-
+  if(add) {ABORT_IF_NEQ(0, 1, "Long long long int too big");}
   curandGenerator_t gen;
   /* Create pseudo-random number generator */
   CURAND_CHECK(curandCreateGenerator(&gen, CURAND_RNG_PSEUDO_DEFAULT));
@@ -1130,6 +1222,235 @@ void gpu_shuffle_array(cublasHandle_t handle, const long long int n,  Dtype* x)
 
 template void gpu_shuffle_array<float>(cublasHandle_t handle, const long long int n,  float* x);
 template void gpu_shuffle_array<int>(cublasHandle_t handle, const long long int n,  int* x);
+
+template<typename Dtype, typename Itype>
+__device__ int device_partition (Dtype* x, int low_index, int high_index, Itype* indicies)
+{
+    // pivot (Element to be placed at right position)
+    Dtype pivot = x[high_index];  
+    Dtype temp = 0.0;
+    Itype temp_ = 0;
+    int i = (low_index - 1);  // Index of smaller element
+
+    for (int j = low_index; j < high_index; j++)
+    {
+      // If current element is smaller than the pivot
+      if (x[j] < pivot)
+      {
+        i++;    // increment index of smaller element
+        temp = x[i];
+        x[i] = x[j];
+        x[j] = temp;
+        temp_ = indicies[i];
+        indicies[i] = indicies[j];
+        indicies[j] = temp_;
+      }
+    }
+    temp = x[i + 1];
+    x[i + 1] = x[high_index];
+    x[high_index] = temp;
+    temp_ = indicies[i + 1];
+    indicies[i + 1] = indicies[high_index];
+    indicies[high_index] = temp_;
+    return (i + 1);
+}
+
+/* low  --> Starting index,  high  --> Ending index */
+template<typename Dtype, typename Itype>
+__device__ void device_quickSort_by_key(Dtype* x, int low_index, int high_index, Itype* indicies, bool* isBad)
+{
+  bool debug = true;
+  //ABORT_IF_NEQ(0, 1, "function not ready");
+  if (low_index < high_index)
+  {
+    /* pi is partitioning index, arr[pi] is now
+       at right place */
+    int pi = device_partition<Dtype,Itype>(x, low_index, high_index, indicies);
+    if(debug){
+      if(low_index < 0 || low_index > 1316 ){
+        isBad[0] = true;
+      }
+      if(high_index < 0 || high_index > 1316 ){
+        isBad[0] = true;
+      }
+      if(pi < 0 || pi > 1316 ){
+        isBad[0] = true;
+      }
+    }
+    device_quickSort_by_key<Dtype,Itype>(x, low_index, pi - 1, indicies,isBad);  // Before pi
+    device_quickSort_by_key<Dtype,Itype>(x, pi + 1, high_index, indicies,isBad); // After pi
+  }
+}
+
+template<typename Dtype>
+__global__ void gpu_sort_csr_colums_kernel(long long int start, int num, 
+                                const int *csr_format_ratingsMtx_userID_dev,
+                                int* coo_format_ratingsMtx_itemID_dev,
+                                Dtype* coo_format_ratingsMtx_rating_dev, bool* isBad) 
+{
+  CUDA_KERNEL_LOOP(i, num) {
+    long long int j = (long long int)i + start;
+    int first_place = (csr_format_ratingsMtx_userID_dev[j]);
+    int last_place = (csr_format_ratingsMtx_userID_dev[j + (long long int)1] - 1);
+    device_quickSort_by_key<int,Dtype>(coo_format_ratingsMtx_itemID_dev, first_place, last_place, coo_format_ratingsMtx_rating_dev, isBad);
+  }
+}
+
+template <>
+void gpu_sort_csr_colums<float>(const long long int ratings_rows, 
+                                const int *csr_format_ratingsMtx_userID_dev,
+                                int* coo_format_ratingsMtx_itemID_dev,
+                                float* coo_format_ratingsMtx_rating_dev, 
+                                long long int num_entries_,
+                                std::string preprocessing_path)
+{
+  if(1) LOG("called gpu_sort_csr_colums");
+  bool debug = true;
+  bool isBad_host = false;
+  bool* isBad;
+  CUDA_CHECK(cudaMalloc((void**)&isBad, SIZE_OF(bool)));
+  CUDA_CHECK(cudaMemcpy(isBad, &isBad_host, SIZE_OF(bool), cudaMemcpyHostToDevice));
+
+  int *csr_format_ratingsMtx_userID_host = NULL;
+  if(debug){
+    csr_format_ratingsMtx_userID_host  = (int *)malloc((ratings_rows + (long long int)1) * SIZE_OF(int));
+    checkErrors(csr_format_ratingsMtx_userID_host);
+    checkCudaErrors(cudaMemcpy(csr_format_ratingsMtx_userID_host,  csr_format_ratingsMtx_userID_dev,  (ratings_rows + (long long int)1) *  SIZE_OF(int), cudaMemcpyDeviceToHost));
+  }
+
+  struct timeval program_start, program_end;
+  double program_time;
+  gettimeofday(&program_start, NULL);
+
+  long long int CUDA_NUM_BLOCKS_TEMP = CUDA_NUM_BLOCKS;
+  long long int CUDA_NUM_THREADS_TEMP = CUDA_NUM_THREADS;
+  if(0){
+    if(debug) LOG(" changing CUDA_NUM_BLOCKS_TEMP, and CUDA_NUM_THREADS_TEMP values") ;
+    CUDA_NUM_BLOCKS_TEMP = (long long int)1;
+    CUDA_NUM_THREADS_TEMP = (long long int)1;
+  }
+
+  long long int num_gpu_blocks = GET_BLOCKS(ratings_rows, CUDA_NUM_THREADS_TEMP);
+
+  if(debug){
+    LOG("CUDA_NUM_BLOCKS_TEMP : "<<CUDA_NUM_BLOCKS_TEMP);
+    LOG("CUDA_NUM_THREADS_TEMP : "<<CUDA_NUM_THREADS_TEMP);
+  }
+
+  if (num_gpu_blocks > CUDA_NUM_BLOCKS_TEMP){
+    long long int num_loops = (long long int)0;
+    long long int num_entries = (long long int)(CUDA_NUM_BLOCKS_TEMP * CUDA_NUM_THREADS_TEMP);
+    long long int spot = (long long int)0;
+    if(too_big(num_entries) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
+
+    while (num_gpu_blocks > CUDA_NUM_BLOCKS_TEMP){
+      if(debug){
+        LOG("num_gpu_blocks : "<<num_gpu_blocks);
+        LOG("num_loops : "<<num_loops);
+        LOG("spot : "<<spot);
+        LOG("num_entries : "<<num_entries);
+
+        int first_place = (csr_format_ratingsMtx_userID_host[spot]);
+        int last_place = (csr_format_ratingsMtx_userID_host[spot + num_entries]); 
+        LOG("first_place : "<<first_place);
+        LOG("last_place : "<<last_place - 1);
+        LOG("num_entries : "<<last_place - first_place);
+        save_device_array_to_file<int>(csr_format_ratingsMtx_userID_dev + spot, (int)num_entries + 1, preprocessing_path + "csr_format_ratingsMtx_userID_dev");
+        save_device_array_to_file<int>(coo_format_ratingsMtx_itemID_dev + first_place, last_place - first_place, preprocessing_path + "coo_format_ratingsMtx_itemID_dev");
+        save_device_array_to_file<float>(coo_format_ratingsMtx_rating_dev + first_place, last_place - first_place, preprocessing_path + "coo_format_ratingsMtx_rating_dev");
+        //checkCudaErrors(cudaDeviceSynchronize());
+      }
+      gpu_sort_csr_colums_kernel<float><<<CUDA_NUM_BLOCKS_TEMP, CUDA_NUM_THREADS_TEMP>>>(spot, (int)num_entries,
+                                                                                        csr_format_ratingsMtx_userID_dev,
+                                                                                        coo_format_ratingsMtx_itemID_dev,
+                                                                                        coo_format_ratingsMtx_rating_dev, isBad);
+      
+      num_gpu_blocks = num_gpu_blocks - (long long int)CUDA_NUM_BLOCKS_TEMP;
+      num_loops += (long long int)1;
+      spot = num_loops * num_entries;
+      CUDA_CHECK(cudaMemcpy(&isBad_host, isBad, SIZE_OF(bool), cudaMemcpyDeviceToHost));
+      checkCudaErrors(cudaFree(isBad));
+      if ( isBad_host == true){
+        ABORT_IF_NEQ(0, 1, "uh oh!") 
+      };
+      if(debug){
+        //checkCudaErrors(cudaDeviceSynchronize());
+        int first_place = (csr_format_ratingsMtx_userID_host[spot]);
+        int last_place = (csr_format_ratingsMtx_userID_host[spot + num_entries]);
+        save_device_array_to_file<int>(csr_format_ratingsMtx_userID_dev + spot, (int)num_entries + 1, preprocessing_path + "csr_format_ratingsMtx_userID_dev");
+        save_device_array_to_file<int>(coo_format_ratingsMtx_itemID_dev + first_place, last_place - first_place, preprocessing_path + "coo_format_ratingsMtx_itemID_dev");
+        save_device_array_to_file<float>(coo_format_ratingsMtx_rating_dev + first_place, last_place - first_place, preprocessing_path + "coo_format_ratingsMtx_rating_dev");
+        //checkCudaErrors(cudaDeviceSynchronize()); 
+        gettimeofday(&program_end, NULL);
+        program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
+        LOG("gpu_sort_csr_colums run time loop "<<num_loops<<" : "<<readable_time(program_time)<<std::endl);              
+      }
+    }
+    // spot is the number of entries done so far
+    // total - (done) = left to go 
+    gpu_sort_csr_colums_kernel<float><<<num_gpu_blocks, CUDA_NUM_THREADS_TEMP>>>(spot, (int)(ratings_rows - spot),
+                                                                            csr_format_ratingsMtx_userID_dev,
+                                                                            coo_format_ratingsMtx_itemID_dev,
+                                                                            coo_format_ratingsMtx_rating_dev, isBad);
+    CUDA_CHECK(cudaMemcpy(&isBad_host, isBad, SIZE_OF(bool), cudaMemcpyDeviceToHost));
+    checkCudaErrors(cudaFree(isBad));
+    if ( isBad_host == true){
+      ABORT_IF_NEQ(0, 1, "uh oh!") 
+    };
+  }else{
+    if(too_big(ratings_rows) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
+    if(debug){
+      LOG("num_gpu_blocks : "<<num_gpu_blocks);
+    }
+    gpu_sort_csr_colums_kernel<float><<<num_gpu_blocks, CUDA_NUM_THREADS_TEMP>>>((long long int)0, (int)ratings_rows,
+                                                                            csr_format_ratingsMtx_userID_dev,
+                                                                            coo_format_ratingsMtx_itemID_dev,
+                                                                            coo_format_ratingsMtx_rating_dev, isBad);
+    CUDA_CHECK(cudaMemcpy(&isBad_host, isBad, SIZE_OF(bool), cudaMemcpyDeviceToHost));
+    checkCudaErrors(cudaFree(isBad));
+    if ( isBad_host == true){
+      ABORT_IF_NEQ(0, 1, "uh oh!") 
+    };
+  }  
+  //if(debug) checkCudaErrors(cudaDeviceSynchronize());
+  if(1) LOG("finished call to gpu_sort_csr_colums") ;
+  gettimeofday(&program_end, NULL);
+  program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
+  if(1) LOG("gpu_sort_csr_colums run time : "<<readable_time(program_time)<<std::endl);
+}
+
+void gpu_sort_csr_colums_test()
+{
+
+  int num_rows = 1;
+  int num_entries = 1317;
+
+  int csr_format_ratingsMtx_userID_host[num_rows + 1] = {0, num_entries};
+  int coo_format_ratingsMtx_itemID_host[num_entries] = {0, 8, 18, 35, 55, 59, 86, 94, 103, 109, 110, 125, 149, 152, 157, 159, 160, 162, 164, 167, 172, 179, 184, 207, 229, 230, 234, 248, 257, 265, 279, 281, 287, 315, 316, 343, 348, 352, 355, 376, 379, 392, 404, 433, 441, 456, 470, 473, 474, 479, 493, 499, 526, 545, 550, 552, 554, 557, 585, 586, 589, 591, 598, 607, 609, 672, 677, 732, 735, 740, 744, 749, 761, 777, 779, 783, 785, 787, 809, 831, 840, 857, 860, 884, 898, 902, 903, 907, 909, 911, 912, 919, 921, 922, 939, 952, 967, 968, 990, 1006, 1009, 1010, 1012, 1013, 1015, 1017, 1018, 1026, 1027, 1029, 1030, 1031, 1034, 1072, 1083, 1085, 1087, 1100, 1125, 1126, 1134, 1147, 1174, 1177, 1196, 1198, 1202, 1203, 1205, 1206, 1208, 1209, 1211, 1212, 1217, 1219, 1220, 1222, 1223, 1224, 1227, 1232, 1233, 1236, 1240, 1241, 1244, 1246, 1247, 1249, 1251, 1252, 1253, 1254, 1255, 1256, 1259, 1262, 1264, 1269, 1271, 1273, 1274, 1275, 1281, 1282, 1283, 1284, 1287, 1289, 1296, 1300, 1302, 1306, 1319, 1338, 1339, 1344, 1346, 1355, 1358, 1370, 1371, 1372, 1374, 1375, 1379, 1384, 1387, 1393, 1395, 1406, 1407, 1428, 1484, 1494, 1498, 1516, 1526, 1537, 1543, 1550, 1551, 1555, 1561, 1572, 1582, 1586, 1590, 1591, 1605, 1607, 1609, 1616, 1624, 1638, 1644, 1652, 1675, 1680, 1681, 1701, 1703, 1706, 1720, 1730, 1731, 1747, 1783, 1821, 1830, 1857, 1861, 1866, 1880, 1881, 1910, 1916, 1917, 1918, 1920, 1922, 1951, 1952, 1953, 1960, 1964, 1967, 1981, 1999, 2000, 2001, 2002, 2004, 2009, 2010, 2011, 2013, 2015, 2016, 2018, 2027, 2032, 2033, 2037, 2042, 2049, 2050, 2052, 2053, 2057, 2075, 2077, 2087, 2090, 2091, 2094, 2104, 2113, 2114, 2115, 2133, 2136, 2138, 2143, 2152, 2159, 2160, 2161, 2185, 2211, 2244, 2267, 2272, 2299, 2310, 2316, 2323, 2328, 2337, 2353, 2354, 2365, 2372, 2380, 2381, 2401, 2403, 2405, 2406, 2411, 2412, 2413, 2419, 2420, 2421, 2428, 2448, 2449, 2454, 2466, 2469, 2470, 2487, 2501, 2527, 2528, 2548, 2550, 2565, 2570, 2615, 2632, 2639, 2641, 2642, 2653, 2659, 2661, 2693, 2698, 2700, 2705, 2709, 2716, 2719, 2725, 2727, 2734, 2787, 2788, 2790, 2794, 2796, 2797, 2806, 2807, 2809, 2857, 2866, 2870, 2875, 2878, 2879, 2904, 2914, 2915, 2923, 2947, 2948, 2950, 2952, 2984, 2985, 2986, 2990, 2992, 2996, 3017, 3021, 3032, 3038, 3043, 3051, 3061, 3069, 3073, 3074, 3086, 3090, 3104, 3107, 3113, 3133, 3146, 3189, 3195, 3197, 3199, 3242, 3252, 3253, 3256, 3272, 3274, 3299, 3347, 3362, 3363, 3364, 3395, 3396, 3399, 3408, 3420, 3434, 3438, 3439, 3447, 3470, 3480, 3507, 3526, 3549, 3550, 3577, 3592, 3622, 3623, 3634, 3637, 3638, 3653, 3670, 3675, 3680, 3685, 3698, 3702, 3703, 3704, 3705, 3726, 3735, 3739, 3741, 3744, 3762, 3770, 3784, 3792, 3801, 3806, 3825, 3827, 3831, 3835, 3876, 3878, 3916, 3929, 3945, 3947, 3948, 3955, 3958, 3971, 3976, 3980, 3983, 4014, 4021, 4033, 4039, 4080, 4084, 4103, 4123, 4131, 4197, 4209, 4213, 4214, 4222, 4261, 4269, 4274, 4309, 4326, 4342, 4343, 4366, 4368, 4382, 4387, 4395, 4396, 4404, 4436, 4437, 4439, 4443, 4530, 4532, 4541, 4543, 4545, 4551, 4552, 4557, 4579, 4586, 4590, 4620, 4635, 4637, 4642, 4657, 4672, 4677, 4680, 4700, 4717, 4733, 4734, 4811, 4826, 4847, 4854, 4859, 4864, 4875, 4885, 4886, 4901, 4908, 4928, 4962, 4965, 4967, 4968, 4972, 4973, 4978, 4994, 5026, 5037, 5040, 5042, 5049, 5059, 5061, 5071, 5085, 5088, 5092, 5093, 5099, 5104, 5155, 5180, 5181, 5192, 5217, 5218, 5245, 5246, 5253, 5280, 5290, 5293, 5307, 5308, 5312, 5348, 5377, 5393, 5410, 5417, 5418, 5426, 5432, 5437, 5440, 5444, 5451, 5458, 5462, 5480, 5488, 5497, 5501, 5506, 5555, 5567, 5608, 5617, 5629, 5648, 5689, 5704, 5711, 5780, 5781, 5783, 5809, 5832, 5852, 5949, 5961, 5963, 5970, 5973, 5994, 6015, 6053, 6061, 6077, 6098, 6103, 6137, 6139, 6141, 6156, 6173, 6228, 6249, 6263, 6272, 6273, 6282, 6300, 6322, 6349, 6364, 6376, 6382, 6439, 6502, 6529, 6533, 6536, 6540, 6563, 6600, 6663, 6668, 6702, 6720, 6726, 6730, 6733, 6747, 6750, 6765, 6784, 6799, 6856, 6873, 6906, 6933, 6951, 6966, 6986, 6995, 7003, 7012, 7021, 7062, 7089, 7098, 7114, 7115, 7122, 7146, 7190, 7230, 7253, 7256, 7307, 7309, 7312, 7321, 7359, 7360, 7361, 7396, 7418, 7447, 7457, 7563, 7568, 7586, 7697, 7702, 7757, 7765, 7791, 7801, 7819, 7837, 7882, 7886, 7921, 7923, 7924, 7925, 7981, 8015, 8018, 8041, 8124, 8238, 8268, 8359, 8360, 8370, 8386, 8490, 8520, 8530, 8591, 8639, 8643, 8665, 8669, 8672, 8692, 8741, 8750, 8762, 8765, 8805, 8809, 8814, 8816, 8830, 8860, 8873, 8884, 8888, 8893, 8956, 8971, 8975, 8982, 8983, 8984, 8987, 25748, 25749, 25759, 25793, 25797, 25804, 25824, 25889, 25941, 26073, 26121, 26171, 26286, 26337, 26429, 26506, 26584, 26661, 26709, 26766, 26775, 26834, 26864, 26945, 27092, 27104, 27191, 27316, 27433, 27659, 27667, 27727, 27771, 27800, 27838, 30792, 30809, 30893, 31037, 31269, 31426, 31430, 31657, 31749, 31792, 31877, 31949, 32010, 32229, 32360, 32550, 32586, 32934, 33492, 33678, 33793, 33833, 33939, 34047, 34149, 34318, 34658, 35720, 37728, 37948, 40814, 41563, 41565, 41568, 41819, 41879, 42542, 42737, 43674, 43918, 44154, 44902, 44971, 45080, 45446, 45498, 45721, 48393, 48515, 48773, 49081, 49662, 49751, 49768, 49816, 50357, 50797, 50871, 51076, 52107, 52282, 52547, 52580, 52703, 52721, 52999, 53372, 53463, 54000, 54009, 54048, 54825, 54832, 55342, 55468, 56547, 56873, 58558, 58609, 58769, 58880, 59314, 59614, 60068, 60283, 60355, 61239, 61933, 63780, 65467, 65681, 66050, 67297, 68156, 68532, 68589, 68953, 69301, 69608, 69752, 69843, 70750, 71026, 71279, 71932, 71985, 72275, 72303, 72335, 72652, 72924, 72935, 73161, 73358, 73474, 74160, 74316, 74477, 74856, 75976, 75978, 76021, 76694, 76828, 77537, 77775, 77807, 77943, 78024, 78412, 78695, 78859, 79105, 79423, 79635, 79766, 80205, 80423, 80567, 80679, 80718, 80824, 80949, 81392, 81833, 82122, 82303, 82752, 83050, 83670, 83772, 84831, 84988, 86203, 86307, 86398, 86714, 86755, 87030, 87050, 87357, 88098, 88124, 88165, 88328, 89013, 89515, 89548, 89550, 89669, 89766, 89796, 89832, 89871, 90085, 90379, 90534, 90650, 90774, 90776, 91066, 91153, 91418, 91424, 91557, 91559, 91609, 91691, 91708, 91767, 91895, 92084, 92470, 92675, 93036, 93195, 93329, 93392, 93483, 93655, 93784, 94432, 94834, 95587, 95694, 95764, 96293, 96761, 96844, 97767, 97818, 97909, 97947, 97970, 98594, 98765, 98804, 99011, 99053, 99084, 99269, 99272, 99924, 100069, 100495, 100945, 101225, 101286, 101445, 101733, 101824, 101943, 101951, 102011, 102089, 102398, 102424, 102589, 102597, 103102, 103379, 103436, 103518, 103562, 103636, 103662, 103670, 103744, 103812, 104090, 104098, 104639, 104812, 105307, 105480, 105812, 106140, 106396, 106526, 106701, 106867, 107182, 107294, 107381, 107483, 108011, 108047, 108075, 108523, 109031, 109054, 109061, 109105, 109152, 109324, 109572, 109770, 110045, 110115, 110176, 110178, 110228, 110319, 110351, 110534, 110556, 110817, 110896, 111232, 111289, 111311, 112061, 112331, 112394, 112484, 112600, 112930, 112958, 113015, 113219, 113231, 113357, 113605, 113848, 113905, 114279, 114281, 114419, 114576, 115163, 115290, 115378, 115621, 115928, 116856, 116926, 116932, 116988, 117361, 117569, 117581, 117929, 118176, 118197, 118707, 118773, 118853, 118859, 119146, 119311, 119423, 119431, 119795, 120431, 120854, 120933, 121321, 121323, 122287, 123406, 124301, 124536, 124561, 125530, 127629, 128168, 128172, 128444, 128519, 128633, 128861, 129067, 130070, 130348, 130473, 130957, 130983, 131010, 1, 28, 31, 46, 49, 111, 150, 222, 252, 259, 292, 295, 317, 336, 366, 540, 588, 592, 652, 918, 923, 1008, 1035, 1078, 1079, 1088, 1089, 1096, 1135, 1192, 1195, 1197, 1199, 1200, 1207, 1213, 1214, 1216, 1218, 1221, 1239, 1242, 1245, 1248, 1257, 1258, 1260, 1261, 1265, 1277, 1290, 1303, 1320, 1332, 1347, 1349, 1357, 1369, 1373, 1386, 1524, 1583, 1749, 1847, 1919, 1966, 1993, 1996, 2020, 2099, 2117, 2137, 2139, 2142, 2172, 2173, 2192, 2193, 2252, 2287, 2290, 2541, 2627, 2643, 2647, 2663, 2682, 2691, 2715, 2760, 2761, 2803, 2871, 2917, 2943, 2946, 2958, 2967, 2999, 3029, 3036, 3080, 3152, 3264, 3437, 3475, 3478, 3488, 3498, 3888, 3931, 3995, 3996, 4010, 4026, 4104, 4127, 4132, 4225, 4305, 4445, 4466, 4570, 4719, 4753, 4877, 4895, 4910, 4914, 4940, 4979, 4992, 5025, 5038, 5039, 5145, 5170, 5539, 5678, 5796, 5815, 5897, 5951, 5998, 6092, 6241, 6332, 6501, 6538, 6753, 6754, 6773, 6806, 6833, 6887, 7000, 7044, 7045, 7152, 7163, 7246, 7386, 7388, 7437, 7448, 7453, 7481, 7756, 8367, 8481, 8506, 8635, 8689, 8960, 31695};
+  float coo_format_ratingsMtx_rating_host[num_entries] = {0.177706, -0.637103, -0.637103, -0.637103, -1.17237, -0.637103, -0.637103, -1.146, -0.637103, -0.137473, -0.326808, -1.11048, -0.155476, -0.440858, 0.674579, -1.94879, 0.674579, -0.637103, -1.94879, -1.94879, -1.94879, 0.674579, -0.637103, -0.478419, 0.674579, -0.637103, -0.637103, 0.674579, -1.16705, 0.674579, 0.674579, 0.674579, 0.674579, 0.674579, -0.637103, -0.637103, 0.674579, 0.462651, -0.0602304, -0.861401, -1.94879, -0.637103, 0.674579, -0.637103, -1.94879, 0.0303579, 0.674579, 0.674579, -0.274926, -0.486803, -1.94879, -0.637103, 0.0359569, -1.00097, 0.674579, 0.674579, 0.674579, -0.637103, -0.469645, 0.674579, 0.674579, 0.67458, -0.637103, -0.0297566, 0.674579, -0.637103, 0.674579, -1.94879, -0.528783, -0.637103, -1.28711, -0.293823, -0.637103, -0.125956, -0.644179, -0.637103, -1.19001, -0.670619, -0.637103, 0.674579, 3.29794, 0.0192334, -0.637103, -0.637103, -0.637103, 0.0426224, -0.251982, -0.274276, -0.0199693, -0.437627, -0.177032, -0.637103, -0.557999, -0.160624, 0.674579, -0.278596, -0.381082, -1.07516, 0.674579, -0.637103, -0.637103, -0.637103, -0.637103, -0.637103, -0.637103, -0.637103, 0.674579, 0.674579, -0.637103, -0.637103, -0.637103, 0.674579, -0.637103, 0.674579, 0.674579, 0.674579, 0.674579, -1.94879, -0.637103, -0.164661, 0.674579, -0.831809, -0.710015, -1.3044, 0.431595, -0.302686, -0.637103, -0.910546, -0.316508, -0.467197, -1.94879, 1.21624, -1.0206, -0.119223, -0.398339, -0.637103, -0.0200866, -1.94879, -1.94879, -0.193671, -0.247501, 0.674579, -0.117064, -0.637103, -0.4006, 0.0333618, -1.19973, -0.616105, -0.958377, -0.524093, -0.256905, -0.637103, -0.864431, -0.637103, 0.219958, 0.674579, -0.404372, -0.0602766, -0.272447, 0.473058, -0.673156, -0.426598, 0.674579, -0.844806, 0.674579, -1.94879, -0.637103, -0.623995, -0.280731, 0.674579, 0.67458, -0.215643, -0.637103, -0.0329604, 0.674579, 0.674579, -0.82628, -0.242388, -0.0664514, 0.362175, -0.637103, 0.674579, 0.674579, 0.674579, 0.674579, 0.674579, 0.674579, -1.94879, -0.637103, -0.0829305, -0.0604934, -0.637103, 0.674579, -0.637103, -0.637103, -1.94879, -0.637103, -0.637103, 0.67458, -1.94879, -0.428624, -0.637103, -1.94879, -0.637103, -0.415069, -1.94879, -1.01571, -0.435386, -0.637103, -0.637103, -1.94879, -1.94879, -0.120456, 0.00949191, -0.637103, 0.674579, 0.674579, -0.148218, 0.674579, -0.637103, 0.170818, -0.637103, 0.182678, -1.94879, 0.674579, -0.637103, 0.191381, 0.153274, -0.637103, -0.637103, -0.57337, -0.637103, 0.674579, -0.637103, -1.06701, -0.328279, -0.637103, -0.535967, -1.94879, -0.637103, -0.637103, -0.637103, -0.637103, -1.94879, 0.674579, 0.307902, 0.674579, -0.102854, -0.254629, -0.0436821, -1.12417, -1.94879, 0.255385, 0.674579, -0.830422, -0.521523, -1.94879, -0.637103, -0.637103, -0.637103, -0.778003, 0.791021, 0.674579, 0.195782, -0.637103, -0.637103, -0.637103, -0.637103, -0.637103, -0.406215, -1.94879, 0.143165, 0.674579, -0.0690882, -0.637103, -0.637103, -0.637103, 0.674579, 0.674579, -0.366569, 0.674579, 0.674579, 0.674579, 0.674579, 0.674579, -0.637103, -0.0551844, 0.67458, -1.27046, 0.129329, -0.637103, 0.674579, -0.637103, -0.637103, 0.674579, 0.674579, -1.94879, -0.637103, 0.0426347, -1.94879, -0.637103, -1.94879, -0.529162, -1.23139, -1.94879, -1.94879, -1.94879, -1.94879, 0.674579, 0.674579, -0.637103, 0.674579, 0.674579, 0.674579, -0.637103, -0.754389, -0.637103, -0.637103, -0.701621, 0.374468, 0.674579, 0.674579, -0.637103, 2.04119, -0.0594538, 0.674579, 0.372803, -0.0742494, 0.674579, -0.637103, 0.651898, -0.244879, -0.637103, 0.674579, -0.916603, -0.862378, -0.917509, -1.08289, -0.172581, -0.637103, 0.674579, -0.315244, -0.637103, -0.637103, -0.0161588, -0.637103, -0.637103, 0.674579, 0.674579, -0.301266, -0.637103, 0.674579, -0.637103, 0.674579, -0.637103, 0.674579, -0.637103, -0.637103, 0.0358773, 0.674579, -0.637103, -0.637103, -0.637103, -0.637103, -1.37229, 0.674579, -1.94879, -0.637103, -0.637103, -0.454708, -0.806231, -0.345035, 0.674579, -0.651668, -0.0316486, -0.637103, -0.637103, -0.253871, -0.637103, -1.16859, 0.674579, -0.637103, 0.674579, 0.674579, 0.674579, 0.674579, -0.637103, 0.674579, 0.674579, -1.23996, -0.637103, 0.674579, 0.148997, -1.94879, 0.277109, 0.674579, -0.103048, -0.637103, -0.637103, -0.637103, 0.202765, -0.272621, -0.0360244, -1.94879, 0.674579, 0.674579, -0.637103, -0.637103, -1.94879, -0.637103, 0.67458, 0.674579, -0.637103, -0.637103, -0.637103, -0.637103, -0.939542, -1.2072, -0.637103, 0.251636, 0.674579, 0.395388, 0.674579, 0.674579, 0.674579, 2.1697, 0.205222, 0.674579, -0.637103, -0.637103, 0.674579, -0.637103, 0.674579, 0.674579, 0.674579, -0.69779, 0.674579, 0.674579, 0.321634, 0.674579, 0.67458, -0.637103, 0.674579, -1.94879, 0.674579, -0.637103, -0.637103, 0.674579, 0.674579, -1.52034, 0.946077, -1.94879, 0.674579, -0.222471, 0.674579, 0.674579, 0.674579, -1.41221, 0.674579, -0.637103, -1.94879, 0.674579, -0.637103, -0.00356942, 0.674579, 0.674579, -0.637103, -0.272464, 0.223686, -0.637103, -1.41276, -0.637103, 0.674579, -0.637103, -1.94879, 0.674579, -0.637103, -1.94879, -1.29488, -0.637103, 0.674579, 0.674579, -1.94879, 0.674579, -1.94879, 0.20477, -1.12233, 0.195866, -0.383621, 0.674579, 0.674579, 0.178412, -0.637103, 0.674579, -1.6561, -0.786677, -1.94879, -0.637103, 0.338086, -1.94879, -1.94879, -1.94879, -1.94879, -0.637103, -1.94879, -1.50875, 0.00240074, 0.674579, -0.637103, -0.637103, -1.94879, -0.637103, 0.674579, 0.674579, -1.94879, -0.189671, 0.34467, 0.674579, -1.31835, 0.674579, 0.674579, -0.637103, -0.637103, 0.674579, -0.201652, -1.94879, -0.637103, -0.637103, -0.800606, -1.94879, 0.674579, 0.674579, 0.543248, 0.674579, -0.637103, -0.637103, -1.94879, 0.674579, -1.94879, -0.637103, -1.94879, -0.0160151, -1.94879, 0.674579, -0.182755, -1.94879, 0.674579, -0.637103, 0.674579, 0.674579, -0.75268, 0.674579, -0.637103, -0.637103, 0.674579, 0.674579, -0.637103, -0.637103, 0.674579, 0.674579, 0.674579, -0.637103, -1.94879, 0.674579, 0.318759, -0.637103, 0.674579, 0.67458, -0.637103, -1.36439, -0.0144304, 0.674579, -0.637103, -0.225503, 1.15468, 0.503029, -0.637103, -0.637103, 2.51199, -1.94879, -0.637103, -1.94879, -1.24546, -0.637103, 0.782777, -0.637103, -0.265776, 0.674579, -0.637103, -0.0997543, -1.94879, -0.637103, 0.345317, -0.637103, -0.637103, -0.637103, 0.448523, -0.637103, -0.637103, -0.637103, -0.637103, 0.674579, 0.674579, 0.674579, -0.637103, -0.637103, 0.67458, 0.674579, -0.637103, -0.637103, -0.637103, -0.637103, 0.674579, -0.637103, 0.210605, 0.674579, -0.637103, -1.94879, -0.637103, -0.637103, -0.637103, -0.637103, 0.674579, -0.137635, -0.637103, 0.674579, -0.637103, 0.674579, 3.29794, -0.637103, -0.637103, 0.674579, -0.637103, -0.637103, 0.674579, 1.39234, -1.94879, -0.637103, -0.198552, 0.674579, -0.547232, 0.674579, 0.330088, -0.451396, -0.637103, -1.94879, -1.39169, -0.637103, -1.94879, 0.67458, -0.348339, -0.637103, 0.674579, -0.637103, 0.674579, -0.637103, -1.94879, -1.11002, 0.393678, 0.674579, 0.418379, -0.637103, -0.637103, 1.03817, -0.768724, 0.674579, 2.35354, -0.637103, 0.67458, -0.0504983, -0.637103, 0.0784256, 3.29794, 0.67458, 0.674579, -0.637103, 0.674579, -0.637103, -0.637103, -1.94879, -1.94879, -0.637103, 0.674579, -0.637103, -0.0754003, -0.637103, -0.637103, -0.637103, -0.637103, 0.674579, 3.29794, -1.05553, 0.674579, -0.637103, -0.637103, 0.674579, -0.460676, -0.637103, -0.637103, 3.29794, -0.637103, 3.29795, -0.637103, 0.674579, -1.94879, -1.43924, -1.94879, -0.637103, -0.637103, -0.637103, -0.637103, 3.29794, 3.29794, -0.637103, 0.938161, 0.674579, 0.674579, -1.94879, -1.94879, -0.163584, -1.94879, -0.637103, 0.674579, 0.674579, 0.0920067, 3.29794, 0.674579, 0.674579, -0.637103, 3.29794, 0.674579, 0.674579, 0.674579, 0.674579, -0.637103, 0.674579, -0.637103, 0.674579, -0.616435, 0.674579, 0.674579, 0.674579, -0.637103, 0.674579, 0.674579, 0.674579, 0.674579, 0.674579, 0.674579, -1.94879, 3.29794, -0.637103, -1.94879, -1.94879, 3.29794, 3.29794, -0.637103, 0.674579, 0.674579, 3.29794, 3.29794, -0.637103, -0.637103, 0.674579, -0.637103, -0.637103, -0.637103, -0.637103, 0.674579, -0.637103, -0.637103, -1.17764, -0.637103, -0.637103, 0.674579, -0.637103, 0.074912, -0.637103, -0.637103, 0.674579, -0.637103, -0.637103, -1.94879, -0.637103, 0.674579, -0.637103, -0.637103, -0.637103, 0.674579, -0.637103, -0.637103, -0.637103, -0.637103, -0.637103, -1.94879, 0.674579, -0.637103, 0.674579, 0.674579, -0.637103, 0.316765, -0.637103, 0.979924, 0.674579, 1.88818, -0.637103, 0.674579, -0.637103, 0.674579, 0.674579, -0.637103, 0.674579, 0.674579, -0.637103, 0.764716, 0.674579, 0.674579, 1.98626, -0.637103, 0.674579, -0.637103, 0.674579, 0.674579, -1.94879, -0.637103, -0.637103, -1.94879, 0.674579, 0.674579, 0.674579, 0.674579, -0.271676, 0.674579, -0.637103, 0.674579, 0.674579, 0.674579, -0.637103, 0.674579, -0.637103, -1.94879, 0.674579, 0.674579, -0.637103, -0.637103, -0.637103, -0.637103, -0.637103, 1.98626, -0.637103, 0.674579, 0.674579, 0.674579, 0.674579, -0.637103, -0.637103, -1.94879, -0.637103, -0.637103, 0.674579, -1.94879, 2.54423, -0.637103, 0.674579, -0.637103, 1.02233, 0.674579, 0.674579, 0.674579, -0.637103, -0.637103, -0.637103, -0.637103, 0.674579, 0.674579, -0.637103, -0.637103, 0.674579, 0.674579, -0.637103, 0.674579, 0.674579, 0.674579, -0.637103, 0.674579, 0.674579, -0.637103, 0.674579, 0.674579, -0.637103, -0.637103, -0.637103, 0.674579, 0.674579, -0.637103, 0.674579, -1.94879, -0.637103, -1.94879, -0.637103, -1.94879, -0.637103, -0.637103, 0.674579, 0.674579, 0.674579, 0.674579, -0.637103, 0.674579, 0.674579, -0.637103, 0.674579, -0.637103, -0.637103, -1.94879, -0.637103, 0.674579, 0.674579, 0.674579, 0.674579, -0.637103, -0.637103, 0.674579, 0.674579, -0.637103, -0.637103, 0.674579, -0.637103, 0.674579, -0.637103, -0.637103, -0.637103, -0.637103, -0.637103, 0.674579, 0.674579, 0.674579, -0.637103, -0.637103, 0.674579, -0.637103, -0.637103, -0.637103, -0.637103, -0.637103, 0.674579, 0.674579, 0.674579, -0.637103, -0.637103, -1.94879, 0.674579, -0.637103, 0.674579, -0.637103, -0.637103, -0.637103, 0.674579, -0.637103, -0.637103, -1.94879, -1.94879, -0.637103, -0.637103, -0.637103, -0.637103, 0.67458, -0.637103, -0.637103, -0.637103, 0.674579, -0.637103, -0.637103, -0.637103, 0.674579, 0.674579, -0.637103, -0.637103, 0.674579, 0.674579, -0.637103, -0.637103, 0.674579, 0.674579, -0.637103, 0.674579, -0.637103, -0.637103, 0.674579, -0.637103, -0.637103, 0.674579, 0.67458, -0.637103, 0.674579, 0.674579, -0.637103, -0.637103, -0.637103, -0.637103, 0.674579, -0.637103, 0.674579, 0.674579, 0.674579, 0.674579, -0.637103, 0.674579, -0.637103, -0.637103, -0.637103, -0.637103, 0.674579, -0.637103, 0.674579, 0.674579, -0.637103, -0.637103, 0.674579, 0.674579, -0.637103, -0.637103, 0.674579, -0.637103, 0.674579, 0.674579, -0.637103, -0.637103, 0.674579, 0.674579, 0.674579, 0.674579, 0.674579, 0.67458, -0.637103, -0.637103, -0.637103, 0.674579, 0.674579, 0.674579, 0.674579, 0.674579, 0.674579, 0.674579, 0.674579, -0.637103, 0.674579, -0.637103, 0.674579, 0.674579, 0.674579, 0.674579, 0.674579, 0.674579, -0.637103, 0.674579, -0.637103, 0.674579, 0.674579, -0.637103, -0.637103, 0.674579, 0.674579, 0.674579, 0.674579, -0.637103, -0.637103, -0.637103, 0.674579, -0.637103, 0.674579, 0.674579, 0.674579, -0.637103, -1.94879, 0.674579, 0.674579, 0.674579, 0.674579, -0.637103, 0.674579, 0.674579, 0.674579, -0.637103, -0.637103, 0.674579, 0.674579, -0.637103, -0.637103, 0.674579, 0.674579, -0.637103, 0.674579, 0.674579, -0.637103, -0.637103, 0.674579, 0.674579, -0.637103, -0.637103, 0.674579, -0.637103, -0.637103, 0.674579, -0.637103, -0.637103, -0.637103, -0.637103, 0.674579, 0.674579, 0.674579, 0.674579, 0.674579, 0.674579, -0.637103, 0.674579, 0.674579, -0.637103, -0.637103, 0.674579, 0.674579, 0.674579, 0.674579, 0.674579, 0.674579, -0.637103, -0.637103, 0.674579, -0.637103, -0.637103, -0.637103, 0.674579, -0.637103, 0.674579, 0.674579, -0.637103, -0.637103, -0.637103, -0.637103, 0.674579, 0.674579, 0.674579, -0.637103, -0.637103, -0.637103, -0.637103, -0.637103, -0.637103, 0.674579, 0.674579, 0.674579, 0.674579, 0.674579, 0.674579, 0.674579, -0.637103, -0.637103, 0.674579, -0.637103, -0.637103, -1.94879, -0.637103, -0.637103, -0.637103, 0.674579, 0.674579, -0.637103, -0.637103, 0.674579, 0.674579, -0.637103, -0.637103, 1.98626, 1.98626, 0.674579, -1.94879, -0.637103, 0.674579, 0.674579, -0.637103, 0.674579, -0.637103, 0.674579, -1.94879, -0.637103, 0.674579, 0.674579, 0.674579, -0.637103, -0.637103, 0.674579, 0.674579, -0.637103, -1.94879, 0.674579, 0.674579, -0.637103, -0.637103, 0.674579, -1.94879, 0.674579, 0.674579, -1.94879, -0.637103, -0.637103, -0.637103, -0.637103, 0.674579, -0.637103, -0.637103, 0.674579, 0.674579, 0.674579, 0.674579, 0.674579, 0.674579, 0.674579, 0.674579, 0.674579, -0.637103, -0.637103, 0.674579, 0.674579, 0.674579, 0.674579, -0.637103, -0.637103, -0.637103, -0.637103, -0.637103, -0.637103, -1.94879, 0.674579, -0.637103, 0.674579, -0.637103, 0.674579, -0.637103, 0.674579, 0.674579, -0.637103, -1.94879, -0.637103, 0.674579, 0.674579, -0.637103, -0.637103, -0.637103, 0.674579, 0.674579, 0.674579, 0.674579, -1.94879, 0.674579, -0.637103, 0.674579, 0.674579, -0.637103, 0.674579, -1.94879, -0.637103, 0.674579, -0.637103, 0.674579, 0.674579, -0.637103, 0.674579, -0.637103, 0.674579, 0.674579, -1.94879, -0.637103, -0.637103, 3.29794, 0.674579, 0.674579, -1.94879, -0.637103, 0.674579, 0.674579, -0.637103, 0.674579, 0.674579, -0.637103, 3.29794, -0.637103, 0.674579, -0.637103, 0.674579, -0.637103, 0.674579, 0.674579, -0.637103, 0.674579, -0.637103, -0.637103, -1.94879, -0.637103, -0.637103, 0.674579, 3.29794, -0.637103, -0.637103, -0.637103, 0.674579, 0.674579, -0.637103, 0.674579, -1.94879, 0.674579, 0.674579, -0.637103, 3.29794, 1.98626, -0.637103, 0.674579, 0.674579};
+
+  int *csr_format_ratingsMtx_userID_dev = NULL;
+  int* coo_format_ratingsMtx_itemID_dev = NULL;
+  float* coo_format_ratingsMtx_rating_dev = NULL;
+  checkCudaErrors(cudaMalloc((void**)&csr_format_ratingsMtx_userID_dev, (num_rows + 1) * SIZE_OF(int)));
+  checkCudaErrors(cudaMalloc((void**)&coo_format_ratingsMtx_itemID_dev,  num_entries * SIZE_OF(int)));
+  checkCudaErrors(cudaMalloc((void**)&coo_format_ratingsMtx_rating_dev,  num_entries * SIZE_OF(float)));
+  checkCudaErrors(cudaMemcpy(csr_format_ratingsMtx_userID_dev,  csr_format_ratingsMtx_userID_host,  (num_rows + 1) * SIZE_OF(int), cudaMemcpyHostToDevice));
+  checkCudaErrors(cudaMemcpy(coo_format_ratingsMtx_itemID_dev,  coo_format_ratingsMtx_itemID_host,  num_entries * SIZE_OF(int), cudaMemcpyHostToDevice));
+  checkCudaErrors(cudaMemcpy(coo_format_ratingsMtx_rating_dev,  coo_format_ratingsMtx_rating_host,  num_entries * SIZE_OF(float), cudaMemcpyHostToDevice));
+
+
+  print_gpu_array_entries(csr_format_ratingsMtx_userID_dev, num_rows + 1);
+  print_gpu_array_entries(coo_format_ratingsMtx_itemID_dev, num_entries);
+  print_gpu_array_entries(coo_format_ratingsMtx_rating_dev, num_entries);
+
+  gpu_sort_csr_colums<float>(num_rows, csr_format_ratingsMtx_userID_dev, coo_format_ratingsMtx_itemID_dev, coo_format_ratingsMtx_rating_dev);
+
+  print_gpu_array_entries(csr_format_ratingsMtx_userID_dev, num_rows + 1);
+  print_gpu_array_entries(coo_format_ratingsMtx_itemID_dev, num_entries);
+  print_gpu_array_entries(coo_format_ratingsMtx_rating_dev, num_entries);
+  checkCudaErrors(cudaDeviceSynchronize());
+}
 
 template <>
 void gpu_sort_index_by_max<float>(cublasHandle_t handle, const long long int n,  float* x, float* indicies)
@@ -2075,59 +2396,7 @@ void gpu_hadamard<float>(const long long int n, const float* A, float* B )
   };
 }
 
-template <>
-void gpu_axpy<float>(cublasHandle_t dn_handle, const long long int N, const float alpha, const float* X,
- float* Y) 
-{
-  if(too_big(N)) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
-  CUBLAS_CHECK(cublasSaxpy(dn_handle, N, &alpha, X, 1, Y, 1));
-  /*
-     cublasSaxpy multiplies the vector x by the scalar α and adds it
-     to the vector y overwriting the latest vector with the result. 
-     Hence, the performed operation is y [ j ] = α × x [ k ] + y [ j ] 
-     for i = 1 , … , n , k = 1 + ( i - 1 ) *  incx and j = 1 + ( i - 1 ) *  incy . 
-     Notice that the last two equations reflect 1-based indexing used 
-     for compatibility with Fortran.
-  */
-}
 
-template <>
-void gpu_axpy<double>(cublasHandle_t dn_handle, const long long int N, const double alpha, const double* X,
-double* Y) 
-{
-  if(too_big(N)) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
-  CUBLAS_CHECK(cublasDaxpy(dn_handle, N, &alpha, X, 1, Y, 1));
-  /*
-   cublasSaxpy multiplies the vector x by the scalar α and adds it
-   to the vector y overwriting the latest vector with the result. 
-   Hence, the performed operation is y [ j ] = α × x [ k ] + y [ j ] 
-   for i = 1 , … , n , k = 1 + ( i - 1 ) *  incx and j = 1 + ( i - 1 ) *  incy . 
-   Notice that the last two equations reflect 1-based indexing used 
-   for compatibility with Fortran.
-  */
- }
-
-
-template <typename Dtype>
-void gpu_axpby(cublasHandle_t dn_handle, const long long int N, const Dtype alpha, const Dtype* X,
-const Dtype beta, Dtype* Y) 
-{
-  gpu_scale<Dtype>(dn_handle, N, beta, Y);
-  gpu_axpy<Dtype>(dn_handle, N, alpha, X, Y);
-  /*
-     cublasSaxpy multiplies the vector x by the scalar α and adds it
-     to the vector beta * y overwriting the latest vector with the result. 
-     Hence, the performed operation is y [ j ] = α × x [ k ] + beta * y [ j ] 
-     for i = 1 , … , n , k = 1 + ( i - 1 ) *  incx and j = 1 + ( i - 1 ) *  incy . 
-     Notice that the last two equations reflect 1-based indexing used 
-     for compatibility with Fortran.
-  */
- }
-
-template void gpu_axpby<float>(cublasHandle_t dn_handle,const long long int N, const float alpha, const float* X,
-  const float beta, float* Y);
-template void gpu_axpby<double>(cublasHandle_t dn_handle,const long long int N, const double alpha, const double* X,
-  const double beta, double* Y);
 
 template<>
 float gpu_sum_of_squares_of_diff<float>(cublasHandle_t dn_handle, const long long int n, const float* x, float* y)
@@ -2595,7 +2864,7 @@ __global__ void gpu_split_data_kernel(const int* csr_format_ratingsMtx_userID_de
   int** csr_format_ratingsMtx_userID_dev_by_group,
   int** coo_format_ratingsMtx_itemID_dev_by_group,
   float** coo_format_ratingsMtx_rating_dev_by_group,
-  const int* ratings_rows_by_group) 
+  const int* ratings_rows_by_group, bool set_only_first_group ) 
 {
 
   CUDA_KERNEL_LOOP(row, ratings_rows){
@@ -2604,31 +2873,34 @@ __global__ void gpu_split_data_kernel(const int* csr_format_ratingsMtx_userID_de
     int csr_start = 0;
     int num_user = 0;
     int group = group_indicies[row];
-    while(r_ < row){
-      if(group_indicies[r_] == group){
-        csr_start += csr_format_ratingsMtx_userID_dev[r_ + 1] - csr_format_ratingsMtx_userID_dev[r_];
-        num_user  += 1;
+    if(!set_only_first_group || group == 0){
+      
+      while(r_ < row){
+        if(group_indicies[r_] == group){
+          csr_start += csr_format_ratingsMtx_userID_dev[r_ + 1] - csr_format_ratingsMtx_userID_dev[r_];
+          num_user  += 1;
+        }
+        r_++;
       }
-      r_++;
-    }
-    int csr_end = csr_start + csr_format_ratingsMtx_userID_dev[row + 1] - csr_format_ratingsMtx_userID_dev[row];
-    int* csr_format_ratingsMtx_userID;
-    int* coo_format_ratingsMtx_itemID;
-    float* coo_format_ratingsMtx_rating;
-    int ratings_rows_ = ratings_rows_by_group[group];
-    csr_format_ratingsMtx_userID = csr_format_ratingsMtx_userID_dev_by_group[group];
-    coo_format_ratingsMtx_itemID = coo_format_ratingsMtx_itemID_dev_by_group[group];
-    coo_format_ratingsMtx_rating = coo_format_ratingsMtx_rating_dev_by_group[group];
-    if(num_user == ratings_rows_ - 1) csr_format_ratingsMtx_userID[num_user + 1] = csr_end;
-    csr_format_ratingsMtx_userID[num_user] = csr_start;
+      int csr_end = csr_start + csr_format_ratingsMtx_userID_dev[row + 1] - csr_format_ratingsMtx_userID_dev[row];
+      int* csr_format_ratingsMtx_userID;
+      int* coo_format_ratingsMtx_itemID;
+      float* coo_format_ratingsMtx_rating;
+      int ratings_rows_ = ratings_rows_by_group[group];
+      csr_format_ratingsMtx_userID = csr_format_ratingsMtx_userID_dev_by_group[group];
+      coo_format_ratingsMtx_itemID = coo_format_ratingsMtx_itemID_dev_by_group[group];
+      coo_format_ratingsMtx_rating = coo_format_ratingsMtx_rating_dev_by_group[group];
+      if(num_user == ratings_rows_ - 1) 
+        csr_format_ratingsMtx_userID[num_user + 1] = csr_end;
+      csr_format_ratingsMtx_userID[num_user] = csr_start;
 
-    int i = csr_start;
-    for(r_ = csr_format_ratingsMtx_userID_dev[row]; r_ < csr_format_ratingsMtx_userID_dev[row + 1]; r_++){
-      coo_format_ratingsMtx_itemID[i] = coo_format_ratingsMtx_itemID_dev[r_];
-      coo_format_ratingsMtx_rating[i]  = coo_format_ratingsMtx_rating_dev[r_]; 
-      i++;
+      int i = csr_start;
+      for(r_ = csr_format_ratingsMtx_userID_dev[row]; r_ < csr_format_ratingsMtx_userID_dev[row + 1]; r_++){
+        coo_format_ratingsMtx_itemID[i] = coo_format_ratingsMtx_itemID_dev[r_];
+        coo_format_ratingsMtx_rating[i]  = coo_format_ratingsMtx_rating_dev[r_]; 
+        i++;
+      }
     }
-
   }
 }
 
@@ -2643,12 +2915,15 @@ void gpu_split_data(const int* csr_format_ratingsMtx_userID_dev,
   int** csr_format_ratingsMtx_userID_dev_by_group,
   int** coo_format_ratingsMtx_itemID_dev_by_group,
   float** coo_format_ratingsMtx_rating_dev_by_group,
-  const int* ratings_rows_by_group) 
+  const int* ratings_rows_by_group, bool set_only_first_group) 
 {
   struct timeval program_start, program_end;
   double program_time;
   gettimeofday(&program_start, NULL);
   LOG("gpu_split_data called...");
+  if(set_only_first_group){
+    LOG("set only first group");
+  }
 
   const long long int num_gpu_blocks = GET_BLOCKS(ratings_rows);
 
@@ -2663,7 +2938,7 @@ void gpu_split_data(const int* csr_format_ratingsMtx_userID_dev,
     csr_format_ratingsMtx_userID_dev_by_group,
     coo_format_ratingsMtx_itemID_dev_by_group,
     coo_format_ratingsMtx_rating_dev_by_group,
-    ratings_rows_by_group);
+    ratings_rows_by_group, set_only_first_group);
   checkCudaErrors(cudaDeviceSynchronize());
   gettimeofday(&program_end, NULL);
   program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
@@ -3397,7 +3672,7 @@ __global__ void center_ratings_kernel(const float* user_means, const float* user
   CUDA_KERNEL_LOOP(row, ratings_rows){
     for(int i = csr_format_ratingsMtx_userID_dev[row]; i < csr_format_ratingsMtx_userID_dev[row + 1]; i++){
       float val = coo_format_ratingsMtx_rating_dev[i] - user_means[row];
-      if(user_var[row] > (float)0.0){
+      if(user_var[row] > (float)0.01){
         val = val / std::sqrt(user_var[row]);
       }else{
         val = val_when_var_is_zero;
@@ -3733,7 +4008,7 @@ __global__ void get_cosine_similarity_host_kernel(const long long int start,
   const int* csr_format_ratingsMtx_userID_dev,
   const int* coo_format_ratingsMtx_itemID_dev,
   const float* coo_format_ratingsMtx_rating_dev,
-  float* cosine_similarity_dev, bool compare_values, bool* isBad ) 
+  float* cosine_similarity_dev, const bool compare_values, bool* isBad ) 
 {
   // assume that cosine_similarity_dev is stored in column major ordering (a column stays together in memory).
   CUDA_KERNEL_LOOP(entry, num){
@@ -3742,9 +4017,9 @@ __global__ void get_cosine_similarity_host_kernel(const long long int start,
     if(whole_index < (long long int)0 || whole_index >= ratings_rows * ratings_rows){
       isBad[0] = true;
       if(whole_index < (long long int)0){
-        cosine_similarity_dev[entry] = (float)below_index + abs(whole_index / (float)100.0);
+        cosine_similarity_dev[entry] = ((float)below_index) + abs(((float)whole_index) / ((float)100.0));
       }else{
-        cosine_similarity_dev[entry] = (float)below_index + abs(whole_index / (float)(ratings_rows * ratings_rows));
+        cosine_similarity_dev[entry] = ((float)below_index) + abs(((float)whole_index) / ((float)(ratings_rows * ratings_rows)));
       }
       return;
     }
@@ -3777,14 +4052,24 @@ __global__ void get_cosine_similarity_host_kernel(const long long int start,
           }
         }
       }
+      if(compare_values){
+        // make sure you've looked at all of user_j's ratings
+        for(int j = start_j; j < csr_format_ratingsMtx_userID_dev[user_j + 1]; j++){
+          denom_j += pow(coo_format_ratingsMtx_rating_dev[j], (float)2.0) ;
+        }
+      }
       float temp = (float)0.0;
       if(count > 0){
-        if(compare_values){
-          temp = ( num_ / std::sqrt(denom_i) ) / std::sqrt(denom_j) ; //num_ / ( std::sqrt(denom_i) * std::sqrt(denom_j) );
+        if(compare_values){ //
+          if(sqrtf(denom_i * denom_j) > (float)0.001 && gpu_abs<float>(num_) > (float)0.0001){
+            temp = num_ / ( sqrtf(denom_i * denom_j) );// ( num_ / std::sqrt(denom_i) ) / std::sqrt(denom_j) ; 
+            if(temp > (float)1.0) temp = (float)1.0;
+            if(temp < (float)(-1.0)) temp = (float)(-1.0);
+          }
         }else{
           float temp_i = (float)csr_format_ratingsMtx_userID_dev[user_i + 1] - (float)csr_format_ratingsMtx_userID_dev[user_i];
           float temp_j = (float)csr_format_ratingsMtx_userID_dev[user_j + 1] - (float)csr_format_ratingsMtx_userID_dev[user_j];
-          temp = ( ((float)count) /  std::sqrt(temp_i) ) / std::sqrt(temp_j) ;          
+          temp = ( (float)count) /  sqrtf(temp_i * temp_j) ;          
         }
       }
       cosine_similarity_dev[entry] = temp;
@@ -3802,9 +4087,9 @@ __global__ void get_cosine_similarity_host_kernel(const long long int start,
   const int* csr_format_ratingsMtx_userID_dev,
   const int* coo_format_ratingsMtx_itemID_dev,
   const float* coo_format_ratingsMtx_rating_dev,
-  float* cosine_similarity_dev, bool compare_values, 
-  int* top_N_most_sim_itemIDs_dev,
-  float* top_N_most_sim_item_similarity_dev, 
+  float* cosine_similarity_dev, const bool compare_values, 
+  const int* top_N_most_sim_itemIDs_dev,
+  const float* top_N_most_sim_item_similarity_dev, 
   const long long int ratings_cols, const int Top_N, 
   bool* isBad ) 
 {
@@ -3834,92 +4119,94 @@ __global__ void get_cosine_similarity_host_kernel(const long long int start,
       int user_i_itemID = coo_format_ratingsMtx_itemID_dev[user_i_index];
       int user_j_index = csr_format_ratingsMtx_userID_dev[user_j];
       int user_j_itemID = coo_format_ratingsMtx_itemID_dev[user_j_index];
-      for(int item = 0; item < (int)ratings_cols; item++){
+      for(int item = 0; item < (int)ratings_cols; item++)
+      {
         float user_i_rating = (float)0.0;
         while(user_i_index < csr_format_ratingsMtx_userID_dev[user_i + 1] &&
-              user_i_itemID < item){
+              user_i_itemID < item)
+        {
           user_i_index++;
           if(user_i_index < csr_format_ratingsMtx_userID_dev[user_i + 1])
             user_i_itemID = coo_format_ratingsMtx_itemID_dev[user_i_index];
         }
-        if(user_i_index < csr_format_ratingsMtx_userID_dev[user_i + 1]){
-          if(user_i_itemID == item){
-            user_i_rating = coo_format_ratingsMtx_rating_dev[user_i_index];
-          }else{
-            //user_i have not rated the item, has user_i rated similar items?
-            //walk through the items user_i HAS rated and calculate a weighted average of ratings for similar items
-            int   count_micro   = 0;
-            float num_micro    = (float)0.0;
-            float denom_micro = (float)0.0;
-            int start = 0;
-            for(int i = csr_format_ratingsMtx_userID_dev[user_i]; i < csr_format_ratingsMtx_userID_dev[user_i + 1]; i++){
-              int user_i_itemID_other = coo_format_ratingsMtx_itemID_dev[i];
-              for(int k = start; k < Top_N; k++){
-                int _other_similar_item_index = top_N_most_sim_itemIDs_dev[(long long int)k + (long long int)item * (long long int)Top_N];
-                if( user_i_itemID_other == _other_similar_item_index){
-                  count_micro += 1;
-                  num_micro += coo_format_ratingsMtx_rating_dev[i] * top_N_most_sim_item_similarity_dev[(long long int)k + (long long int)item * (long long int)Top_N];
-                  denom_micro += top_N_most_sim_item_similarity_dev[(long long int)k + (long long int)item * (long long int)Top_N] ; 
-                  start = k + 1;
-                  break;
-                }else if(user_i_itemID_other < _other_similar_item_index){
-                  start = k;
-                  break;
-                }
+        //we're out of bounds or user_i_itemID >= item
+        if(user_i_itemID == item){
+          user_i_rating = coo_format_ratingsMtx_rating_dev[user_i_index];
+        }else{
+          //user_i have not rated the item, has user_i rated similar items?
+          //walk through the items user_i HAS rated and calculate a weighted average of ratings for similar items
+          int   count_micro   = 0;
+          float num_micro    = (float)0.0;
+          float denom_micro = (float)0.0;
+          int start = 0;
+          for(int i = csr_format_ratingsMtx_userID_dev[user_i]; i < csr_format_ratingsMtx_userID_dev[user_i + 1]; i++){
+            int user_i_itemID_other = coo_format_ratingsMtx_itemID_dev[i];
+            for(int k = start; k < Top_N; k++){
+              int _other_similar_item_index = top_N_most_sim_itemIDs_dev[(long long int)k + (long long int)item * (long long int)Top_N];
+              if( user_i_itemID_other == _other_similar_item_index){
+                count_micro += 1;
+                num_micro += coo_format_ratingsMtx_rating_dev[i] * top_N_most_sim_item_similarity_dev[(long long int)k + (long long int)item * (long long int)Top_N];
+                denom_micro += top_N_most_sim_item_similarity_dev[(long long int)k + (long long int)item * (long long int)Top_N] ; 
+                start = k + 1;
+                break;
+              }else if(user_i_itemID_other < _other_similar_item_index){
+                start = k;
+                break;
               }
             }
-            if(count_micro > 0){
-              user_i_rating = num_micro / denom_micro;
-            }
+          }
+          if(denom_micro != (float)0.0){
+            user_i_rating = num_micro / denom_micro;
           }
         }
+        
         float user_j_rating = (float)0.0;
         while(user_j_index < csr_format_ratingsMtx_userID_dev[user_j + 1] &&
-              user_j_itemID < item){
+              user_j_itemID < item)
+        {
           user_j_index++;
           if(user_j_index < csr_format_ratingsMtx_userID_dev[user_j + 1])
             user_j_itemID = coo_format_ratingsMtx_itemID_dev[user_j_index];
         }
-        if(user_j_index < csr_format_ratingsMtx_userID_dev[user_j + 1]){
-          if(user_j_itemID == item){
-            user_j_rating = coo_format_ratingsMtx_rating_dev[user_j_index];
-          }else{
-            //user_j have not rated the item, has user_j rated similar items?
-            //walk through the items user_j HAS rated and calculate a weighted average of ratings for similar items
-            int   count_micro   = 0;
-            float num_micro    = (float)0.0;
-            float denom_micro = (float)0.0;
-            int start = 0;
-            for(int j = csr_format_ratingsMtx_userID_dev[user_j]; j < csr_format_ratingsMtx_userID_dev[user_j + 1]; j++){
-              int user_j_itemID_other = coo_format_ratingsMtx_itemID_dev[j];
-              for(int k = start; k < Top_N; k++){
-                int _other_similar_item_index = top_N_most_sim_itemIDs_dev[(long long int)k + (long long int)item * (long long int)Top_N];
-                if( user_j_itemID_other == _other_similar_item_index){
-                  count_micro   += 1;
-                  num_micro    += coo_format_ratingsMtx_rating_dev[j] * top_N_most_sim_item_similarity_dev[(long long int)k + (long long int)item * (long long int)Top_N] ;
-                  denom_micro += top_N_most_sim_item_similarity_dev[(long long int)k + (long long int)item * (long long int)Top_N] ; 
-                  start = k + 1;
-                  break;
-                }else if(user_j_itemID_other < _other_similar_item_index){
-                  start = k;
-                  break;
-                }
+        if(user_j_itemID == item){
+          user_j_rating = coo_format_ratingsMtx_rating_dev[user_j_index];
+        }else{
+          //user_j have not rated the item, has user_j rated similar items?
+          //walk through the items user_j HAS rated and calculate a weighted average of ratings for similar items
+          int   count_micro   = 0;
+          float num_micro    = (float)0.0;
+          float denom_micro = (float)0.0;
+          int start = 0;
+          for(int j = csr_format_ratingsMtx_userID_dev[user_j]; j < csr_format_ratingsMtx_userID_dev[user_j + 1]; j++){
+            int user_j_itemID_other = coo_format_ratingsMtx_itemID_dev[j];
+            for(int k = start; k < Top_N; k++){
+              int _other_similar_item_index = top_N_most_sim_itemIDs_dev[(long long int)k + (long long int)item * (long long int)Top_N];
+              if( user_j_itemID_other == _other_similar_item_index){
+                count_micro   += 1;
+                num_micro    += coo_format_ratingsMtx_rating_dev[j] * top_N_most_sim_item_similarity_dev[(long long int)k + (long long int)item * (long long int)Top_N] ;
+                denom_micro += top_N_most_sim_item_similarity_dev[(long long int)k + (long long int)item * (long long int)Top_N] ; 
+                start = k + 1;
+                break;
+              }else if(user_j_itemID_other < _other_similar_item_index){
+                start = k;
+                break;
               }
             }
-            if(count_micro > 0){
-              user_j_rating = num_micro / denom_micro;
-            }
+          }
+          if(denom_micro != (float)0.0){
+            user_j_rating = num_micro / denom_micro;
           }
         }
+        
         if(user_i_rating != (float)0.0){
           count_i   += 1;
+          denom_i += pow(user_i_rating, (float)2.0) ;
         }
         if(user_j_rating != (float)0.0){
+          denom_j += pow(user_j_rating, (float)2.0) ;
           count_j   += 1;
         }
         if(user_i_rating != (float)0.0 && user_j_rating != (float)0.0){
-          denom_i += pow(user_i_rating, (float)2.0) ;
-          denom_j += pow(user_j_rating, (float)2.0) ; 
           count   += 1;
           num_    += user_i_rating * user_j_rating;          
         }
@@ -3928,10 +4215,12 @@ __global__ void get_cosine_similarity_host_kernel(const long long int start,
 
       float temp = (float)0.0;
       if(count > 0){
-        if(compare_values){
-          temp = ( num_ / std::sqrt(denom_i) ) / std::sqrt(denom_j);
+        if(compare_values){ //
+          if(sqrtf(denom_i * denom_j) > (float)0.001 && gpu_abs<float>(num_) > (float)0.0001){
+            temp = num_ / sqrtf(denom_i * denom_j);
+          }
         }else{
-          temp = ( ((float)count) / std::sqrt((float)(count_i)) ) / std::sqrt((float)(count_j));          
+          temp = ( (float)count) / sqrtf( (float)(count_i) * (float)(count_j) );          
         }
         if (::isinf(temp) || ::isnan(temp)){
           isBad[0] = true;
@@ -3944,6 +4233,226 @@ __global__ void get_cosine_similarity_host_kernel(const long long int start,
 }
 
 
+void get_cosine_similarity_host_kernel_debug(const long long int start, 
+  const int num, 
+  const long long int ratings_rows,
+  const int* csr_format_ratingsMtx_userID_dev,
+  const int* coo_format_ratingsMtx_itemID_dev,
+  const float* coo_format_ratingsMtx_rating_dev,
+  float* cosine_similarity_dev, const bool compare_values, 
+  const int* top_N_most_sim_itemIDs_dev,
+  const float* top_N_most_sim_item_similarity_dev, 
+  const long long int ratings_cols, const int Top_N, 
+  bool* isBad ) 
+{
+
+  LOG("called get_cosine_similarity_host_kernel_debug") ;
+  int* csr_format_ratingsMtx_userID_host = NULL;
+  csr_format_ratingsMtx_userID_host = (int *)malloc( (ratings_rows + (long long int)1) * SIZE_OF(int) );
+  checkErrors(csr_format_ratingsMtx_userID_host);
+  checkCudaErrors(cudaMemcpy(csr_format_ratingsMtx_userID_host, csr_format_ratingsMtx_userID_dev,  (ratings_rows + (long long int)1) *  SIZE_OF(int), cudaMemcpyDeviceToHost));
+
+  LOG("csr_format_ratingsMtx_userID_host[ratings_rows] : "<< csr_format_ratingsMtx_userID_host[ratings_rows]) ;
+  int* coo_format_ratingsMtx_itemID_host = NULL;
+  float* coo_format_ratingsMtx_rating_host = NULL;
+  float* cosine_similarity_host = NULL;
+  coo_format_ratingsMtx_itemID_host = (int *)malloc(csr_format_ratingsMtx_userID_host[ratings_rows] * SIZE_OF(int));
+  coo_format_ratingsMtx_rating_host = (float *)malloc(csr_format_ratingsMtx_userID_host[ratings_rows] * SIZE_OF(float));
+  cosine_similarity_host = (float *)malloc(num * SIZE_OF(float));
+  checkErrors(coo_format_ratingsMtx_itemID_host);
+  checkErrors(coo_format_ratingsMtx_rating_host);
+  checkErrors(cosine_similarity_host);
+  
+  checkCudaErrors(cudaMemcpy(coo_format_ratingsMtx_itemID_host, coo_format_ratingsMtx_itemID_dev,  csr_format_ratingsMtx_userID_host[ratings_rows] *  SIZE_OF(int), cudaMemcpyDeviceToHost));
+  checkCudaErrors(cudaMemcpy(coo_format_ratingsMtx_rating_host, coo_format_ratingsMtx_rating_dev,  csr_format_ratingsMtx_userID_host[ratings_rows] *  SIZE_OF(float), cudaMemcpyDeviceToHost));
+  //checkCudaErrors(cudaMemcpy(cosine_similarity_host, cosine_similarity_dev,  num *  SIZE_OF(float), cudaMemcpyDeviceToHost));
+
+  int* top_N_most_sim_itemIDs_host = NULL;
+  float* top_N_most_sim_item_similarity_host = NULL;
+  top_N_most_sim_itemIDs_host = (int *)malloc((long long int)Top_N * ratings_cols * SIZE_OF(int));
+  top_N_most_sim_item_similarity_host = (float *)malloc((long long int)Top_N * ratings_cols  * SIZE_OF(float));
+  checkErrors(top_N_most_sim_itemIDs_host);
+  checkErrors(top_N_most_sim_item_similarity_host);
+  checkCudaErrors(cudaMemcpy(top_N_most_sim_itemIDs_host, top_N_most_sim_itemIDs_dev, (long long int)Top_N * ratings_cols  *  SIZE_OF(int), cudaMemcpyDeviceToHost));
+  checkCudaErrors(cudaMemcpy(top_N_most_sim_item_similarity_host, top_N_most_sim_item_similarity_dev,  (long long int)Top_N * ratings_cols *  SIZE_OF(float), cudaMemcpyDeviceToHost));
+
+  int entry = 0;
+  //getRandIntsBetween(&entry , 0 , (int)num - 1, 1);
+  
+  for(entry = 14224; entry < num; entry++)
+  {
+    //LOG("entry : "<< (long long int)entry + start);
+    long long int below_index = (long long int)entry + start;
+    long long int whole_index = from_below_diag_to_whole_faster(below_index, ratings_rows);
+    if(whole_index < (long long int)0 || whole_index >= ratings_rows * ratings_rows){
+      LOG("Is BAD!");
+      return;
+    }
+    int user_i = (int)(whole_index % ratings_rows);
+    int user_j = (int)(whole_index / ratings_rows);
+    //LOG("user_i : "<< user_i);
+    //LOG("user_j : "<< user_j);
+    if( user_i == user_j ){
+      LOG("Is BAD!");
+      return;
+      //cosine_similarity_host[entry] = (float)1.0;
+    }else{
+      int   count   = 0;
+      int   count_i   = 0;
+      int   count_j   = 0;
+      float num_    = (float)0.0;
+      float denom_i = (float)0.0;
+      float denom_j = (float)0.0;
+      int user_i_index = csr_format_ratingsMtx_userID_host[user_i];
+      int user_i_itemID = coo_format_ratingsMtx_itemID_host[user_i_index];
+      int user_j_index = csr_format_ratingsMtx_userID_host[user_j];
+      int user_j_itemID = coo_format_ratingsMtx_itemID_host[user_j_index];
+
+      int item = 0;
+      //getRandIntsBetween(&item , 0 , (int)ratings_cols - 1, 1);
+      for(item = 0; item < (int)ratings_cols; item++)
+      {
+        //LOG("item : "<< item );
+        float user_i_rating = (float)0.0;
+        int while_count = 0;
+        while(user_i_index < csr_format_ratingsMtx_userID_host[user_i + 1] &&
+              user_i_itemID < item)
+        {
+          user_i_index++;
+          if(user_i_index < csr_format_ratingsMtx_userID_host[user_i + 1])
+            user_i_itemID = coo_format_ratingsMtx_itemID_host[user_i_index];
+        }
+        //LOG("user_i_index : "<< user_i_index);
+        //LOG("user_i_itemID : "<< user_i_itemID);
+        // if(user_i_index < csr_format_ratingsMtx_userID_host[user_i + 1] - 1){
+        //   LOG("next user_i_itemID : "<< coo_format_ratingsMtx_itemID_host[user_i_index + 1]);
+        // }
+        //we're out of bounds or user_i_itemID >= item
+        if(user_i_itemID == item){
+          user_i_rating = coo_format_ratingsMtx_rating_host[user_i_index];
+          //LOG("user_i_rating : "<< user_i_rating);
+        }else{
+          //user_i have not rated the item, has user_i rated similar items?
+          //walk through the items user_i HAS rated and calculate a weighted average of ratings for similar items
+          int   count_micro   = 0;
+          float num_micro    = (float)0.0;
+          float denom_micro = (float)0.0;
+          int start = 0;
+          for(int i = csr_format_ratingsMtx_userID_host[user_i]; i < csr_format_ratingsMtx_userID_host[user_i + 1]; i++){
+            int user_i_itemID_other = coo_format_ratingsMtx_itemID_host[i];
+            for(int k = start; k < Top_N; k++){
+              int _other_similar_item_index = top_N_most_sim_itemIDs_host[(long long int)k + (long long int)item * (long long int)Top_N];
+              if( user_i_itemID_other == _other_similar_item_index){
+                //LOG("other similar item  : "<< user_i_itemID_other);
+                count_micro += 1;
+                num_micro += coo_format_ratingsMtx_rating_host[i] * top_N_most_sim_item_similarity_host[(long long int)k + (long long int)item * (long long int)Top_N];
+                denom_micro += top_N_most_sim_item_similarity_host[(long long int)k + (long long int)item * (long long int)Top_N] ; 
+                start = k + 1;
+                break;
+              }else if(user_i_itemID_other < _other_similar_item_index){
+                start = k;
+                break;
+              }
+            }
+          }
+          if(denom_micro != (float)0.0){
+            user_i_rating = num_micro / denom_micro;
+          }
+          //LOG("user_i_rating : "<< user_i_rating);
+        }
+        
+        
+        float user_j_rating = (float)0.0;
+
+        while(user_j_index < csr_format_ratingsMtx_userID_host[user_j + 1] &&
+              user_j_itemID < item)
+        {
+          user_j_index++;
+          if(user_j_index < csr_format_ratingsMtx_userID_host[user_j + 1])
+            user_j_itemID = coo_format_ratingsMtx_itemID_host[user_j_index];
+        }
+        // LOG("user_j_index : "<< user_j_index);
+        // LOG("user_j_itemID : "<< user_j_itemID);
+        // if(user_i_index < csr_format_ratingsMtx_userID_host[user_i + 1] - 1){
+        //   LOG("next user_j_itemID : "<< coo_format_ratingsMtx_itemID_host[user_j_index + 1]);
+        // }
+        if(user_j_itemID == item){
+          user_j_rating = coo_format_ratingsMtx_rating_host[user_j_index];
+          //LOG("user_j_rating : "<< user_j_rating);
+        }else{
+          //user_j have not rated the item, has user_j rated similar items?
+          //walk through the items user_j HAS rated and calculate a weighted average of ratings for similar items
+          int   count_micro   = 0;
+          float num_micro    = (float)0.0;
+          float denom_micro = (float)0.0;
+          int start = 0;
+          for(int j = csr_format_ratingsMtx_userID_host[user_j]; j < csr_format_ratingsMtx_userID_host[user_j + 1]; j++){
+            int user_j_itemID_other = coo_format_ratingsMtx_itemID_host[j];
+            for(int k = start; k < Top_N; k++){
+              int _other_similar_item_index = top_N_most_sim_itemIDs_host[(long long int)k + (long long int)item * (long long int)Top_N];
+              if( user_j_itemID_other == _other_similar_item_index){
+                //LOG("other similar item  : "<< user_j_itemID_other);
+                count_micro   += 1;
+                num_micro    += coo_format_ratingsMtx_rating_host[j] * top_N_most_sim_item_similarity_host[(long long int)k + (long long int)item * (long long int)Top_N] ;
+                denom_micro += top_N_most_sim_item_similarity_host[(long long int)k + (long long int)item * (long long int)Top_N] ; 
+                start = k + 1;
+                break;
+              }else if(user_j_itemID_other < _other_similar_item_index){
+                start = k;
+                break;
+              }
+            }
+          }
+          if(denom_micro != (float)0.0){
+            user_j_rating = num_micro / denom_micro;
+          }
+          //LOG("user_j_rating : "<< user_j_rating);
+        }
+        
+        
+        if(user_i_rating != (float)0.0){
+          count_i   += 1;
+          denom_i += pow(user_i_rating, (float)2.0) ;
+        }
+        if(user_j_rating != (float)0.0){
+          denom_j += pow(user_j_rating, (float)2.0) ;
+          count_j   += 1;
+        }
+        if(user_i_rating != (float)0.0 && user_j_rating != (float)0.0){
+          count   += 1;
+          num_    += user_i_rating * user_j_rating;          
+        }
+        
+      } //end for loop on items
+
+      float temp = (float)0.0;
+      if(count > 0){
+        if(compare_values){ //
+          if(std::sqrt(denom_i * denom_j) > (float)0.001 && std::abs(num_) > (float)0.0001){
+            temp = num_ / std::sqrt(denom_i * denom_j);
+          }
+        }else{
+          temp = ( (float)count) / std::sqrt( (float)(count_i) * (float)(count_j) );          
+        }
+        if (::isinf(temp) || ::isnan(temp)){
+          LOG("Is BAD!");
+          return;
+        };
+      }
+      LOG("cosine_similarity_host["<<entry<<"] : "<< temp);
+      cosine_similarity_host[entry] = temp;
+    }
+  } // end for loop on cosine mtx entries
+  LOG("num : "<< (long long int)num + start);
+  free(csr_format_ratingsMtx_userID_host);
+  free(coo_format_ratingsMtx_itemID_host);
+  free(coo_format_ratingsMtx_rating_host);
+  free(cosine_similarity_host);
+  free(top_N_most_sim_itemIDs_host);
+  free(top_N_most_sim_item_similarity_host);
+}
+
+
 
 void get_cosine_similarity_host_kernel_debug(const long long int start, 
   const int num, 
@@ -3951,15 +4460,12 @@ void get_cosine_similarity_host_kernel_debug(const long long int start,
   const int* csr_format_ratingsMtx_userID_dev,
   const int* coo_format_ratingsMtx_itemID_dev,
   const float* coo_format_ratingsMtx_rating_dev,
-  float* cosine_similarity_dev, bool* isBad ) 
-{/*
-  bool debug = true;
-
+  float* cosine_similarity_dev, bool compare_values, bool* isBad ) 
+{
+  LOG("called get_cosine_similarity_host_kernel_debug") ;
   int* csr_format_ratingsMtx_userID_host = (int *)malloc((ratings_rows +1)* SIZE_OF(int));
-  checkCudaErrors(cudaMemcpy(csr_format_ratingsMtx_userID_host, csr_format_ratingsMtx_userID_dev,  (ratings_rows +1) *  SIZE_OF(int), cudaMemcpyDeviceToHost));
-  if(debug && 0){
-    LOG("max_index =  : "<<csr_format_ratingsMtx_userID_host[ratings_rows]);
-  }
+  checkCudaErrors(cudaMemcpy(csr_format_ratingsMtx_userID_host, csr_format_ratingsMtx_userID_dev,  (ratings_rows + (long long int)1) *  SIZE_OF(int), cudaMemcpyDeviceToHost));
+
   int* coo_format_ratingsMtx_itemID_host = (int *)malloc(csr_format_ratingsMtx_userID_host[ratings_rows] * SIZE_OF(int));
   float* coo_format_ratingsMtx_rating_host = (float *)malloc(csr_format_ratingsMtx_userID_host[ratings_rows] * SIZE_OF(float));
   float* cosine_similarity_host = (float *)malloc(num * SIZE_OF(float));
@@ -3971,98 +4477,142 @@ void get_cosine_similarity_host_kernel_debug(const long long int start,
   for(int entry = 0; entry < num; entry++){
     long long int below_index = (long long int)entry + start;
     long long int whole_index = from_below_diag_to_whole_faster(below_index, ratings_rows);
-    int user_i = (int)(whole_index % ratings_rows);
-    int user_j = (int)(whole_index / ratings_rows);
-
-    long long int whole_index_slow = from_below_diag_to_whole(below_index, ratings_rows);
-    int user_i_slow = (int)(whole_index_slow % ratings_rows);
-    int user_j_slow = (int)(whole_index_slow / ratings_rows);
-    if(user_i_slow != user_i || user_j_slow != user_j){
-      LOG("below_index : "<<below_index);
-      LOG("whole_index : "<<whole_index);
-      LOG("max whole index =  : "<<ratings_rows * ratings_rows - (long long int)1);
-      LOG("user_i : "<<user_i);
-      LOG("user_j : "<<user_j);
-
-      LOG("slow whole_index : "<<whole_index_slow);
-      LOG("slow user_i : "<<user_i_slow);
-      LOG("slow user_j : "<<user_j_slow<<std::endl);
-      
-      return;
-    }    
-    if(debug && 0){
-      LOG("below_index : "<<below_index);
-      LOG("whole_index : "<<whole_index);
-      LOG("max whole index =  : "<<ratings_rows * ratings_rows - (long long int)1);
-      LOG("user_i : "<<user_i);
-      LOG("user_j : "<<user_j);
-    }
-
+  
     if(whole_index < (long long int)0 || whole_index >= ratings_rows * ratings_rows){
       LOG("below_index : "<<below_index);
       LOG("whole_index : "<<whole_index);
       LOG("max whole index =  : "<<ratings_rows * ratings_rows - (long long int)1);
-      LOG("user_i : "<<user_i);
-      LOG("user_j : "<<user_j);
+
       LOG("Is BAD!");
       whole_index = from_below_diag_to_whole(below_index, ratings_rows);
-      user_i = (int)(whole_index % ratings_rows);
-      user_j = (int)(whole_index / ratings_rows);
       LOG("slow whole_index : "<<whole_index);
-      LOG("slow user_i : "<<user_i);
-      LOG("slow user_j : "<<user_j<<std::endl);
-      
       return;
     }
+    int user_i = (int)(whole_index % ratings_rows);
+    int user_j = (int)(whole_index / ratings_rows);
+
     if( user_i == user_j){
       LOG("Is BAD because user_i == user_j");
+      LOG("below_index : "<<below_index);
+      LOG("whole_index : "<<whole_index);
+      LOG("user_i : "<<user_i);
+      LOG("user_j : "<<user_j);
       return;
     }else{
       int   count   = 0;
-      float num     = (float)0.0;
+      float num_    = (float)0.0;
       float denom_i = (float)0.0;
       float denom_j = (float)0.0;
+      int start_j = csr_format_ratingsMtx_userID_host[user_j];
       for(int i = csr_format_ratingsMtx_userID_host[user_i]; i < csr_format_ratingsMtx_userID_host[user_i + 1]; i++){
         int user_i_itemID = coo_format_ratingsMtx_itemID_host[i];
-        int user_j_itemID = 0;
-        int start_j = csr_format_ratingsMtx_userID_host[user_j];
-        //LOG("start_j : " <<start_j);
+        denom_i += pow(coo_format_ratingsMtx_rating_host[i], (float)2.0) ;
         for(int j = start_j; j < csr_format_ratingsMtx_userID_host[user_j + 1]; j++){
-          user_j_itemID = coo_format_ratingsMtx_itemID_host[j];
-          if(debug && 0){
-            LOG("user_i : "<<user_i);
-            LOG("coo index i : "<<i);
-            LOG("user_i_itemID : "<<user_i_itemID);
-            LOG("user_j : "<<user_j);
-            LOG("coo index j : "<<j);
-            LOG("user_j_itemID : "<<user_j_itemID);
-            LOG("largest possible coo index : "<<csr_format_ratingsMtx_userID_host[ratings_rows] - 1);
-          }
+          int user_j_itemID = coo_format_ratingsMtx_itemID_host[j];
+          denom_j += pow(coo_format_ratingsMtx_rating_host[j], (float)2.0) ; 
           if( user_i_itemID == user_j_itemID){
             count   += 1;
-            num     += coo_format_ratingsMtx_rating_host[i] * coo_format_ratingsMtx_rating_host[j] ;
-            denom_i += pow(coo_format_ratingsMtx_rating_host[i], (float)2.0) ;
-            denom_j += pow(coo_format_ratingsMtx_rating_host[j], (float)2.0) ; 
+            num_    += coo_format_ratingsMtx_rating_host[i] * coo_format_ratingsMtx_rating_host[j] ;
             start_j = j + 1;
+            break;
           }else if(user_i_itemID < user_j_itemID){
             start_j = j;
+            denom_j -= pow(coo_format_ratingsMtx_rating_host[j], (float)2.0) ;
             break;
           }
         }
       }
-      if(count > 0){
-          //float temp = num / sqrt(denom_i * denom_j);
-        float temp_i = (float)csr_format_ratingsMtx_userID_host[user_i + 1] - (float)csr_format_ratingsMtx_userID_host[user_i];
-        float temp_j = (float)csr_format_ratingsMtx_userID_host[user_j + 1] - (float)csr_format_ratingsMtx_userID_host[user_j];
-        float temp = ((float)count) / sqrtf(temp_i * temp_j);
-        cosine_similarity_host[entry] = temp;
-        if (::isinf(temp) || ::isnan(temp)){
-          LOG("Is BAD!");
-          return;
-        };
-      }else{
-        cosine_similarity_host[entry] = (float)0.0;
+      if(compare_values){
+        // make sure you've looked at all of user_j's ratings
+        for(int j = start_j; j < csr_format_ratingsMtx_userID_host[user_j + 1]; j++){
+          denom_j += pow(coo_format_ratingsMtx_rating_host[j], (float)2.0) ;
+        }
       }
+      float temp = (float)0.0;
+      if(count > 0){ //
+        if(compare_values){ //
+          if(std::sqrt(denom_i * denom_j) > (float)0.001 && std::abs(num_) > (float)0.0001){
+            temp = num_ / ( std::sqrt(denom_i * denom_j) );// ( num_ / std::sqrt(denom_i) ) / std::sqrt(denom_j) ; 
+            if(temp > (float)1.0) temp = (float)1.0;
+            if(temp < (float)(-1.0)) temp = (float)(-1.0);
+          }
+        }else{
+          float temp_i = (float)csr_format_ratingsMtx_userID_host[user_i + 1] - (float)csr_format_ratingsMtx_userID_host[user_i];
+          float temp_j = (float)csr_format_ratingsMtx_userID_host[user_j + 1] - (float)csr_format_ratingsMtx_userID_host[user_j];
+          temp =  ((float)count) /  std::sqrt(temp_i * temp_j) ;          
+        }
+      }
+      cosine_similarity_host[entry] = temp;
+
+      if (::isinf(temp) || ::isnan(temp)  ){
+        LOG("Is BAD value is INF or NAN");
+        LOG("below_index : "<<below_index);
+        LOG("whole_index : "<<whole_index);
+        LOG("user_i : "<<user_i);
+        LOG("user_j : "<<user_j);
+        LOG("cosine_similarity_host[entry] : "<<temp);
+        LOG(" ");
+
+        LOG("user_i num ratings : "<<csr_format_ratingsMtx_userID_host[user_i + 1] - csr_format_ratingsMtx_userID_host[user_i]);
+        LOG("user_j num ratings : "<<csr_format_ratingsMtx_userID_host[user_j + 1] - csr_format_ratingsMtx_userID_host[user_j]);
+        int   count   = 0;
+        float num_    = (float)0.0;
+        float denom_i = (float)0.0;
+        float denom_j = (float)0.0;
+        int start_j = csr_format_ratingsMtx_userID_host[user_j];
+        for(int i = csr_format_ratingsMtx_userID_host[user_i]; i < csr_format_ratingsMtx_userID_host[user_i + 1]; i++){
+          int user_i_itemID = coo_format_ratingsMtx_itemID_host[i];
+          LOG("user_i_itemID : "<<user_i_itemID);
+          LOG("denom_i += : "<<ToString<float>(pow(coo_format_ratingsMtx_rating_host[i], (float)2.0)));
+          denom_i += pow(coo_format_ratingsMtx_rating_host[i], (float)2.0) ;
+          for(int j = start_j; j < csr_format_ratingsMtx_userID_host[user_j + 1]; j++){
+            int user_j_itemID = coo_format_ratingsMtx_itemID_host[j];
+            LOG("  user_j_itemID : "<<user_j_itemID);
+            LOG("  denom_j += : "<<ToString<float>(pow(coo_format_ratingsMtx_rating_host[j], (float)2.0)));
+            denom_j += pow(coo_format_ratingsMtx_rating_host[j], (float)2.0) ; 
+            if( user_i_itemID == user_j_itemID){
+              count   += 1;
+              LOG("    num_ += : "<<ToString<float>(coo_format_ratingsMtx_rating_host[i] * coo_format_ratingsMtx_rating_host[j]));
+              num_    += coo_format_ratingsMtx_rating_host[i] * coo_format_ratingsMtx_rating_host[j] ;
+              start_j = j + 1;
+              break;
+            }else if(user_i_itemID < user_j_itemID){
+              start_j = j;
+              denom_j -= pow(coo_format_ratingsMtx_rating_host[j], (float)2.0) ;
+              break;
+            }
+          }
+        }
+        if(compare_values){
+          // make sure you've looked at all of user_j's ratings
+          for(int j = start_j; j < csr_format_ratingsMtx_userID_host[user_j + 1]; j++){
+            denom_j += pow(coo_format_ratingsMtx_rating_host[j], (float)2.0) ;
+          }
+        }
+        float temp_ = (float)0.0;
+        if(count > 0){ 
+          LOG("here");
+          if(compare_values){ //
+            if(std::sqrt(denom_i * denom_j) > (float)0.001 && std::abs(num_) > (float)0.0001){
+              LOG("num_ : "<<ToString<float>(num_));
+              LOG("std::abs(num_) > (float)0.0001 : "<<(std::abs(num_) > (float)0.0001));
+              LOG("std::abs(num_) : "<<ToString<float>(std::abs(num_)) );
+              LOG("denom_i : "<<ToString<float>(denom_i));
+              LOG("denom_j : "<<ToString<float>(denom_j));
+              temp_ = num_ / ( std::sqrt(denom_i * denom_j) );// ( num_ / std::sqrt(denom_i) ) / std::sqrt(denom_j) ; 
+              if(temp_ > (float)1.0) temp_ = (float)1.0;
+              if(temp_ < (float)(-1.0)) temp_ = (float)(-1.0);
+            }
+          }else{
+            float temp_i = (float)csr_format_ratingsMtx_userID_host[user_i + 1] - (float)csr_format_ratingsMtx_userID_host[user_i];
+            float temp_j = (float)csr_format_ratingsMtx_userID_host[user_j + 1] - (float)csr_format_ratingsMtx_userID_host[user_j];
+            temp_ =  ((float)count) /  std::sqrt(temp_i * temp_j) ;          
+          }
+        }
+        LOG("temp : "<<temp_);
+
+        return;
+      };
     }
   }
  
@@ -4070,7 +4620,7 @@ void get_cosine_similarity_host_kernel_debug(const long long int start,
  free(coo_format_ratingsMtx_itemID_host);
  free(coo_format_ratingsMtx_rating_host);
  free(cosine_similarity_host);
- */
+ 
 }
 
 
@@ -4082,14 +4632,15 @@ void get_cosine_similarity_host_kernel_debug(const long long int start,
   const float* coo_format_ratingsMtx_rating_dev,
   float* cosine_similarity_host, 
   bool compare_values,
-  int* top_N_most_sim_itemIDs_dev,
-  float* top_N_most_sim_item_similarity_dev, 
+  const int* top_N_most_sim_itemIDs_dev,
+  const float* top_N_most_sim_item_similarity_dev, 
   const long long int ratings_cols, const int Top_N)
  {
 
-  bool Debug = true;
+  bool Debug = false;
   bool print = true;
   std::string blank = "";
+
 
   struct timeval program_start, program_end;
   double program_time;
@@ -4102,9 +4653,13 @@ void get_cosine_similarity_host_kernel_debug(const long long int start,
     if(ratings_cols <= (long long int)0) top_N_most_sim_itemIDs_dev = NULL;
     if(Top_N <= (long long int)0) top_N_most_sim_itemIDs_dev = NULL;
   }
-  if(Debug) {
-    LOG("compare_values : " <<compare_values) ;
-    LOG("top_N_most_sim_itemIDs_dev : " <<(top_N_most_sim_itemIDs_dev != NULL)) ;
+  if(top_N_most_sim_itemIDs_dev){
+    Debug = true;
+    LOG("Debug bool : " <<Debug) ;
+    LOG("top_N_most_sim_itemIDs_dev bool : " <<(top_N_most_sim_itemIDs_dev != NULL)) ;
+  }
+  if(print) {
+    LOG("compare_values bool : " <<compare_values) ;
   }
   bool isBad_host = false;
   bool* isBad;
@@ -4113,73 +4668,109 @@ void get_cosine_similarity_host_kernel_debug(const long long int start,
 
   const long long int num_below_diag = (ratings_rows * (ratings_rows - (long long int)1)) / (long long int)2;
 
+  long long int CUDA_NUM_BLOCKS_TEMP = CUDA_NUM_BLOCKS;
+  long long int CUDA_NUM_THREADS_TEMP = CUDA_NUM_THREADS;
+  if(top_N_most_sim_itemIDs_dev != NULL){
+    if(Debug) LOG(" changing CUDA_NUM_BLOCKS_TEMP, and CUDA_NUM_THREADS_TEMP values") ;
+    CUDA_NUM_BLOCKS_TEMP = (long long int)1000;
+    CUDA_NUM_THREADS_TEMP = (long long int)100;
+  }
 
   //long long int num_gpu_blocks = GET_BLOCKS(ratings_rows * ratings_rows);
-  long long int num_gpu_blocks = GET_BLOCKS(num_below_diag);
+  long long int num_gpu_blocks = GET_BLOCKS(num_below_diag, CUDA_NUM_THREADS_TEMP);
 
-  if(Debug) LOG( "total loops : " <<ceil( ((float)(num_below_diag)) / ((float)(CUDA_NUM_BLOCKS*CUDA_NUM_THREADS)) ) ) ;
+  if(Debug) {
+    LOG("num_below_diag : " <<num_below_diag) ;
+    LOG("CUDA_NUM_BLOCKS_TEMP : " <<CUDA_NUM_BLOCKS_TEMP) ;
+    LOG("CUDA_NUM_THREADS_TEMP : " <<CUDA_NUM_THREADS_TEMP) ;
+    LOG( "total loops : " <<ceil( ((float)(num_below_diag)) / ((float)(CUDA_NUM_BLOCKS_TEMP * CUDA_NUM_THREADS_TEMP)) ) ) ;
+  }  
 
+  
 
-  if (num_gpu_blocks > CUDA_NUM_BLOCKS){
+  if (num_gpu_blocks > CUDA_NUM_BLOCKS_TEMP){
     long long int num_loops = (long long int)0;
-    const long long int num_entries = (long long int)(CUDA_NUM_BLOCKS * CUDA_NUM_THREADS);
+    const long long int num_entries = (long long int)(CUDA_NUM_BLOCKS_TEMP * CUDA_NUM_THREADS_TEMP);
     long long int spot = (long long int)0;
 
     float * cosine_similarity_dev;
     checkCudaErrors(cudaMalloc((void**)&cosine_similarity_dev, num_entries * SIZE_OF(float)));
-    if(Debug) LOG("cosine_similarity_dev allocated") ;
+    if(Debug) {
+      LOG("cosine_similarity_dev allocated") ;
+      gpu_set_all<float>(cosine_similarity_dev, num_entries, (float)0.0);
+    }
 
-    while (num_gpu_blocks > CUDA_NUM_BLOCKS){
-      if(Debug) {
+    while (num_gpu_blocks > CUDA_NUM_BLOCKS_TEMP){
+      if(Debug && top_N_most_sim_itemIDs_dev) {
         LOG("num_gpu_blocks : " <<num_gpu_blocks) ;
         LOG("num_loops : " <<num_loops) ;
         LOG("spot : " <<spot) ;
+        LOG("num_entries : " <<num_entries) ;
         //save_host_array_to_file<float>(cosine_similarity_host + spot, (int)num_entries, "cosine_similarity_host");
       }
       //checkCudaErrors(cudaMemcpy(cosine_similarity_dev, cosine_similarity_host + spot,  num_entries *  SIZE_OF(float), cudaMemcpyHostToDevice));
       //checkCudaErrors(cudaDeviceSynchronize());
       if(top_N_most_sim_itemIDs_dev){
-        get_cosine_similarity_host_kernel<<<CUDA_NUM_BLOCKS, CUDA_NUM_THREADS>>>(spot, (int)num_entries, ratings_rows, 
+        get_cosine_similarity_host_kernel<<<CUDA_NUM_BLOCKS_TEMP, CUDA_NUM_THREADS_TEMP>>>(spot, (int)num_entries, ratings_rows, 
           csr_format_ratingsMtx_userID_dev,
           coo_format_ratingsMtx_itemID_dev,
           coo_format_ratingsMtx_rating_dev,
           cosine_similarity_dev, compare_values, 
           top_N_most_sim_itemIDs_dev, top_N_most_sim_item_similarity_dev,  
           ratings_cols, Top_N, isBad);
+        // get_cosine_similarity_host_kernel_debug(spot, (int)num_entries, ratings_rows, 
+        //   csr_format_ratingsMtx_userID_dev,
+        //   coo_format_ratingsMtx_itemID_dev,
+        //   coo_format_ratingsMtx_rating_dev,
+        //   cosine_similarity_dev, compare_values, 
+        //   top_N_most_sim_itemIDs_dev, top_N_most_sim_item_similarity_dev,  
+        //   ratings_cols, Top_N, isBad);
       }else{
-        get_cosine_similarity_host_kernel<<<CUDA_NUM_BLOCKS, CUDA_NUM_THREADS>>>(spot, (int)num_entries, ratings_rows, 
+        get_cosine_similarity_host_kernel<<<CUDA_NUM_BLOCKS_TEMP, CUDA_NUM_THREADS_TEMP>>>(spot, (int)num_entries, ratings_rows, 
           csr_format_ratingsMtx_userID_dev,
           coo_format_ratingsMtx_itemID_dev,
           coo_format_ratingsMtx_rating_dev,
-          cosine_similarity_dev, compare_values, isBad);        
+          cosine_similarity_dev, compare_values, isBad);   
       }
+
       CUDA_CHECK(cudaMemcpy(&isBad_host, isBad, SIZE_OF(bool), cudaMemcpyDeviceToHost));
-      if(isBad_host || Debug){
+      if(isBad_host){
+        if(top_N_most_sim_itemIDs_dev){
+          //
+        }else{
+          get_cosine_similarity_host_kernel_debug(spot, (int)num_entries, ratings_rows, 
+            csr_format_ratingsMtx_userID_dev,
+            coo_format_ratingsMtx_itemID_dev,
+            coo_format_ratingsMtx_rating_dev,
+            cosine_similarity_dev, compare_values, isBad);  
+        }
+        LOG("num_gpu_blocks : " <<num_gpu_blocks) ;
+        LOG("num_loops : " <<num_loops) ;
+        LOG("spot : " <<spot) ;
+        LOG("num_entries : " <<num_entries) ;
         save_device_array_to_file(cosine_similarity_dev, (int)num_entries, "cosine_similarity_dev", strPreamble(blank));
         ABORT_IF_NEQ(0, 1, "isBad");
       };
 
-      // get_cosine_similarity_host_kernel_debug(spot, num_entries, ratings_rows, 
-      //   csr_format_ratingsMtx_userID_dev,
-      //   coo_format_ratingsMtx_itemID_dev,
-      //   coo_format_ratingsMtx_rating_dev,
-      //   cosine_similarity_dev, isBad);
-      checkCudaErrors(cudaDeviceSynchronize());
+      
       checkCudaErrors(cudaMemcpy(cosine_similarity_host + spot, cosine_similarity_dev,  num_entries *  SIZE_OF(float), cudaMemcpyDeviceToHost));
-      checkCudaErrors(cudaDeviceSynchronize());
-      if(Debug && 0) {
+      if(Debug ) {
+        checkCudaErrors(cudaDeviceSynchronize());
+        gpu_set_all<float>(cosine_similarity_dev, num_entries, (float)0.0);
         //LOG("Here") ;
         //save_host_array_to_file<float>(cosine_similarity_host + spot, (int)num_entries, "cosine_similarity_host");
       }
-      num_gpu_blocks = num_gpu_blocks - (long long int)CUDA_NUM_BLOCKS;
+      num_gpu_blocks = num_gpu_blocks - CUDA_NUM_BLOCKS_TEMP;
       num_loops += (long long int)1;
       spot = num_loops * num_entries;
-      if(Debug) {
+      if(Debug && top_N_most_sim_itemIDs_dev) {
         gettimeofday(&program_end, NULL);
-        program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
+        program_time = (program_end.tv_sec * 1000 + (program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
         if(print) LOG("get_cosine_similarity_host average loop run time : "<<readable_time(program_time / (double)num_loops));
+        //ABORT_IF_NEQ(0, 1, "");
       }
-    }
+    } // end while
+
     if(Debug && 0) {
       LOG("num_gpu_blocks : " <<num_gpu_blocks) ;
       LOG("num_loops : " <<num_loops) ;
@@ -4189,7 +4780,7 @@ void get_cosine_similarity_host_kernel_debug(const long long int start,
     // total - (done) = left to go 
     // checkCudaErrors(cudaMemcpy(cosine_similarity_dev, cosine_similarity_host + spot,  (num_below_diag - spot) *  SIZE_OF(float), cudaMemcpyHostToDevice));
     if(top_N_most_sim_itemIDs_dev){
-      get_cosine_similarity_host_kernel<<<num_gpu_blocks, CUDA_NUM_THREADS>>>(spot, (int)(num_below_diag - spot), ratings_rows, 
+      get_cosine_similarity_host_kernel<<<num_gpu_blocks, CUDA_NUM_THREADS_TEMP>>>(spot, (int)(num_below_diag - spot), ratings_rows, 
         csr_format_ratingsMtx_userID_dev,
         coo_format_ratingsMtx_itemID_dev,
         coo_format_ratingsMtx_rating_dev,
@@ -4197,7 +4788,7 @@ void get_cosine_similarity_host_kernel_debug(const long long int start,
         top_N_most_sim_itemIDs_dev, top_N_most_sim_item_similarity_dev,  
           ratings_cols, Top_N,  isBad);
     }else{
-      get_cosine_similarity_host_kernel<<<num_gpu_blocks, CUDA_NUM_THREADS>>>(spot, (int)(num_below_diag - spot), ratings_rows, 
+      get_cosine_similarity_host_kernel<<<num_gpu_blocks, CUDA_NUM_THREADS_TEMP>>>(spot, (int)(num_below_diag - spot), ratings_rows, 
         csr_format_ratingsMtx_userID_dev,
         coo_format_ratingsMtx_itemID_dev,
         coo_format_ratingsMtx_rating_dev,
@@ -4205,13 +4796,11 @@ void get_cosine_similarity_host_kernel_debug(const long long int start,
     }
     CUDA_CHECK(cudaMemcpy(&isBad_host, isBad, SIZE_OF(bool), cudaMemcpyDeviceToHost));
     checkCudaErrors(cudaFree(isBad));
-    if(isBad_host || Debug){
+    if(isBad_host){
       save_device_array_to_file(cosine_similarity_dev, (int)num_entries, "cosine_similarity_dev", strPreamble(blank));
       ABORT_IF_NEQ(0, 1, "isBad");
     };
-    checkCudaErrors(cudaDeviceSynchronize());
     checkCudaErrors(cudaMemcpy(cosine_similarity_host + spot, cosine_similarity_dev,  (num_below_diag - spot) *  SIZE_OF(float), cudaMemcpyDeviceToHost));
-    checkCudaErrors(cudaDeviceSynchronize());
     checkCudaErrors(cudaFree(cosine_similarity_dev));
   }else{
     if(Debug) LOG("get_cosine_similarity_host num_gpu_blocks <= CUDA_NUM_BLOCKS") ;
@@ -4220,7 +4809,7 @@ void get_cosine_similarity_host_kernel_debug(const long long int start,
 
     // checkCudaErrors(cudaMemcpy(cosine_similarity_dev, cosine_similarity_host,  num_below_diag *  SIZE_OF(float), cudaMemcpyHostToDevice));
     if(top_N_most_sim_itemIDs_dev){
-      get_cosine_similarity_host_kernel<<<num_gpu_blocks, CUDA_NUM_THREADS>>>(0, (int)num_below_diag, ratings_rows, 
+      get_cosine_similarity_host_kernel<<<num_gpu_blocks, CUDA_NUM_THREADS_TEMP>>>(0, (int)num_below_diag, ratings_rows, 
         csr_format_ratingsMtx_userID_dev,
         coo_format_ratingsMtx_itemID_dev,
         coo_format_ratingsMtx_rating_dev,
@@ -4228,7 +4817,7 @@ void get_cosine_similarity_host_kernel_debug(const long long int start,
         top_N_most_sim_itemIDs_dev, top_N_most_sim_item_similarity_dev,  
           ratings_cols, Top_N, isBad);
     }else{
-      get_cosine_similarity_host_kernel<<<num_gpu_blocks, CUDA_NUM_THREADS>>>(0, (int)num_below_diag, ratings_rows, 
+      get_cosine_similarity_host_kernel<<<num_gpu_blocks, CUDA_NUM_THREADS_TEMP>>>(0, (int)num_below_diag, ratings_rows, 
         csr_format_ratingsMtx_userID_dev,
         coo_format_ratingsMtx_itemID_dev,
         coo_format_ratingsMtx_rating_dev,
@@ -4845,6 +5434,41 @@ void gpu_get_num_latent_factors<float>(cublasHandle_t dn_handle, const long long
 }
 
 template <>
+void gpu_get_latent_factor_mass<float>(cublasHandle_t dn_handle, const long long int m, float* S, 
+  const long long int num_latent_factors, float* percent) 
+{
+  if(too_big(m) ) {ABORT_IF_EQ(0, 0,"Long long long int too big");}
+  if(num_latent_factors > m ) {ABORT_IF_EQ(0, 0,"Long long long int too big");}
+
+  bool Debug = false;
+  float sum;
+  if(Debug) {
+    LOG("here!");
+    LOG("m : "<< m);
+  }
+  gpu_asum<float>(dn_handle, m, S, &sum);
+  if(Debug) LOG("here!");
+
+  float* S_host = NULL;
+  S_host = (float *)malloc(SIZE_OF(float)*m); 
+  checkErrors(S_host);
+  CUDA_CHECK(cudaMemcpy(S_host, S, m * SIZE_OF(float), cudaMemcpyDeviceToHost));
+
+  if(Debug) LOG("here!");
+
+  float sum_so_far;
+  for(int j = 0; j < (int)num_latent_factors; j++){
+    if(Debug) {
+      LOG("S_host[ "<<j<<" ] : "<< S_host[j]);
+    }
+    sum_so_far += S_host[j];
+  }
+  percent[0] = sum_so_far / sum;
+  free(S_host);
+  if(Debug) LOG("here!");
+}
+
+template <>
 void preserve_first_m_rows<float>(const long long int old_lda, const long long int new_lda, 
                                   const long long int sda, float* V) 
 {
@@ -5036,12 +5660,7 @@ void gpu_orthogonal_decomp<float>(cublasHandle_t handle, cusolverDnHandle_t dn_s
       // LOG("Press Enter to continue.") ;
       // std::cin.ignore();
   }
-  int first_tiny_sv_ = first_tiny_sv(min_dim, d_S, (float)0.0001);
-  if(first_tiny_sv_ < min_dim){
-    LOG("WARNING WILL DIVIDE BY ~ZERO");
-    LOG("first_tiny_sv_ : " << first_tiny_sv_<< " < "<<min_dim);
-    save_device_array_to_file<float>(d_S, min_dim, "singular_values");
-  }
+  int first_tiny_sv_ = first_tiny_sv(min_dim, d_S, (float)0.00001);
 
   if(n > m){
       //the tranpose problem was solved
@@ -5058,6 +5677,11 @@ void gpu_orthogonal_decomp<float>(cublasHandle_t handle, cusolverDnHandle_t dn_s
         // std::cin.ignore();
     }
     if(S_with_U){
+      if(first_tiny_sv_ < min_dim){
+        LOG("WARNING WILL DIVIDE BY ~ZERO");
+        LOG("first_tiny_sv_ : " << first_tiny_sv_<< " < "<<min_dim);
+        save_device_array_to_file<float>(d_S, min_dim, "singular_values");
+      }
       gpu_mult_US_in_SVD<float>(m, min_dim, U, d_S, true);
       gpu_div_US_in_SVD<float>(n, min_dim, V, d_S, true);
     }
@@ -5067,6 +5691,11 @@ void gpu_orthogonal_decomp<float>(cublasHandle_t handle, cusolverDnHandle_t dn_s
     transpose_in_place<float>(handle, sda,  sda, V);
     gpu_gemm<float>(handle, false, false, n, m, n, (float)1.0, V, A, (float)0.0, U);
     if(!S_with_U){
+      if(first_tiny_sv_ < min_dim){
+        LOG("WARNING WILL DIVIDE BY ~ZERO");
+        LOG("first_tiny_sv_ : " << first_tiny_sv_<< " < "<<min_dim);
+        save_device_array_to_file<float>(d_S, min_dim, "singular_values");
+      }
       if(Debug) LOG("Divide U by S and mult V by S");
       gpu_div_US_in_SVD<float>(m, min_dim, U, d_S, true);
       gpu_mult_US_in_SVD<float>(n, min_dim, V, d_S, true);
@@ -5083,6 +5712,7 @@ void gpu_orthogonal_decomp<float>(cublasHandle_t handle, cusolverDnHandle_t dn_s
   
 
   gpu_get_num_latent_factors<float>(handle, min_dim, d_S, num_latent_factors, percent);
+
 
   if(Debug){
     float max_S = (float)0.0;
@@ -6394,7 +7024,7 @@ void gpu_R_error<float>(cublasHandle_t dn_handle, const cusparseHandle_t sp_hand
                       const long long int batch_size_t, const long long int batch_size_GU, 
                       const long long int num_latent_factors, const long long int ratings_cols,
                       const int nnz, const int first_coo_ind, const bool compress, 
-                      float* testing_entries, float* coo_errors, const float testing_fraction,
+                      float* training_entries, float* coo_errors, const float testing_fraction,
                       const float *coo_format_ratingsMtx_rating_dev_batch, 
                       const int *csr_format_ratingsMtx_userID_dev_batch, 
                       const int *coo_format_ratingsMtx_itemID_dev_batch,
@@ -6405,7 +7035,10 @@ void gpu_R_error<float>(cublasHandle_t dn_handle, const cusparseHandle_t sp_hand
 {
   bool Debug  = false;
   bool print_ = true;
-  if(print_) LOG("gpu_R_error called");
+  if(print_) {
+    LOG("gpu_R_error called");
+    LOG("initial training_rate : "<<training_rate);
+  }
   std::string blank = "";
 
   struct timeval program_start, program_end;
@@ -6435,25 +7068,25 @@ void gpu_R_error<float>(cublasHandle_t dn_handle, const cusparseHandle_t sp_hand
   float *coo_R = NULL;
   checkCudaErrors(cudaMalloc((void**)&coo_R, nnz * SIZE_OF(float)));
 
-  float *testing_entries_cpy = NULL; 
+  float *training_entries_cpy = NULL; 
   bool testing = (testing_fraction > (float)0.0);
   if(testing){
-    gpu_get_rand_bools<float>(nnz,  testing_entries, (float)1.0 - testing_fraction /*probability of 1*/);
-    checkCudaErrors(cudaMalloc((void**)&testing_entries_cpy, nnz * SIZE_OF(float)));
-    checkCudaErrors(cudaMemcpy(testing_entries_cpy, testing_entries, nnz * SIZE_OF(float), cudaMemcpyDeviceToDevice));
+    gpu_get_rand_bools<float>(nnz,  training_entries, (float)1.0 - testing_fraction /*probability of 1*/);
+    checkCudaErrors(cudaMalloc((void**)&training_entries_cpy, nnz * SIZE_OF(float)));
+    checkCudaErrors(cudaMemcpy(training_entries_cpy, training_entries, nnz * SIZE_OF(float), cudaMemcpyDeviceToDevice));
     if(Debug && 0){
-      save_device_arrays_side_by_side_to_file<float>(coo_format_ratingsMtx_rating_dev_batch, testing_entries, nnz, "ratings_before_hadamard");
+      save_device_arrays_side_by_side_to_file<float>(coo_format_ratingsMtx_rating_dev_batch, training_entries, nnz, "ratings_before_hadamard");
     }
 
-    gpu_hadamard<float>(nnz, coo_format_ratingsMtx_rating_dev_batch, testing_entries );
+    gpu_hadamard<float>(nnz, coo_format_ratingsMtx_rating_dev_batch, training_entries );
 
     if(Debug && 0){
-      save_device_arrays_side_by_side_to_file<float>(coo_format_ratingsMtx_rating_dev_batch, testing_entries, nnz, "ratings_after_hadamard");
+      save_device_arrays_side_by_side_to_file<float>(coo_format_ratingsMtx_rating_dev_batch, training_entries, nnz, "ratings_after_hadamard");
     }
   }else{
-    testing_entries = (float *)coo_format_ratingsMtx_rating_dev_batch;
+    training_entries = (float *)coo_format_ratingsMtx_rating_dev_batch;
     if(Debug){
-      LOG("testing_entries : "<<testing_entries);
+      LOG("training_entries : "<<training_entries);
     }
   }
 
@@ -6505,7 +7138,7 @@ void gpu_R_error<float>(cublasHandle_t dn_handle, const cusparseHandle_t sp_hand
         <<"m = "<<batch_size_t<<" , n = "<<num_latent_factors<<" , k = "<<ratings_cols<<","<<std::endl<<"                                                "
         <<"nnz = "<<  nnz<<" , first_coo_ind = "<<  first_coo_ind<<","<<std::endl<<"                                                "
         <<"&alpha, sp_descr,"<<std::endl<<"                                                "
-        <<"testing_entries,csr_format_ratingsMtx_userID_dev_batch, coo_format_ratingsMtx_itemID_dev_batch,"<<std::endl<<"                                                "
+        <<"training_entries,csr_format_ratingsMtx_userID_dev_batch, coo_format_ratingsMtx_itemID_dev_batch,"<<std::endl<<"                                                "
         <<"V, ldb = "<<ratings_cols<<", &beta,"<<std::endl<<"                                                "
         <<"U_t, ldc = "<<batch_size_t<<" );"  );
     }else{
@@ -6514,7 +7147,7 @@ void gpu_R_error<float>(cublasHandle_t dn_handle, const cusparseHandle_t sp_hand
         <<"m = "<<batch_size_t<<" , n = "<<batch_size_GU<<" , k = "<<ratings_cols<<","<<std::endl<<"                                                "
         <<"nnz = "<<  nnz<<" , first_coo_ind = "<<  first_coo_ind<<","<<std::endl<<"                                                "
         <<"&alpha, sp_descr,"<<std::endl<<"                                                "
-        <<"testing_entries,csr_format_ratingsMtx_userID_dev_batch, coo_format_ratingsMtx_itemID_dev_batch,"<<std::endl<<"                                                "
+        <<"training_entries,csr_format_ratingsMtx_userID_dev_batch, coo_format_ratingsMtx_itemID_dev_batch,"<<std::endl<<"                                                "
         <<"V, ldb = "<<ratings_cols<<", &beta,"<<std::endl<<"                                                "
         <<"U_t, ldc = "<<batch_size_t<<" );"  );    
     }
@@ -6522,7 +7155,7 @@ void gpu_R_error<float>(cublasHandle_t dn_handle, const cusparseHandle_t sp_hand
     // gpu_spXdense_MMM_check<float>(dn_handle, false, false, batch_size_t,
     //                              (compress == false) ? batch_size_GU : num_latent_factors, 
     //                              ratings_cols, first_coo_ind, alpha, 
-    //                              testing_entries, 
+    //                              training_entries, 
     //                              csr_format_ratingsMtx_userID_dev_batch, 
     //                              coo_format_ratingsMtx_itemID_dev_batch,
     //                              V, beta, U_t_check);
@@ -6533,12 +7166,13 @@ void gpu_R_error<float>(cublasHandle_t dn_handle, const cusparseHandle_t sp_hand
   // gpu_spXdense_MMM<float>(sp_handle, false, false, batch_size_t,
   //  (compress == false) ? batch_size_GU : num_latent_factors, 
   //  ratings_cols, nnz, first_coo_ind, &alpha, sp_descr, 
-  //  testing_entries, 
+  //  training_entries, 
   //  csr_format_ratingsMtx_userID_dev_batch, 
   //  coo_format_ratingsMtx_itemID_dev_batch,
   //  V, ratings_cols, &beta, U_t, batch_size_t, Debug);
-  bool knowledgeable = true;
-  if(!testing && increment_index == 0) {
+  bool knowledgeable = false;
+  //if(!testing && increment_index == 0){
+  if(increment_index == 0) {
     knowledgeable = false;
   }
 
@@ -6547,7 +7181,9 @@ void gpu_R_error<float>(cublasHandle_t dn_handle, const cusparseHandle_t sp_hand
     if(!knowledgeable){
       gpu_rng_gaussian<float>(batch_size_t * (compress ? num_latent_factors : batch_size_GU), (float)0.0, (float)1.0, U_t);
     }else{
-      gpu_rng_gaussian<float>(batch_size_t * ratings_cols, (float)0.0, (float)1.0, R_t);
+      LOG("Starting from an educated guess...");
+      //gpu_rng_gaussian<float>(batch_size_t * ratings_cols, (float)0.0, (float)0.00007, R_t);
+      //gpu_set_all(R_t, batch_size_t * ratings_cols, (float)0.0);
       if(Debug && 0){
         save_device_mtx_to_file<float>(R_t, batch_size_t, ratings_cols, "R_t_0", false, strPreamble(blank));
       }
@@ -6555,7 +7191,7 @@ void gpu_R_error<float>(cublasHandle_t dn_handle, const cusparseHandle_t sp_hand
         gpu_fill_training_mtx_if(batch_size_t, ratings_cols, false,
                                 csr_format_ratingsMtx_userID_dev_batch,
                                 coo_format_ratingsMtx_itemID_dev_batch,
-                                testing_entries, testing_entries_cpy,
+                                training_entries, training_entries_cpy,
                                 R_t);
         if(Debug && 0){
           save_device_mtx_to_file<float>(R_t, batch_size_t, ratings_cols, "R_t_1", false, strPreamble(blank));
@@ -6564,7 +7200,7 @@ void gpu_R_error<float>(cublasHandle_t dn_handle, const cusparseHandle_t sp_hand
         gpu_fill_training_mtx(batch_size_t, ratings_cols, false,
                               csr_format_ratingsMtx_userID_dev_batch,
                               coo_format_ratingsMtx_itemID_dev_batch,
-                              testing_entries,
+                              training_entries,
                               R_t);
       }
       // M, N, K
@@ -6614,10 +7250,9 @@ void gpu_R_error<float>(cublasHandle_t dn_handle, const cusparseHandle_t sp_hand
         }
       }
     }
-
   //}
   
-  float largest_sv;
+  float largest_sv = (float)0.0;
 
   if(Debug){
     LOG("S_with_U : "<<S_with_U)
@@ -6647,7 +7282,7 @@ void gpu_R_error<float>(cublasHandle_t dn_handle, const cusparseHandle_t sp_hand
 
       gpu_mult_US_in_SVD<float>(batch_size_t, compress ? num_latent_factors : batch_size_GU, U_t, SV, true ); //right mult
       checkCudaErrors(cudaMemcpy(&largest_sv, SV, SIZE_OF(float), cudaMemcpyDeviceToHost));
-      LOG("largest_sv : "<<largest_sv);
+      if(Debug){LOG("largest_sv : "<<largest_sv);}
     }else{
       largest_sv = gpu_norm(dn_handle, batch_size_t, U_t);
       //more thinking here:force order
@@ -6676,11 +7311,10 @@ void gpu_R_error<float>(cublasHandle_t dn_handle, const cusparseHandle_t sp_hand
     //save_device_mtx_to_file<float>(V, ratings_cols, (compress ? num_latent_factors : batch_size_GU), "V", false, strPreamble(blank));
     
     //save_device_arrays_side_by_side_to_file<float>(U_t, U_t_check, batch_size_t * (compress ? num_latent_factors : batch_size_GU), "U_t");
-    //save_device_arrays_side_by_side_to_file(coo_format_ratingsMtx_itemID_dev_batch, testing_entries, nnz, "R_t");
+    //save_device_arrays_side_by_side_to_file(coo_format_ratingsMtx_itemID_dev_batch, training_entries, nnz, "R_t");
 
-    LOG("largest_sv : "<<largest_sv)
     LOG("compress : "<<compress)
-    //save_device_arrays_side_by_side_to_file<float>(coo_format_ratingsMtx_rating_dev_batch, testing_entries, coo_errors, nnz, "ratings_testing_errors_v2");
+    //save_device_arrays_side_by_side_to_file<float>(coo_format_ratingsMtx_rating_dev_batch, training_entries, coo_errors, nnz, "ratings_testing_errors_v2");
   }
 
   int i = 0;
@@ -6688,7 +7322,8 @@ void gpu_R_error<float>(cublasHandle_t dn_handle, const cusparseHandle_t sp_hand
   float error;
   float min_error_so_far = (float)10000.0;
   int min_error_iter = i;
-  float min_training_rate = (float)0.0000001;
+  int unchanged_error_count = 0;
+  float min_training_rate = training_rate / ((float)10000.0);
 
   int num_steps =  log10((int)round(training_rate / min_training_rate));
 
@@ -6696,15 +7331,23 @@ void gpu_R_error<float>(cublasHandle_t dn_handle, const cusparseHandle_t sp_hand
   //float regularization_constant = 0.01;
   int max_its = 500;
   if(testing){
-    max_its = 500;
-  }else{
-    max_its = 300;
+    max_its = 10000;
   }
-  float epsilon = (float)0.1;
+
+  int training_its = 10;
+  training_its = 4*(training_its + 1);
+
+  float epsilon = (float)0.09;
+  if(testing){
+    epsilon = (float)0.2;
+  }
 
   float* error_vector = NULL;
-  error_vector = (float *)malloc(max_its * SIZE_OF(float));
+  error_vector = (float *)malloc((max_its + training_its) * SIZE_OF(float));
   checkErrors(error_vector);
+  float* micro_km_error = NULL;
+  micro_km_error = (float *)malloc((training_its) * SIZE_OF(float));
+  checkErrors(micro_km_error);
 
   int num_its_per_step = max_its / num_steps;
   if(Debug){
@@ -6716,8 +7359,14 @@ void gpu_R_error<float>(cublasHandle_t dn_handle, const cusparseHandle_t sp_hand
     LOG("i < max_its : "<< (i < max_its));
     LOG("training_rate >= min_training_rate : "<< (training_rate >= min_training_rate));
   }
+  bool has_slowed = false;
+  bool has_slowed_last = false;
+  int max_num_slow = 50;
+  int U_GU_update_count = 0;
 
-  while(not_done && i < max_its && training_rate >= min_training_rate){
+  float training_rate_U_GU = (float)1.0 / (float)45000.0;
+  float training_rate_V = (float)0.00001;
+  while(not_done && i < max_its /*&& training_rate >= min_training_rate*/){
 
     //============================================================================================
     // Compute  R_t_predict = U_t * V^T 
@@ -6741,7 +7390,7 @@ void gpu_R_error<float>(cublasHandle_t dn_handle, const cusparseHandle_t sp_hand
       if(isBad){
         ABORT_IF_NEQ(0, 1, "isBad");
       };
-      //save_device_arrays_side_by_side_to_file<float>(coo_format_ratingsMtx_rating_dev_batch, testing_entries, coo_errors, nnz, "ratings_testing_errors_v3");
+      //save_device_arrays_side_by_side_to_file<float>(coo_format_ratingsMtx_rating_dev_batch, training_entries, coo_errors, nnz, "ratings_testing_errors_v3");
     }
 
     //============================================================================================
@@ -6754,7 +7403,7 @@ void gpu_R_error<float>(cublasHandle_t dn_handle, const cusparseHandle_t sp_hand
     sparse_error(batch_size_t, ratings_cols, R_t, 
                  csr_format_ratingsMtx_userID_dev_batch, 
                  coo_format_ratingsMtx_itemID_dev_batch,
-                 testing_entries, 
+                 training_entries, 
                  coo_errors, nnz, coo_R);
     if(0){
       bool isBad = gpu_isBad<float>(coo_errors, nnz);
@@ -6762,7 +7411,7 @@ void gpu_R_error<float>(cublasHandle_t dn_handle, const cusparseHandle_t sp_hand
         ABORT_IF_NEQ(0, 1, "isBad");
       };
     }
-    if(testing) gpu_hadamard<float>(nnz, testing_entries_cpy, coo_errors );
+    if(testing) gpu_hadamard<float>(nnz, training_entries_cpy, coo_errors );
     float training_error_temp;// = gpu_sum_of_squares<float>(nnz, coo_errors);
     if( Debug)  LOG("gpu_R_error iteration : "<<i);
     long long int nnz_ = (long long int)((float)nnz * ((float)1.0 - testing_fraction));
@@ -6770,7 +7419,7 @@ void gpu_R_error<float>(cublasHandle_t dn_handle, const cusparseHandle_t sp_hand
     bool do_ = true;
     float temp;// = training_error_temp / (float)(nnz_);
     gpu_mean_abs_nonzero(nnz, coo_errors, &temp);
-    
+
     if(i > 0){
       if(Debug){
         LOG("temp : "<<temp);
@@ -6783,26 +7432,60 @@ void gpu_R_error<float>(cublasHandle_t dn_handle, const cusparseHandle_t sp_hand
         if(print_ && 0) {
           LOG("gpu_R_error finished at iteration : "<<i);
         }
-        error = temp;
-        error_vector[i] = error;
-        do_ = false;
-        not_done = false;
-        break;
-      }
-      
-      if( (std::abs(temp - min_error_so_far) < ((float)1.05 *  min_error_so_far)) && 
-          (i - min_error_iter > 20) ){
-        // have we stopped improving?
-        training_rate = training_rate / (float)10.0;
-        if(print_) {
-          LOG("gpu_R_error has slow learning at iteration : "<<i);
-          LOG("gpu_R_error reducing training_rate : "<<i);
-          LOG("training_rate : "<<training_rate);
+        if(!testing && (i == max_its - 1) && !has_slowed){
+          has_slowed = true;
+          max_its = i + training_its;
+        }else{
+          error = temp;
+          error_vector[i] = error;
+          do_ = false;
+          not_done = false;
+          break;
         }
+      }
+      if(Debug) {
+        LOG("std::abs(temp - min_error_so_far) : "<<std::abs(temp - min_error_so_far));
+        LOG("((float)0.05 *  min_error_so_far)) : "<<((float)0.05 *  min_error_so_far));
+        LOG("unchanged_error_count : "<<unchanged_error_count);
+      }      
+      if( (std::abs(temp - error_vector[i - 1 - unchanged_error_count]) < ((float)0.01 *  min_error_so_far)) ){
+        unchanged_error_count++;
+        // have we stopped improving?
+        if(unchanged_error_count > max_num_slow && training_rate > min_training_rate){
+          if(print_) {
+            LOG("gpu_R_error has slow learning at iteration : "<<i);
+          }
+          if(testing){
+            training_rate = training_rate / (float)10.0;
+            max_num_slow -=5;
+            if(print_) {
+              LOG("gpu_R_error reducing training_rate : "<<i);
+              LOG("training_rate : "<<training_rate);
+            }            
+          }else{
+            has_slowed = true;
+            max_its = i + training_its;
+          }
+          unchanged_error_count = 0;
+        }else if(unchanged_error_count > 20 && training_rate <= min_training_rate){
+          if(!testing && !has_slowed){
+            has_slowed = true;
+            max_its = i + training_its;
+          }else{
+            LOG("gpu_R_error error unchanged for too long : "<<i);
+            error = temp;
+            error_vector[i] = error;
+            do_ = false;
+            not_done = false;
+            break;            
+          }
+        }
+      }else{
+        unchanged_error_count = 0;
       }
       if (temp > (float)1.3 * min_error_so_far){
         // have we gotten worse?
-        training_rate = training_rate / (float)10.0;
+        has_slowed = false;
         if(print_) {
           LOG("gpu_R_error jumped over minimum iteration : "<<i);
           LOG("min_error_so_far : "<<min_error_so_far);
@@ -6816,6 +7499,8 @@ void gpu_R_error<float>(cublasHandle_t dn_handle, const cusparseHandle_t sp_hand
         if(!testing) {
           checkCudaErrors(cudaMemcpy(U_GU, U_GU_check, batch_size_GU * (compress ? num_latent_factors : batch_size_GU) * SIZE_OF(float), cudaMemcpyHostToDevice));
           checkCudaErrors(cudaMemcpy(V, V_check, ratings_cols * (compress ? num_latent_factors : batch_size_GU) * SIZE_OF(float), cudaMemcpyHostToDevice));
+          //gpu_rng_gaussian<float>(batch_size_GU * (compress ? num_latent_factors : batch_size_GU), (float)0.0, (float)0.00007, U_GU, 1, dn_handle);
+          //gpu_rng_gaussian<float>(ratings_cols * (compress ? num_latent_factors : batch_size_GU), (float)0.0, (float)0.00007, V, 1, dn_handle);
           gpu_gemm<float>(dn_handle, true, false, 
                 ratings_cols, batch_size_GU, 
                 compress ? num_latent_factors : batch_size_GU,
@@ -6824,14 +7509,24 @@ void gpu_R_error<float>(cublasHandle_t dn_handle, const cusparseHandle_t sp_hand
                 (float)0.0,
                 R_GU);
         }
-        //do_ = false;
         temp = min_error_so_far;
-      }
-      if(Debug){
-        LOG("min_error_so_far : "<<min_error_so_far);
+        if(training_rate > min_training_rate){
+          training_rate = training_rate / (float)10.0;
+        }else if(i > 50){
+          LOG("gpu_R_error done : "<<i);
+          error = temp;
+          error_vector[i] = error;
+          do_ = false;
+          not_done = false;
+          break;          
+        }
       }
 
+
+    }else{
+      LOG("initial error : "<<temp);
     }
+
     
     if(do_){
       error = temp;
@@ -6846,30 +7541,43 @@ void gpu_R_error<float>(cublasHandle_t dn_handle, const cusparseHandle_t sp_hand
           checkCudaErrors(cudaMemcpy(V_check, V, ratings_cols * (compress ? num_latent_factors : batch_size_GU) * SIZE_OF(float), cudaMemcpyDeviceToHost));
         }   
         min_error_iter = i;
+        if(Debug){
+          LOG("min_error_so_far : "<<min_error_so_far);
+        }
       }
-
+      if( (has_slowed_last != has_slowed) && !testing){
+        has_slowed_last = has_slowed;
+        float multiplier_ = (float)10.0;
+        if(has_slowed){
+          min_error_so_far = (float)10000.0;
+          training_rate = training_rate * multiplier_;
+        }else{
+          training_rate = training_rate / multiplier_;
+        }
+        LOG("training_rate : "<< training_rate);
+      }
       error_vector[i] = error;
 
       if( Debug && 0){
         LOG("gpu_R_error average error : "<< error); 
         //LOG("training error over range of ratings: "<< training_error_temp / ((float)(nnz_) * range_training));
 
-        float *testing_entries_temp; 
-        checkCudaErrors(cudaMalloc((void**)&testing_entries_temp, nnz * SIZE_OF(float)));
-        checkCudaErrors(cudaMemcpy(testing_entries_temp, testing_entries, nnz * SIZE_OF(float), cudaMemcpyDeviceToDevice));
+        float *training_entries_temp; 
+        checkCudaErrors(cudaMalloc((void**)&training_entries_temp, nnz * SIZE_OF(float)));
+        checkCudaErrors(cudaMemcpy(training_entries_temp, training_entries, nnz * SIZE_OF(float), cudaMemcpyDeviceToDevice));
 
         temp = gpu_sum_of_squares_of_diff(dn_handle, nnz, 
                 coo_format_ratingsMtx_rating_dev_batch, 
-                testing_entries_temp);
+                training_entries_temp);
         //LOG("gpu_R_error error normalized by should be max error: "<< training_error_temp / (float)(nnz_)<<std::endl); 
         //LOG("training error : "<< training_error_temp / (float)(nnz_* 2.0)); 
 
 
         std::string title = ("ratings_errors_v" + ToString<int>(i)).c_str();
-        save_device_arrays_side_by_side_to_file<float>(coo_format_ratingsMtx_rating_dev_batch, testing_entries, 
+        save_device_arrays_side_by_side_to_file<float>(coo_format_ratingsMtx_rating_dev_batch, training_entries, 
          coo_R, coo_errors, nnz, "ratings_errors_v");
 
-        checkCudaErrors(cudaFree(testing_entries_temp));
+        checkCudaErrors(cudaFree(training_entries_temp));
         // LOG("Press Enter to continue.") ;
         // std::cin.ignore();
 
@@ -6907,9 +7615,10 @@ void gpu_R_error<float>(cublasHandle_t dn_handle, const cusparseHandle_t sp_hand
       //(int)(std::min(training_iteration+ 2, 100) 
       // LOG("(int)(std::min(training_iteration + 2, 100) :  "<< (int)(std::min(training_iteration + 2, 100)));
       // LOG("i % (int)(std::min(training_iteration + 2, 100) :  "<< i % (int)(std::min(training_iteration + 2, 100)));
-      int update_u_inc = (int)(std::min(training_iteration + 2, max_its / 10));
-      update_u_inc = 2;
-      bool update_u = ( ( i % update_u_inc ) != 0 );
+      bool update_u = true;
+      if(has_slowed){
+        update_u = update_u && ( ( i % 2 ) != 0);
+      }
       if(testing || update_u ){
         // Update U
 
@@ -6960,80 +7669,100 @@ void gpu_R_error<float>(cublasHandle_t dn_handle, const cusparseHandle_t sp_hand
           gpu_normalize_mtx_rows_or_cols(batch_size_t, compress ? num_latent_factors : batch_size_GU, false, U_t, false); 
           if(Debug) LOG("here");     
         } 
+
+        
+      }else{
+        updated_ = true;
+        
+
         // LOG("(int)(std::min(training_iteration + 2, 100) :  "<< (int)(std::min(training_iteration + 2, 100)));
         // LOG("i % (int)(std::min(training_iteration + 2, 100) :  "<< i % (int)(std::min(training_iteration + 2, 100))); 
-        bool update_u_gu = ( ( i % update_u_inc ) == ( i % (update_u_inc -1) ) );  
-        update_u_gu = true;     
-        if(!testing && update_u_gu ){
+        // bool update_u_gu = ( ( i % update_u_inc ) == ( i % (update_u_inc -1) ) );  
+        if(Debug) {
+          LOG("it : "<< i);
+          LOG("( i % 4 ) : "<< ( i % 4 ));
+        }
+        bool update_u_gu = ( i % 4 ) != 0;   
+        if(update_u_gu){
           if(Debug) LOG("update U_GU! it "<< i);
+
           gpu_dense_nearest_row<float>(batch_size_GU, batch_size_GU, U_GU, 
                                        batch_size_t, U_t, 
                                        km_selection, km_errors, false);
-          float temp_training_rate = training_rate;
+          
+          if(Debug) micro_km_error[U_GU_update_count] = gpu_expected_value(batch_size_t,  km_errors);
           //training_rate = 0.01;
           gpu_calculate_KM_error_and_update(batch_size_GU, batch_size_GU, U_GU, 
                                            batch_size_t, U_t, csr_format_ratingsMtx_userID_dev_batch,
-                                           km_selection, training_rate, reg_ ? regularization_constant : (float)1.0, training_iteration);
-          training_rate = temp_training_rate;
-          if(Debug){
-            save_device_array_to_file<float>(km_errors, batch_size_t, "meta_km_errors");
-            save_device_array_to_file<int>(km_selection, batch_size_t, "meta_km_selection");
-          }
-          updated_ = true;
-        }
-        
-      }else{
-        // update V
-        if(Debug) LOG("update V! it "<< i);
-        updated_ = true;
-        float temp_training_rate = training_rate;
-        //training_rate = 0.1;
-        gpu_spXdense_MMM<float>(sp_handle, true, false, batch_size_t, compress ? num_latent_factors : batch_size_GU, 
-                                ratings_cols, nnz, first_coo_ind, &training_rate, sp_descr, 
-                                coo_errors, 
-                                csr_format_ratingsMtx_userID_dev_batch, 
-                                coo_format_ratingsMtx_itemID_dev_batch,
-                                U_t, batch_size_t, &beta, V, ratings_cols, false);
-        training_rate = temp_training_rate;
-        
-        //============================================================================================
-        // Handle column normalization in V
-        //============================================================================================     
-        /*
-          if(S_with_U){
-            //void gpu_normalize_mtx_rows_or_cols(const long long int M, const long long int N,  
-            //                              bool row_major_ordering, float* x, bool normalize_rows);
-            
-            gpu_normalize_mtx_rows_or_cols(ratings_cols, compress ? num_latent_factors : batch_size_GU, false, V, false); 
-            if(Debug) LOG("here");  
-          }else{
-            if(SV != NULL){
-              int first_tiny_sv_ = first_tiny_sv(compress ? num_latent_factors : batch_size_GU, SV, (float)0.00001);
-              if(first_tiny_sv_ < (int)(compress ? num_latent_factors : batch_size_GU)){
-                LOG("WARNING WILL DIVIDE BY ~ZERO");
-                long long int temp = (compress == false) ? batch_size_GU : num_latent_factors;
-                LOG("first_tiny_sv_ : " << first_tiny_sv_<< " < "<<temp);
-                save_device_array_to_file(SV, compress ? num_latent_factors : batch_size_GU, "SV", strPreamble(blank));
-              }
-              gpu_div_US_in_SVD<float>(ratings_cols, compress ? num_latent_factors : batch_size_GU, V, SV, true );//right div
+                                           km_selection, training_rate_U_GU, reg_ ? regularization_constant : (float)1.0, training_iteration);
+          //training_rate = temp_training_rate;
 
+          if(Debug){
+            //save_device_array_to_file<float>(km_errors, batch_size_t, "micro_km_errors");
+            //save_device_array_to_file<int>(km_selection, batch_size_t, "micro_km_selection");
+
+            gpu_sparse_nearest_row<float>(batch_size_GU, ratings_cols, R_GU, 
+                                         batch_size_t, nnz, csr_format_ratingsMtx_userID_dev_batch, 
+                                         coo_format_ratingsMtx_itemID_dev_batch,
+                                         training_entries, km_selection, km_errors, false);
+            micro_km_error[U_GU_update_count] = gpu_sum(batch_size_t,  km_errors);
+            U_GU_update_count++;
+            save_host_array_to_file<float>(micro_km_error, U_GU_update_count, "micro_km_errors_through_iteration");
+            save_host_array_to_file<float>(error_vector, i + 1, "training_error_thru_iterations", strPreamble(blank));
+          }
+        }else{
+
+          // update V
+          //============================================================================================
+          // Update  V = V * (1 - alpha * lambda) + alpha * Error^T * U_training 
+          //============================================================================================ 
+          if(Debug) LOG("update V! it : "<< i);
+          //training_rate = 0.1;
+          
+          gpu_spXdense_MMM<float>(sp_handle, true, false, batch_size_t, compress ? num_latent_factors : batch_size_GU, 
+                                  ratings_cols, nnz, first_coo_ind, &training_rate_V, sp_descr, 
+                                  coo_errors, 
+                                  csr_format_ratingsMtx_userID_dev_batch, 
+                                  coo_format_ratingsMtx_itemID_dev_batch,
+                                  U_t, batch_size_t, &beta, V, ratings_cols, false);
+          if(Debug) save_host_array_to_file<float>(error_vector, i + 1, "training_error_thru_iterations", strPreamble(blank));
+          
+          //============================================================================================
+          // Handle column normalization in V
+          //============================================================================================     
+          /*
+            if(S_with_U){
               //void gpu_normalize_mtx_rows_or_cols(const long long int M, const long long int N,  
               //                              bool row_major_ordering, float* x, bool normalize_rows);
-              gpu_normalize_mtx_rows_or_cols(ratings_cols, compress ? num_latent_factors : batch_size_GU,  
-                                                false, V, false);
-
-              gpu_mult_US_in_SVD<float>(ratings_cols, compress ? num_latent_factors : batch_size_GU, V, SV, true ); //right mult
+              
+              gpu_normalize_mtx_rows_or_cols(ratings_cols, compress ? num_latent_factors : batch_size_GU, false, V, false); 
+              if(Debug) LOG("here");  
             }else{
-              //more thinking here:force order
-              float current_largest_sv = gpu_norm(dn_handle, ratings_cols, V);
-              gpu_scale(dn_handle, ratings_cols * ( compress ? num_latent_factors : batch_size_GU), largest_sv/current_largest_sv, V);
-            }   
-          } 
-        */
+              if(SV != NULL){
+                int first_tiny_sv_ = first_tiny_sv(compress ? num_latent_factors : batch_size_GU, SV, (float)0.00001);
+                if(first_tiny_sv_ < (int)(compress ? num_latent_factors : batch_size_GU)){
+                  LOG("WARNING WILL DIVIDE BY ~ZERO");
+                  long long int temp = (compress == false) ? batch_size_GU : num_latent_factors;
+                  LOG("first_tiny_sv_ : " << first_tiny_sv_<< " < "<<temp);
+                  save_device_array_to_file(SV, compress ? num_latent_factors : batch_size_GU, "SV", strPreamble(blank));
+                }
+                gpu_div_US_in_SVD<float>(ratings_cols, compress ? num_latent_factors : batch_size_GU, V, SV, true );//right div
 
-      }
+                //void gpu_normalize_mtx_rows_or_cols(const long long int M, const long long int N,  
+                //                              bool row_major_ordering, float* x, bool normalize_rows);
+                gpu_normalize_mtx_rows_or_cols(ratings_cols, compress ? num_latent_factors : batch_size_GU,  
+                                                  false, V, false);
 
-      if(!testing && updated_){
+                gpu_mult_US_in_SVD<float>(ratings_cols, compress ? num_latent_factors : batch_size_GU, V, SV, true ); //right mult
+              }else{
+                //more thinking here:force order
+                float current_largest_sv = gpu_norm(dn_handle, ratings_cols, V);
+                gpu_scale(dn_handle, ratings_cols * ( compress ? num_latent_factors : batch_size_GU), largest_sv/current_largest_sv, V);
+              }   
+            } 
+          */
+        }
+        //if(!testing && updated_){
         // M, N, K
         // M number of columns of matrix op(A) and C.
         // N is number of rows of matrix op(B) and C.]
@@ -7067,18 +7796,21 @@ void gpu_R_error<float>(cublasHandle_t dn_handle, const cusparseHandle_t sp_hand
         checkCudaErrors(cudaMemcpy(&largest_sv, SV, SIZE_OF(float), cudaMemcpyDeviceToHost));
         if(Debug) LOG("largest_sv : "<<largest_sv);
         largest_sv = temp_lsv;
+        //}
       }
+
 
       i += 1 ; 
     } // end do_
+
   } // end while
 
 
 
   if(1){
     save_host_array_to_file<float>(error_vector, i + 1, "training_error_thru_iterations", strPreamble(blank));
-    //save_device_arrays_side_by_side_to_file<float>(coo_format_ratingsMtx_rating_dev_batch, testing_entries, coo_errors, nnz, "ratings_testing_errors_v3");
-    if(coo_R != NULL && Debug) save_device_arrays_side_by_side_to_file<float>(testing_entries, coo_R, coo_errors, nnz, "training_actual_prediction_errors");
+    //save_device_arrays_side_by_side_to_file<float>(coo_format_ratingsMtx_rating_dev_batch, training_entries, coo_errors, nnz, "ratings_testing_errors_v3");
+    if(coo_R != NULL && Debug) save_device_arrays_side_by_side_to_file<float>(training_entries, coo_R, coo_errors, nnz, "training_actual_prediction_errors");
   }
 
   if(print_){
@@ -7101,18 +7833,18 @@ void gpu_R_error<float>(cublasHandle_t dn_handle, const cusparseHandle_t sp_hand
                  coo_format_ratingsMtx_rating_dev_batch, 
                  coo_errors, nnz, coo_R);
 
-    gpu_reverse_bools<float>(nnz,  testing_entries_cpy);         // zeros for training entries, ones for testing entries
-    gpu_hadamard<float>(nnz, testing_entries_cpy, coo_errors );  // only the testing errors 
-    gpu_hadamard<float>(nnz, coo_format_ratingsMtx_rating_dev_batch, testing_entries_cpy ); // only the testing entries
+    gpu_reverse_bools<float>(nnz,  training_entries_cpy);         // zeros for training entries, ones for testing entries
+    gpu_hadamard<float>(nnz, training_entries_cpy, coo_errors );  // only the testing errors 
+    gpu_hadamard<float>(nnz, coo_format_ratingsMtx_rating_dev_batch, training_entries_cpy ); // only the testing entries
 
     if(1 && coo_R != NULL) {
-      save_device_arrays_side_by_side_to_file<float>(testing_entries_cpy, coo_R, coo_errors, nnz, "testing_actual_prediction_errors");
+      save_device_arrays_side_by_side_to_file<float>(training_entries_cpy, coo_R, coo_errors, nnz, "testing_actual_prediction_errors");
     }
     
     float error_test;// = gpu_sum_of_squares<float>(nnz, coo_errors);
-    float mean_guess_error;// = gpu_sum_of_squares<float>(nnz, testing_entries_cpy);
+    float mean_guess_error;// = gpu_sum_of_squares<float>(nnz, training_entries_cpy);
     gpu_mean_abs_nonzero(nnz, coo_errors, &error_test);
-    gpu_mean_abs_nonzero(nnz, testing_entries_cpy, &mean_guess_error);
+    gpu_mean_abs_nonzero(nnz, training_entries_cpy, &mean_guess_error);
     float nnz_ = (float)nnz * testing_fraction; 
 
     float* log_hist = (float *)malloc(7 * SIZE_OF(float)); 
@@ -7142,8 +7874,8 @@ void gpu_R_error<float>(cublasHandle_t dn_handle, const cusparseHandle_t sp_hand
     free(log_hist);
     cpu_incremental_average((long long int)(increment_index + 1), testing_error_on_testing_entries, error_test);
 
-    //checkCudaErrors(cudaMemcpy(testing_entries, testing_entries_cpy, nnz * SIZE_OF(float), cudaMemcpyDeviceToDevice));
-    checkCudaErrors(cudaFree(testing_entries_cpy));
+    //checkCudaErrors(cudaMemcpy(training_entries, training_entries_cpy, nnz * SIZE_OF(float), cudaMemcpyDeviceToDevice));
+    checkCudaErrors(cudaFree(training_entries_cpy));
   }else{
     float km_errors_training;
     gpu_mean_abs_nonzero(batch_size_t, km_errors, &km_errors_training);
@@ -7166,6 +7898,7 @@ void gpu_R_error<float>(cublasHandle_t dn_handle, const cusparseHandle_t sp_hand
     //checkCudaErrors(cudaFree(U_t_check));
   }
   free(error_vector);
+  free(micro_km_error);
   // checkCudaErrors(cudaFree(U_t_check));
   free(U_t_check);
 
@@ -7970,9 +8703,13 @@ void gpu_dense_nearest_row(const int rows_A, const int cols, const Dtype* dense_
 template void gpu_dense_nearest_row<float>(const int rows_A, const int cols, const float* dense_mtx_A, 
  const int rows_B, const float* dense_mtx_B, int* selection, float* error, bool row_major_ordering);
 
+
+
+
+
 template <typename Dtype>
 __global__ void gpu_sparse_nearest_row_kernel(const int rows_A, const int cols, const Dtype* dense_mtx_A, 
- const int rows_B, const int* csr_rows_B, const int* coo_cols_B,
+ const int rows_B, const int num_sparse_entries, const int* csr_rows_B, const int* coo_cols_B,
  const Dtype* coo_entries_B, int* selection, Dtype* error, bool row_major_ordering, bool* isBad)
 {
   const int row_skip = csr_rows_B[0];
@@ -7996,6 +8733,7 @@ __global__ void gpu_sparse_nearest_row_kernel(const int rows_A, const int cols, 
           //temp += pow(dense_mtx_A[row_A + (long long int)rows_A * (long long int)col] - coo_entries_B[true_coo_index], (Dtype)2.0);
         }
       }
+      temp *= ( ((Dtype)count) / ((Dtype)num_sparse_entries) );
       if(temp < closest_A_row_dist || row_A == (long long int)0){
         closest_A_row_dist = temp;
         closest_A_row      = (int)row_A;
@@ -8050,7 +8788,7 @@ void gpu_sparse_nearest_row(const int rows_A, const int cols, const Dtype* dense
         LOG("spot : "<<spot);
       }
       gpu_sparse_nearest_row_kernel<<<CUDA_NUM_BLOCKS, CUDA_NUM_THREADS>>>(rows_A,  cols, dense_mtx_A, 
-                                          num_entries, csr_rows_B + spot, coo_cols_B, 
+                                          num_entries, num_sparse_entries, csr_rows_B + spot, coo_cols_B, 
                                           coo_entries_B, selection, error, row_major_ordering, isBad);
       num_gpu_blocks = num_gpu_blocks - (long long int)CUDA_NUM_BLOCKS;
       num_loops += (long long int)1;
@@ -8059,7 +8797,7 @@ void gpu_sparse_nearest_row(const int rows_A, const int cols, const Dtype* dense
     // spot is the number of entries done so far
     // total - (done) = left to go 
     gpu_sparse_nearest_row_kernel<<<num_gpu_blocks, CUDA_NUM_THREADS>>>(rows_A,  cols, dense_mtx_A, 
-                                  rows_B - spot, csr_rows_B + spot, coo_cols_B, 
+                                  rows_B - spot, num_sparse_entries, csr_rows_B + spot, coo_cols_B, 
                                   coo_entries_B, selection, error, row_major_ordering, isBad);
   }else{
     if(too_big(rows_B) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
@@ -8073,7 +8811,7 @@ void gpu_sparse_nearest_row(const int rows_A, const int cols, const Dtype* dense
       LOG("row_major_ordering : "<<row_major_ordering);
     }
     gpu_sparse_nearest_row_kernel<<<num_gpu_blocks, CUDA_NUM_THREADS>>>(rows_A,  cols, dense_mtx_A, 
-                                    rows_B, csr_rows_B, coo_cols_B, 
+                                    rows_B, num_sparse_entries, csr_rows_B, coo_cols_B, 
                                     coo_entries_B, selection, error, row_major_ordering, isBad);
   };
 
@@ -8092,6 +8830,12 @@ void gpu_sparse_nearest_row(const int rows_A, const int cols, const Dtype* dense
 template void gpu_sparse_nearest_row<float>(const int rows_A, const int cols, const float* dense_mtx_A, 
  const int rows_B, const int num_sparse_entries, const int* csr_rows_B, const int* coo_cols_B,
  const float* coo_entries_B, int* selection, float* error, bool row_major_ordering);
+
+
+
+
+
+
 
 
 template <typename Dtype>
@@ -8182,7 +8926,8 @@ void gpu_calculate_KM_error_and_update(const int rows_A, const int cols, Dtype* 
     long long int num_entries = (long long int)(CUDA_NUM_BLOCKS * CUDA_NUM_THREADS);
     long long int spot        = (long long int)0;
     if(too_big(num_entries) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
-    while (num_gpu_blocks > CUDA_NUM_BLOCKS){
+    while (num_gpu_blocks > CUDA_NUM_BLOCKS)
+    {
       gpu_calculate_KM_error_and_update_kernel<<<CUDA_NUM_BLOCKS, CUDA_NUM_THREADS>>>(rows_A, cols, dense_mtx_A, 
                                                     rows_B, dense_mtx_B, csr_rows_B, selection, training_rate, regularization_constant, increment_index, spot, num_entries, isBad);
       num_gpu_blocks = num_gpu_blocks - (long long int)CUDA_NUM_BLOCKS;
