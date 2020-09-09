@@ -351,6 +351,9 @@ template<typename Dtype>
 void gpu_set_as_index(Dtype* x, const long long int rows, const long long int cols);
 
 template<typename Dtype>
+void gpu_set_as_func_of_index(Dtype* x, const long long int n, Dtype first,  Dtype last);
+
+template<typename Dtype>
 void gpu_set_as_index_host(Dtype* x_host, const long long int rows, const long long int cols);
 
 template<typename Dtype>
@@ -473,7 +476,7 @@ void cublasCSCSparseXgemm(cusparseHandle_t handle,int m, int n, int k,
 template < typename Dtype>
 void gpu_get_rand_bools(const long long int n,  Dtype* x, float probability_of_success);
 
-void gpu_mark_GU_users(const int ratings_rows_GU, const int ratings_rows, const int* x_host, int* y );
+void gpu_mark_ACU_users(const int ratings_rows_ACU, const int ratings_rows, const int* x_host, int* y );
 
 void gpu_get_rand_groups(const long long int n,  int* x, float* probability_of_success, const int num_groups);
 
@@ -667,8 +670,9 @@ template <typename Dtype>
 void gpu_block_orthogonal_decomp_from_host(cublasHandle_t handle, cusolverDnHandle_t dn_solver_handle,
                                             const long long int m, const long long int n, 
                                             long long int* num_latent_factors, const Dtype percent,
-                                            Dtype* A, Dtype* U, Dtype* V, 
-                                            long long int block_rows = (long long int)1000, bool S_with_U = false, Dtype* S = NULL); 
+                                            Dtype* A, Dtype* U, Dtype* V, bool row_major_ordering, 
+                                            long long int block_rows = (long long int)1000, 
+                                            bool S_with_U = false, Dtype* S = NULL);  
 
 void gpu_block_orthogonal_decomp_from_host_test(cublasHandle_t handle, cusolverDnHandle_t dn_solver_handle);
 
@@ -722,14 +726,14 @@ void gpu_logarithmic_histogram_abs_val(const long long int n, Dtype* error_dev, 
 
 template <typename Dtype>
 void gpu_R_error(cublasHandle_t dn_handle, const cusparseHandle_t sp_handle, const cusparseMatDescr_t sp_descr, cusolverDnHandle_t dn_solver_handle,
-                const long long int batch_size_t, const long long int batch_size_GU, 
+                const long long int batch_size_t, const long long int batch_size_ACU, 
                 const long long int num_latent_factors, const long long int ratings_cols,
                 const int nnz, const int first_coo_ind, const bool compress, 
                 Dtype* training_entries, Dtype* coo_errors, const Dtype testing_fraction,
                 const Dtype *coo_format_ratingsMtx_rating_dev_batch, 
                 const int *csr_format_ratingsMtx_userID_dev_batch, 
                 const int *coo_format_ratingsMtx_itemID_dev_batch,
-                Dtype *V, Dtype *U_t, Dtype *R_t, Dtype *U_GU, Dtype *R_GU, 
+                Dtype *V, Dtype *U_t, Dtype *R_t, Dtype *U_ACU, Dtype *R_ACU, 
                 Dtype training_rate, Dtype regularization_constant, const int increment_index, int training_iteration,
                 Dtype* testing_error_on_training_entries, Dtype* testing_error_on_testing_entries, 
                 Dtype* total_iterations, bool S_with_U = false, Dtype *SV = NULL, Dtype *logarithmic_histogram = NULL);

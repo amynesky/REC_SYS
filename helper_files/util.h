@@ -183,6 +183,9 @@ Dtype cpu_abs_max(const long long int n,  const Dtype* x);
 template <typename Dtype> 
 Dtype cpu_expected_value(const long long int n,  const Dtype* x);
 
+template <typename Dtype> 
+Dtype cpu_variance(const long long int n,  const Dtype* x);
+
 template <typename Dtype>
 Dtype cpu_expected_abs_value(const long long int n,  const Dtype* x);
 
@@ -291,6 +294,9 @@ long long int cpu_compute_hidden_values (const long long int ratings_rows,
   int**   coo_format_ratingsMtx_userID_host_new,
   int**   coo_format_ratingsMtx_itemID_host_new,
   float** coo_format_ratingsMtx_rating_host_new);
+
+template<typename Dtype>
+void quickSort(Dtype* x, int low_index, int high_index);
 
 template<typename Dtype, typename Itype>
 void quickSort_by_key(Dtype* x, int low_index, int high_index, Itype* indicies);

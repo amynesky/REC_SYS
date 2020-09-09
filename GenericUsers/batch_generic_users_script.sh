@@ -11,7 +11,7 @@
 set -x
 
 
-# load modules    #SBATCH -p GPU-shared  #SBATCH -A ac560rp   #SBTACH -e /home/nesky/REC_SYS/GenericUsers
+# load modules    #SBATCH -p GPU-shared  #SBATCH -A ac560rp   #SBATCH --mail-type=ALL #SBTACH -e /home/nesky/REC_SYS/GenericUsers
 
 
 #module load hdf5/1.8.16_gnu

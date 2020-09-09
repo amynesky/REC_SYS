@@ -243,12 +243,12 @@ void cpu_incremental_average_array<float>(const long long int increment_index, f
 template<typename Dtype>
 void cpu_incremental_average(const long long int increment_index, Dtype* old_avg, Dtype new_val) {
   bool Debug = false;
-  if(increment_index < (long long int)1){
-    ABORT_IF_EQ(0, 0, "oops!");
-  }
+  // if(increment_index < (long long int)1){
+  //   ABORT_IF_EQ(0, 0, "oops!");
+  // }
   if(increment_index == (long long int)1){
     old_avg[0] = new_val;
-  }else{
+  }else if(increment_index > (long long int)1) {
     if(Debug){
       LOG("old avg : "<< old_avg[0]);
       LOG("new value : "<< new_val);
@@ -1025,6 +1025,18 @@ Dtype cpu_expected_value(const long long int n,  const Dtype* x) {
 }
 
 template float cpu_expected_value<float>(const long long int n,  const float* x);
+
+template <typename Dtype> 
+Dtype cpu_variance(const long long int n,  const Dtype* x) {
+  if(too_big(n) ) {ABORT_IF_NEQ(0, 1,"Long long long int too big");}
+  Dtype y = (Dtype)0.0;
+  for(long long int i = (long long int)0; i < n; i += (long long int)1 ) {
+    cpu_incremental_average(i + (long long int)1, &y, static_cast<Dtype>(pow(x[i], (Dtype)2.0)));
+  };  
+  return y - static_cast<Dtype>(pow(cpu_expected_value<Dtype>(n, x), (Dtype)2.0));
+}
+
+template float cpu_variance<float>(const long long int n,  const float* x);
 
 template <>
 float cpu_expected_abs_value<float>(const long long int n,  const float* x) {
@@ -2031,6 +2043,7 @@ void cpu_shuffle_mtx_rows_or_cols(const long long int M, const long long int N, 
       if(Debug) LOG("row_major_ordering is true") ;
       cpu_permute<float>(x, indicies_host, N, M, false); 
     }else{
+      // x is column major order is the same thing as x^T in row major order
       if(Debug) LOG("col major ordering") ;
       cpu_permute<float>(x, indicies_host, M, N, true); 
     };
@@ -2454,6 +2467,67 @@ long long int cpu_compute_hidden_values (const long long int ratings_rows,
   return (long long int)new_coo_count;
 }
 
+/* This function takes last element as pivot, places
+   the pivot element at its correct position in sorted
+    array, and places all smaller (smaller than pivot)
+   to left of pivot and all greater elements to right
+   of pivot */
+template<typename Dtype>
+int partition (Dtype* x, int low_index, int high_index)
+{
+  bool debug = false;
+  // pivot (Element to be placed at right position)
+  Dtype pivot = x[high_index];  
+  Dtype temp = 0.0;
+  int i = (low_index - 1);  // Index of smaller element
+
+  for (int j = low_index; j < high_index; j++)
+  {
+      // If current element is smaller than the pivot
+      if (x[j] < pivot)
+      {
+          i++;    // increment index of smaller element
+          temp = x[i];
+          x[i] = x[j];
+          x[j] = temp;
+      }
+  }
+  temp = x[i + 1];
+  x[i + 1] = x[high_index];
+  x[high_index] = temp;
+  return (i + 1);
+}
+
+template int partition<int>(int* x, int low_index, int high_index);
+template int partition<float>(float* x, int low_index, int high_index);
+
+
+/* low  --> Starting index,  high  --> Ending index */
+template<typename Dtype>
+void quickSort(Dtype* x, int low_index, int high_index)
+{
+  bool debug = false;
+  //ABORT_IF_NEQ(0, 1, "function not ready");
+  if (low_index < high_index)
+  {
+    /* pi is partitioning index, arr[pi] is now
+       at right place */
+    int pi = partition<Dtype>(x, low_index, high_index);
+    if(debug){
+      LOG("pi : "<<pi);
+      if(low_index < 0 || high_index > 1316){
+        LOG("low_index : "<<low_index);
+        LOG("high_index : "<<high_index);
+        ABORT_IF_EQ(0, 0, "uh oh!");
+      }
+    }
+    quickSort<Dtype>(x, low_index, pi - 1);  // Before pi
+    quickSort<Dtype>(x, pi + 1, high_index); // After pi
+  }
+}
+
+template void quickSort<int>(int* x, int low_index, int high_index);
+template void quickSort<float>(float* x, int low_index, int high_index);
 
 /* This function takes last element as pivot, places
    the pivot element at its correct position in sorted
@@ -3406,17 +3480,22 @@ template <>
 void cpu_get_num_latent_factors<float>(const long long int m, float* S_host, 
   long long int* num_latent_factors, const float percent) 
 {
-  bool Debug = false;
+  bool Debug = true;
   float sum = cpu_asum<float>( m, S_host);
 
 
   float sum_so_far;
-  num_latent_factors[0] = m-1;
-  for(int j = 0; j < m-1; j++){
+  num_latent_factors[0] = m;
+  for(int j = 0; j < (int)m; j++){
     sum_so_far += S_host[j];
     if(sum_so_far / sum >= percent) {
-      num_latent_factors[0] = j+1;
-      if(Debug) LOG("num_latent_factors = "<< j+1);
+      num_latent_factors[0] = (long long int)(j+1);
+      if(Debug) {
+        LOG("num_latent_factors = "<< j+1);
+        LOG("sum = "<< sum);
+        LOG("sum_so_far = "<< sum_so_far);
+        LOG("sum_so_far / sum = "<< sum_so_far / sum);
+      }
       break;
     }
   }

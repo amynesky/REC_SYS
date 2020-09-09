@@ -14,6 +14,7 @@
 #include <float.h> 
 #endif
 
+#if defined(ENABLE_CUDA)
 /* Using updated (v2) interfaces to cublas and cusparse */
 #include <cuda_runtime.h>
 #include "/home/nesky/REC_SYS/helper_files/helper_cuda.h"
@@ -23,23 +24,27 @@
 #include "cusolverSp_LOWLEVEL_PREVIEW.h"
 //#include "helper_cusolver.h"
 #include "cusolverDn.h"
+#include "/home/nesky/REC_SYS/helper_files/util_gpu.cuh"
+#endif
 
 // Utilities and system includes
 #include "/home/nesky/REC_SYS/helper_files/CSVReader.h"
 #include "/home/nesky/REC_SYS/helper_files/util.h"
-#include "/home/nesky/REC_SYS/helper_files/util_gpu.cuh"
+
 #include "generic_users.h"
 
-const char *sSDKname = "Generic Users Recommender Systems";
+const char *sSDKname = "Artificial Core Users Recommender Systems";
 
 const bool Debug = 1;
 
 bool Content_Based = 0;         // This means that we use extra knowledge about the user preferences or about the item relationships
-bool random_initialization = 1; // This means that we only split the data into two groups and the GU mtx will be initialized randomly with perhaps other augmentation
+bool Conserve_GPU_Mem = 1;      // This means that the full ACU rating mtx is stored on the host 
+bool random_initialization = 0; // This means that we only split the data into two groups and the ACU mtx will be initialized randomly with perhaps other augmentation
 bool load_CU_from_preprocessing = 1;
-bool load_full_GU_from_save = 1;
-bool Conserve_GPU_Mem = 1;      // This means that the full GU rating mtx is stored on the host 
+bool load_full_ACU_from_save = 1;
+bool testing_only = 1;
 std::string preprocessing_path = "";
+
 
 #define update_Mem(new_mem) \
     allocatedMem += static_cast<long long int>(new_mem); \
@@ -62,7 +67,7 @@ std::string preprocessing_path = "";
 //     if (d_S    ) checkCudaErrors(cudaFree(d_S));
 //     if (d_S    ) checkCudaErrors(cudaFree(d_S));
 //     if (d_S    ) checkCudaErrors(cudaFree(d_S));
-//     checkCudaErrors(cudaMalloc((void**)&U_GU,       batch_size_GU       * batch_size_GU                       * SIZE_OF(float)));
+//     checkCudaErrors(cudaMalloc((void**)&U_ACU,       batch_size_ACU       * batch_size_ACU                       * SIZE_OF(float)));
 //     checkCudaErrors(cudaMalloc((void**)&V,          ratings_cols        * ratings_cols                        * SIZE_OF(float)));
 //     checkCudaErrors(cudaMalloc((void**)&U_training, batch_size_training * std::max(min_, batch_size_training) * SIZE_OF(float)));
 //     checkCudaErrors(cudaMalloc((void**)&R_training, batch_size_training * ratings_cols                        * SIZE_OF(float)));
@@ -81,7 +86,7 @@ int main(int argc, char *argv[])
 {
     std::string blank = "";
 
-    struct timeval program_start, program_end, training_start, training_end;
+    struct timeval program_start, program_end, training_start, training_end, testing_start, testing_end;
     double program_time;
     double training_time;
     gettimeofday(&program_start, NULL);
@@ -169,10 +174,16 @@ int main(int argc, char *argv[])
     };
 
 
+    // float* Beta = NULL;
+    // checkCudaErrors(cudaMalloc((void**)&Beta, 200 * SIZE_OF(float)));
+    // gpu_set_as_func_of_index<float>(Beta, 200, (float)1.0,  (float)1.0 - (float)0.01);
+    // if(1){
+    //   save_device_array_to_file<float>(Beta, 200, "V_regularizing_array");
+    // }
 
 
     // gpu_block_orthogonal_decomp_from_host_test(dn_handle, dn_solver_handle);
-    // return 0;
+    //return 0;
 
     //============================================================================================
     // Get the ratings data from CSV File
@@ -214,6 +225,7 @@ int main(int argc, char *argv[])
             Dataset_Name = "Rent The Runaway";
             csv_Ratings_Path = "/pylon5/ac560rp/nesky/REC_SYS/datasets/renttherunway_final_data_copy.json";
             //csv_keyWords_path = "/pylon5/ac560rp/nesky/REC_SYS/datasets/renttherunway_final_data.json";
+            preprocessing_path = "/pylon5/ac560rp/nesky/REC_SYS/CoreUsers/preprocessing/renttherunway/consider_item_cosine_similarity/user_cosine_similarity_incorporates_ratings/not/top_users.txt";
             Content_Based = 0;
             temp_num_entries = 192544;           // use for Rent The Runaway dataset
             save_path += "rentTheRunway/";
@@ -240,10 +252,10 @@ int main(int argc, char *argv[])
     LOG("csv_Ratings_Path : "<< csv_Ratings_Path);
     LOG("csv_keyWords_path : "<< csv_keyWords_path <<" dataset");
 
-    LOG("random_initialization : "<< random_initialization);// This means that we initialize the full GU rating mtx randomly
-    LOG("load_CU_from_preprocessing : "<< load_CU_from_preprocessing);// This means that we initialize the full GU rating mtx randomly
-    LOG("load_full_GU_from_save : "<< load_full_GU_from_save);
-    LOG("Conserve_GPU_Mem : "<< Conserve_GPU_Mem);          // This means that the full GU rating mtx is stored on the host
+    LOG("random_initialization : "<< random_initialization);// This means that we initialize the full ACU rating mtx randomly
+    LOG("load_CU_from_preprocessing : "<< load_CU_from_preprocessing);// This means that we initialize the full ACU rating mtx randomly
+    LOG("load_full_ACU_from_save : "<< load_full_ACU_from_save);
+    LOG("Conserve_GPU_Mem : "<< Conserve_GPU_Mem);          // This means that the full ACU rating mtx is stored on the host
     LOG("Content_Based : "<< Content_Based<<std::endl);     // This means that we use extra knowledge about the user preferences or about the item relationships
 
 
@@ -255,7 +267,7 @@ int main(int argc, char *argv[])
     //const int num_entries = 10000; //for debuging code
     bool load_all = true;
     bool original_column_ordering = true;
-    original_column_ordering = original_column_ordering || Content_Based;// || load_CU_from_preprocessing || load_full_GU_from_save
+    original_column_ordering = original_column_ordering || Content_Based;// || load_CU_from_preprocessing || load_full_ACU_from_save
     if(!load_all){
         original_column_ordering = false;
     }
@@ -290,7 +302,7 @@ int main(int argc, char *argv[])
             csv_Ratings.getDataJSON(coo_format_ratingsMtx_userID_host,
                                     coo_format_ratingsMtx_itemID_host,
                                     coo_format_ratingsMtx_rating_host, 
-                                    num_entries, missing_);
+                                    num_entries, missing_, &items_dictionary);
             break;
         }default: 
             ABORT_IF_EQ(0, 1, "no valid dataset selected");
@@ -447,40 +459,44 @@ int main(int argc, char *argv[])
     
 
 
+    /*
+    random_initialization      -> fill ACU mtx with rand values from some rand distr.
+    load_CU_from_preprocessing -> fill ACU mtx with Core Users
+
+    */
+
+    bool pull_rand_ACU_users = !random_initialization && !load_CU_from_preprocessing;
 
 
-    bool pull_rand_GU_users = !random_initialization && !load_CU_from_preprocessing;
 
 
 
-
-
-    const float probability_GU       = (float)10.0/(float)100.0;
+    const float probability_ACU       = (float)10.0/(float)100.0;
     const float p                    = (float)1.0/(float)10.0;
-    const float probability_testing  = !pull_rand_GU_users ?       p        :        p        * ((float)1.0 - probability_GU);
-    const float probability_training = !pull_rand_GU_users ? (float)1.0 - p :((float)1.0 - p) * ((float)1.0 - probability_GU);
+    const float probability_testing  = !pull_rand_ACU_users ?       p        :        p        * ((float)1.0 - probability_ACU);
+    const float probability_training = !pull_rand_ACU_users ? (float)1.0 - p :((float)1.0 - p) * ((float)1.0 - probability_ACU);
     LOG("percentage of users for testing: " <<probability_testing);
     LOG("percentage of users for training: "<<probability_training);
-    if(pull_rand_GU_users) {
-        LOG("percentage of users for GA: "      <<(float)1.0 - probability_training - probability_testing<<std::endl);
+    if(pull_rand_ACU_users) {
+        LOG("percentage of users for ACU: "      <<(float)1.0 - probability_training - probability_testing<<std::endl);
     }
 
-    long long int ratings_rows_GU_temp       = (long long int)(probability_GU * (float)ratings_rows);
-    if(!pull_rand_GU_users){
-        ratings_rows_GU_temp  /= (long long int)1000;
-        ratings_rows_GU_temp  *= (long long int)1000; // now ratings_rows_GU_temp is divisible by 100
+    long long int ratings_rows_ACU_temp       = (long long int)(probability_ACU * (float)ratings_rows);
+    if(!pull_rand_ACU_users){
+        ratings_rows_ACU_temp  /= (long long int)1000;
+        ratings_rows_ACU_temp  *= (long long int)1000; // now ratings_rows_ACU_temp is divisible by 100
     }
-    ABORT_IF_LE(probability_GU, (float)0.0, "probability_GU <= 0");
+    ABORT_IF_LE(probability_ACU, (float)0.0, "probability_ACU <= 0");
     ABORT_IF_LE(probability_testing, (float)0.0, "probability_testing <= 0");
     ABORT_IF_LE(probability_training, (float)0.0, "probability_training <= 0");
 
 
 
-    int num_groups =  pull_rand_GU_users ? 3 : 2;
+    int num_groups =  pull_rand_ACU_users ? 3 : 2;
     float  probability_of_groups_host [num_groups];
     probability_of_groups_host[0] = probability_testing;
     probability_of_groups_host[1] = probability_training;
-    if(pull_rand_GU_users){
+    if(pull_rand_ACU_users){
         probability_of_groups_host[2] = (float)1.0 - probability_training - probability_testing;
     }
 
@@ -497,7 +513,7 @@ int main(int argc, char *argv[])
     gpu_get_rand_groups(ratings_rows,  group_indicies, probability_of_groups_dev, num_groups);
 
     int* top_users = NULL;
-    if(load_CU_from_preprocessing && !load_full_GU_from_save){
+    if(load_CU_from_preprocessing && !load_full_ACU_from_save){
         top_users= (int *)malloc(ratings_rows * SIZE_OF(int));
         checkErrors(top_users);
 
@@ -511,11 +527,11 @@ int main(int argc, char *argv[])
         LOG("top_users[0] : "<<top_users[0]);
         LOG("top_users[ratings_rows - 1] : "<<top_users[ratings_rows - 1]);
 
-        gpu_mark_GU_users(ratings_rows_GU_temp, ratings_rows, top_users, group_indicies );
+        gpu_mark_ACU_users(ratings_rows_ACU_temp, ratings_rows, top_users, group_indicies );
         free(top_users);
         LOG("here!");
     }
-    if(load_full_GU_from_save){
+    if(load_full_ACU_from_save){
         LOG("LOADING PRESAVED TESTING AND TRAINING SETS");
 
         int* temp__ = NULL;
@@ -545,35 +561,38 @@ int main(int argc, char *argv[])
     const long long int num_entries_training  = group_sizes[1];
 
     if(!random_initialization){
-        ratings_rows_GU_temp = group_sizes[2];
+        ratings_rows_ACU_temp = group_sizes[2];
     }
-    const long long int num_entries_GU        = ratings_rows_GU_temp;
+    const long long int num_entries_ACU        = ratings_rows_ACU_temp;
 
 
     count_each_group(ratings_rows, group_indicies, group_sizes, num_groups);
     const long long int ratings_rows_testing  = group_sizes[0];
     const long long int ratings_rows_training = group_sizes[1];
     if(!random_initialization){
-        ratings_rows_GU_temp = group_sizes[2];
+        ratings_rows_ACU_temp = group_sizes[2];
     }
-    const long long int ratings_rows_GU       = ratings_rows_GU_temp;
+    const long long int ratings_rows_ACU       = ratings_rows_ACU_temp;
     
     LOG("num testing users : "   <<ratings_rows_testing);
     LOG("num training users : "  <<ratings_rows_training);
-    LOG("num GU users : "        <<ratings_rows_GU);
+    LOG("num ACU users : "        <<ratings_rows_ACU);
     LOG("num testing entries : " <<num_entries_testing);
     LOG("num training entries : "<<num_entries_training);
+
+    LOG("MEMORY REDUCTION OF ACU USERS : "      <<static_cast<double>(ratings_rows_ACU * ratings_cols) / static_cast<double>(ratings_rows + (long long int)2 * num_entries)<<std::endl<<std::endl<<std::endl);
+
     
     
     if(!random_initialization){
-        LOG("num GU entries : "      <<num_entries_GU<<std::endl);
-        ABORT_IF_NEQ(ratings_rows_testing + ratings_rows_training + ratings_rows_GU, ratings_rows, "The number of rows does not add up correctly.");
-        ABORT_IF_NEQ(num_entries_testing  + num_entries_training  + num_entries_GU,  num_entries, "The number of entries does not add up correctly.");
+        LOG("num ACU entries : "      <<num_entries_ACU<<std::endl);
+        ABORT_IF_NEQ(ratings_rows_testing + ratings_rows_training + ratings_rows_ACU, ratings_rows, "The number of rows does not add up correctly.");
+        ABORT_IF_NEQ(num_entries_testing  + num_entries_training  + num_entries_ACU,  num_entries, "The number of entries does not add up correctly.");
     }else{
         ABORT_IF_NEQ(ratings_rows_testing + ratings_rows_training, ratings_rows, "The number of rows does not add up correctly.");
         ABORT_IF_NEQ(num_entries_testing  + num_entries_training ,  num_entries, "The number of entries does not add up correctly.");        
     }
-    ABORT_IF_LE(ratings_rows_GU, (long long int)0, "ratings_rows_GU <= 0");
+    ABORT_IF_LE(ratings_rows_ACU, (long long int)0, "ratings_rows_ACU <= 0");
     ABORT_IF_LE(ratings_rows_testing, (long long int)0, "ratings_rows_testing <= 0");
     ABORT_IF_LE(ratings_rows_training, (long long int)0, "ratings_rows_training <= 0");    
 
@@ -598,9 +617,9 @@ int main(int argc, char *argv[])
     int*   coo_format_ratingsMtx_itemID_dev_training;
     float* coo_format_ratingsMtx_rating_dev_training;
 
-    int*   csr_format_ratingsMtx_userID_dev_GU;
-    int*   coo_format_ratingsMtx_itemID_dev_GU;
-    float* coo_format_ratingsMtx_rating_dev_GU;
+    int*   csr_format_ratingsMtx_userID_dev_ACU;
+    int*   coo_format_ratingsMtx_itemID_dev_ACU;
+    float* coo_format_ratingsMtx_rating_dev_ACU;
 
     
     checkCudaErrors(cudaMalloc((void**)&csr_format_ratingsMtx_userID_dev_testing,  (ratings_rows_testing + 1) * SIZE_OF(int)));
@@ -612,37 +631,37 @@ int main(int argc, char *argv[])
     checkCudaErrors(cudaMalloc((void**)&coo_format_ratingsMtx_rating_dev_training,  num_entries_training        * SIZE_OF(float)));
 
     if(!random_initialization){
-        checkCudaErrors(cudaMalloc((void**)&csr_format_ratingsMtx_userID_dev_GU,  (ratings_rows_GU + 1) * SIZE_OF(int)));
-        checkCudaErrors(cudaMalloc((void**)&coo_format_ratingsMtx_itemID_dev_GU,  num_entries_GU        * SIZE_OF(int)));
-        checkCudaErrors(cudaMalloc((void**)&coo_format_ratingsMtx_rating_dev_GU,  num_entries_GU        * SIZE_OF(float)));
+        checkCudaErrors(cudaMalloc((void**)&csr_format_ratingsMtx_userID_dev_ACU,  (ratings_rows_ACU + 1) * SIZE_OF(int)));
+        checkCudaErrors(cudaMalloc((void**)&coo_format_ratingsMtx_itemID_dev_ACU,  num_entries_ACU        * SIZE_OF(int)));
+        checkCudaErrors(cudaMalloc((void**)&coo_format_ratingsMtx_rating_dev_ACU,  num_entries_ACU        * SIZE_OF(float)));
     }
     update_Mem(  (ratings_rows_testing + 1)  * SIZE_OF(int) + num_entries_testing  * SIZE_OF(int) + num_entries_testing  * SIZE_OF(float)
                + (ratings_rows_training + 1) * SIZE_OF(int) + num_entries_training * SIZE_OF(int) + num_entries_training * SIZE_OF(float)
-               + (ratings_rows_GU + 1)       * SIZE_OF(int) + num_entries_GU       * SIZE_OF(int) + num_entries_GU       * SIZE_OF(float)  );
+               + (ratings_rows_ACU + 1)       * SIZE_OF(int) + num_entries_ACU       * SIZE_OF(int) + num_entries_ACU       * SIZE_OF(float)  );
     
     int*   csr_format_ratingsMtx_userID_dev_by_group_host  [num_groups];
     csr_format_ratingsMtx_userID_dev_by_group_host[0] = csr_format_ratingsMtx_userID_dev_testing;
     csr_format_ratingsMtx_userID_dev_by_group_host[1] = csr_format_ratingsMtx_userID_dev_training;
     if(!random_initialization){
-        csr_format_ratingsMtx_userID_dev_by_group_host[2] = csr_format_ratingsMtx_userID_dev_GU;
+        csr_format_ratingsMtx_userID_dev_by_group_host[2] = csr_format_ratingsMtx_userID_dev_ACU;
     }
     int*   coo_format_ratingsMtx_itemID_dev_by_group_host  [num_groups];
     coo_format_ratingsMtx_itemID_dev_by_group_host[0] = coo_format_ratingsMtx_itemID_dev_testing;
     coo_format_ratingsMtx_itemID_dev_by_group_host[1] = coo_format_ratingsMtx_itemID_dev_training;
     if(!random_initialization){
-        coo_format_ratingsMtx_itemID_dev_by_group_host[2] = coo_format_ratingsMtx_itemID_dev_GU;
+        coo_format_ratingsMtx_itemID_dev_by_group_host[2] = coo_format_ratingsMtx_itemID_dev_ACU;
     }
     float*   coo_format_ratingsMtx_rating_dev_by_group_host  [num_groups];
     coo_format_ratingsMtx_rating_dev_by_group_host[0] = coo_format_ratingsMtx_rating_dev_testing;
     coo_format_ratingsMtx_rating_dev_by_group_host[1] = coo_format_ratingsMtx_rating_dev_training;
     if(!random_initialization){
-        coo_format_ratingsMtx_rating_dev_by_group_host[2] = coo_format_ratingsMtx_rating_dev_GU;
+        coo_format_ratingsMtx_rating_dev_by_group_host[2] = coo_format_ratingsMtx_rating_dev_ACU;
     }
     int ratings_rows_by_group_host[num_groups];
     ratings_rows_by_group_host[0] = ratings_rows_testing;
     ratings_rows_by_group_host[1] = ratings_rows_training;
     if(!random_initialization){
-        ratings_rows_by_group_host[2] = ratings_rows_GU;
+        ratings_rows_by_group_host[2] = ratings_rows_ACU;
     }
     int**   csr_format_ratingsMtx_userID_dev_by_group;
     int**   coo_format_ratingsMtx_itemID_dev_by_group;
@@ -670,9 +689,9 @@ int main(int argc, char *argv[])
                    ratings_rows_by_group); 
     if(Debug && 0){
         if(random_initialization){
-            save_device_array_to_file<int>  (csr_format_ratingsMtx_userID_dev_GU,        ratings_rows_GU + 1,       "csr_format_ratingsMtx_userID_dev_GU");
-            save_device_array_to_file<int>  (coo_format_ratingsMtx_itemID_dev_GU,        num_entries_GU,            "coo_format_ratingsMtx_itemID_dev_GU");
-            save_device_array_to_file<float>(coo_format_ratingsMtx_rating_dev_GU,        num_entries_GU,            "coo_format_ratingsMtx_rating_dev_GU");
+            save_device_array_to_file<int>  (csr_format_ratingsMtx_userID_dev_ACU,        ratings_rows_ACU + 1,       "csr_format_ratingsMtx_userID_dev_ACU");
+            save_device_array_to_file<int>  (coo_format_ratingsMtx_itemID_dev_ACU,        num_entries_ACU,            "coo_format_ratingsMtx_itemID_dev_ACU");
+            save_device_array_to_file<float>(coo_format_ratingsMtx_rating_dev_ACU,        num_entries_ACU,            "coo_format_ratingsMtx_rating_dev_ACU");
         }
         save_device_array_to_file<int>  (csr_format_ratingsMtx_userID_dev_training,  ratings_rows_training + 1, "csr_format_ratingsMtx_userID_dev_training");
         save_device_array_to_file<int>  (coo_format_ratingsMtx_itemID_dev_training,  num_entries_training,      "coo_format_ratingsMtx_itemID_dev_training");
@@ -682,8 +701,8 @@ int main(int argc, char *argv[])
         save_device_array_to_file<float>(coo_format_ratingsMtx_rating_dev_testing,   num_entries_testing,       "coo_format_ratingsMtx_rating_dev_testing");
         // LOG("csr_format_ratingsMtx_userID_dev_training : ");
         // print_gpu_mtx_entries<int>(csr_format_ratingsMtx_userID_dev_training, ratings_rows_training + 1, 1 );
-        // LOG("csr_format_ratingsMtx_userID_dev_GU : ");
-        // print_gpu_mtx_entries<int>(csr_format_ratingsMtx_userID_dev_GU, ratings_rows_GU + 1, 1 );
+        // LOG("csr_format_ratingsMtx_userID_dev_ACU : ");
+        // print_gpu_mtx_entries<int>(csr_format_ratingsMtx_userID_dev_ACU, ratings_rows_ACU + 1, 1 );
         // LOG("Press Enter to continue.") ;
         // std::cin.ignore();
     }
@@ -731,19 +750,19 @@ int main(int argc, char *argv[])
 
     float* user_means_training;
     float* user_means_testing;
-    float* user_means_GU;
+    float* user_means_ACU;
     checkCudaErrors(cudaMalloc((void**)&user_means_training, ratings_rows_training * SIZE_OF(float)));
     checkCudaErrors(cudaMalloc((void**)&user_means_testing,  ratings_rows_testing  * SIZE_OF(float)));
-    checkCudaErrors(cudaMalloc((void**)&user_means_GU,       ratings_rows_GU       * SIZE_OF(float)));
-    update_Mem((ratings_rows_training + ratings_rows_testing + ratings_rows_GU)* SIZE_OF(float));
+    checkCudaErrors(cudaMalloc((void**)&user_means_ACU,       ratings_rows_ACU       * SIZE_OF(float)));
+    update_Mem((ratings_rows_training + ratings_rows_testing + ratings_rows_ACU)* SIZE_OF(float));
 
     float* user_var_training;
     float* user_var_testing;
-    float* user_var_GU;
+    float* user_var_ACU;
     checkCudaErrors(cudaMalloc((void**)&user_var_training, ratings_rows_training * SIZE_OF(float)));
     checkCudaErrors(cudaMalloc((void**)&user_var_testing,  ratings_rows_testing  * SIZE_OF(float)));
-    checkCudaErrors(cudaMalloc((void**)&user_var_GU,       ratings_rows_GU       * SIZE_OF(float)));
-    update_Mem((ratings_rows_training + ratings_rows_testing + ratings_rows_GU)* SIZE_OF(float));
+    checkCudaErrors(cudaMalloc((void**)&user_var_ACU,       ratings_rows_ACU       * SIZE_OF(float)));
+    update_Mem((ratings_rows_training + ratings_rows_testing + ratings_rows_ACU)* SIZE_OF(float));
 
 
     collect_user_means(user_means_training, user_var_training,  (long long int)ratings_rows_training,
@@ -752,9 +771,9 @@ int main(int argc, char *argv[])
                        user_means_testing, user_var_testing,    (long long int)ratings_rows_testing,
                        csr_format_ratingsMtx_userID_dev_testing,
                        coo_format_ratingsMtx_rating_dev_testing,
-                       user_means_GU, user_var_GU,              random_initialization ? (long long int)0 : (long long int)ratings_rows_GU,
-                       csr_format_ratingsMtx_userID_dev_GU,
-                       coo_format_ratingsMtx_rating_dev_GU);
+                       user_means_ACU, user_var_ACU,              random_initialization ? (long long int)0 : (long long int)ratings_rows_ACU,
+                       csr_format_ratingsMtx_userID_dev_ACU,
+                       coo_format_ratingsMtx_rating_dev_ACU);
 
     if(Debug && 0){
         save_device_array_to_file<float>(user_means_testing,  ratings_rows_testing,  "user_means_testing");
@@ -762,15 +781,15 @@ int main(int argc, char *argv[])
         save_device_array_to_file<float>(user_means_training, ratings_rows_training, "user_means_training");
         save_device_array_to_file<float>(user_var_training,   ratings_rows_training, "user_var_training");
         if(!random_initialization){
-            save_device_array_to_file<float>(user_means_GU,       ratings_rows_GU,       "user_means_GU");
-            save_device_array_to_file<float>(user_var_GU,         ratings_rows_GU,       "user_var_GU");
+            save_device_array_to_file<float>(user_means_ACU,       ratings_rows_ACU,       "user_means_ACU");
+            save_device_array_to_file<float>(user_var_ACU,         ratings_rows_ACU,       "user_var_ACU");
         }
         // LOG("user_means_training : ");
-        // print_gpu_array_entries(user_means_GU, ratings_rows_GU);
+        // print_gpu_array_entries(user_means_ACU, ratings_rows_ACU);
         // LOG("user_means_training : ");
-        // print_gpu_array_entries(user_means_GU, ratings_rows_GU);
-        // LOG("user_means_GU : ");
-        // print_gpu_array_entries(user_means_GU, ratings_rows_GU);
+        // print_gpu_array_entries(user_means_ACU, ratings_rows_ACU);
+        // LOG("user_means_ACU : ");
+        // print_gpu_array_entries(user_means_ACU, ratings_rows_ACU);
         // LOG("Press Enter to continue.") ;
         // std::cin.ignore();
     }
@@ -798,19 +817,19 @@ int main(int argc, char *argv[])
 
 
 
-    LOG("Center Data and fill GA matrix... ");
+    LOG("Center Data and fill ACU matrix... ");
 
 
-    float * coo_format_ratingsMtx_row_centered_rating_dev_GU;
+    float * coo_format_ratingsMtx_row_centered_rating_dev_ACU;
     float * coo_format_ratingsMtx_row_centered_rating_dev_testing;
     float * coo_format_ratingsMtx_row_centered_rating_dev_training;
     
     if(!random_initialization){
-        checkCudaErrors(cudaMalloc((void**)&coo_format_ratingsMtx_row_centered_rating_dev_GU,       num_entries_GU       * SIZE_OF(float)));
+        checkCudaErrors(cudaMalloc((void**)&coo_format_ratingsMtx_row_centered_rating_dev_ACU,       num_entries_ACU       * SIZE_OF(float)));
     }
     checkCudaErrors(cudaMalloc((void**)&coo_format_ratingsMtx_row_centered_rating_dev_testing,  num_entries_testing  * SIZE_OF(float)));
     checkCudaErrors(cudaMalloc((void**)&coo_format_ratingsMtx_row_centered_rating_dev_training, num_entries_training * SIZE_OF(float)));
-    update_Mem( ( num_entries_GU + num_entries_testing + num_entries_training) * SIZE_OF(float) );
+    update_Mem( ( num_entries_ACU + num_entries_testing + num_entries_training) * SIZE_OF(float) );
 
 
 
@@ -820,15 +839,15 @@ int main(int argc, char *argv[])
     LOG("rating used when the variance of the user's ratings is zero : "<< val_when_var_is_zero);
 
     if(!random_initialization){
-        center_ratings(user_means_GU, user_var_GU, 
-                       ratings_rows_GU, num_entries_GU,
-                        csr_format_ratingsMtx_userID_dev_GU,
-                        coo_format_ratingsMtx_rating_dev_GU,
-                        coo_format_ratingsMtx_row_centered_rating_dev_GU, val_when_var_is_zero);
+        center_ratings(user_means_ACU, user_var_ACU, 
+                       ratings_rows_ACU, num_entries_ACU,
+                        csr_format_ratingsMtx_userID_dev_ACU,
+                        coo_format_ratingsMtx_rating_dev_ACU,
+                        coo_format_ratingsMtx_row_centered_rating_dev_ACU, val_when_var_is_zero);
 
-        checkCudaErrors(cudaMemcpy(coo_format_ratingsMtx_rating_dev_GU,       coo_format_ratingsMtx_row_centered_rating_dev_GU,       num_entries_GU       *  SIZE_OF(float), cudaMemcpyDeviceToDevice));
-        checkCudaErrors(cudaFree(coo_format_ratingsMtx_row_centered_rating_dev_GU));             update_Mem((ratings_rows_GU + 1) * SIZE_OF(int) * (-1));
-        float range_GU       = gpu_range<float>(num_entries_GU,        coo_format_ratingsMtx_rating_dev_GU);
+        checkCudaErrors(cudaMemcpy(coo_format_ratingsMtx_rating_dev_ACU,       coo_format_ratingsMtx_row_centered_rating_dev_ACU,       num_entries_ACU       *  SIZE_OF(float), cudaMemcpyDeviceToDevice));
+        checkCudaErrors(cudaFree(coo_format_ratingsMtx_row_centered_rating_dev_ACU));             update_Mem((ratings_rows_ACU + 1) * SIZE_OF(int) * (-1));
+        float range_ACU       = gpu_range<float>(num_entries_ACU,        coo_format_ratingsMtx_rating_dev_ACU);
     }
 
     center_ratings(user_means_testing, user_var_testing, 
@@ -846,8 +865,8 @@ int main(int argc, char *argv[])
     checkCudaErrors(cudaMemcpy(coo_format_ratingsMtx_rating_dev_testing,  coo_format_ratingsMtx_row_centered_rating_dev_testing,  num_entries_testing  *  SIZE_OF(float), cudaMemcpyDeviceToDevice));
     checkCudaErrors(cudaMemcpy(coo_format_ratingsMtx_rating_dev_training, coo_format_ratingsMtx_row_centered_rating_dev_training, num_entries_training *  SIZE_OF(float), cudaMemcpyDeviceToDevice));
     
-    checkCudaErrors(cudaFree(coo_format_ratingsMtx_row_centered_rating_dev_testing));        update_Mem(num_entries_GU        * SIZE_OF(int) * (-1));
-    checkCudaErrors(cudaFree(coo_format_ratingsMtx_row_centered_rating_dev_training));       update_Mem(num_entries_GU        * SIZE_OF(float) * (-1));
+    checkCudaErrors(cudaFree(coo_format_ratingsMtx_row_centered_rating_dev_testing));        update_Mem(num_entries_ACU        * SIZE_OF(int) * (-1));
+    checkCudaErrors(cudaFree(coo_format_ratingsMtx_row_centered_rating_dev_training));       update_Mem(num_entries_ACU        * SIZE_OF(float) * (-1));
 
     
     
@@ -867,7 +886,7 @@ int main(int argc, char *argv[])
 
     range_training = (float)2.0 * expt_abs_training;
 
-    //LOG(std::endl<<"range_GU = "         <<range_GU) ;
+    //LOG(std::endl<<"range_ACU = "         <<range_ACU) ;
     //LOG("range_testing = "    <<range_testing) ;
     //LOG("range_training = "   <<range_training) ;
     LOG("max_training = "     <<max_training) ;
@@ -885,13 +904,13 @@ int main(int argc, char *argv[])
    
     if( Debug && 0){
         if(!random_initialization){
-            save_device_array_to_file<int>  (csr_format_ratingsMtx_userID_dev_GU,        ratings_rows_GU + 1,       "csr_format_ratingsMtx_userID_dev_GU");
-            save_device_array_to_file<int>  (coo_format_ratingsMtx_itemID_dev_GU,        num_entries_GU,            "coo_format_ratingsMtx_itemID_dev_GU");
-            save_device_array_to_file<float>(coo_format_ratingsMtx_rating_dev_GU,        num_entries_GU,            "coo_format_ratingsMtx_rating_dev_GU");
+            save_device_array_to_file<int>  (csr_format_ratingsMtx_userID_dev_ACU,        ratings_rows_ACU + 1,       "csr_format_ratingsMtx_userID_dev_ACU");
+            save_device_array_to_file<int>  (coo_format_ratingsMtx_itemID_dev_ACU,        num_entries_ACU,            "coo_format_ratingsMtx_itemID_dev_ACU");
+            save_device_array_to_file<float>(coo_format_ratingsMtx_rating_dev_ACU,        num_entries_ACU,            "coo_format_ratingsMtx_rating_dev_ACU");
         }
 
     	// save_device_array_to_file<float>(coo_format_ratingsMtx_rating_dev_training,  num_entries_training,      "coo_format_ratingsMtx_rating_dev_training_post_centering");
-    	// save_device_array_to_file<float>(coo_format_ratingsMtx_rating_dev_GU,  num_entries_GU,      "coo_format_ratingsMtx_rating_dev_GU_post_centering");
+    	// save_device_array_to_file<float>(coo_format_ratingsMtx_rating_dev_ACU,  num_entries_ACU,      "coo_format_ratingsMtx_rating_dev_ACU_post_centering");
     	// save_device_array_to_file<float>(coo_format_ratingsMtx_rating_dev_testing,  num_entries_testing,      "coo_format_ratingsMtx_rating_dev_testing_post_centering");
 
         // save_device_array_to_file<int>  (csr_format_ratingsMtx_userID_dev_testing,  ratings_rows_testing + 1, "csr_format_ratingsMtx_userID_dev_testing_post_centering");
@@ -906,8 +925,8 @@ int main(int argc, char *argv[])
 
         // LOG("csr_format_ratingsMtx_userID_dev_training : ");
         // print_gpu_mtx_entries<int>(csr_format_ratingsMtx_userID_dev_training, ratings_rows_training + 1, 1 );
-        // LOG("csr_format_ratingsMtx_userID_dev_GU : ");
-        // print_gpu_mtx_entries<int>(csr_format_ratingsMtx_userID_dev_GU, ratings_rows_GU + 1, 1 );
+        // LOG("csr_format_ratingsMtx_userID_dev_ACU : ");
+        // print_gpu_mtx_entries<int>(csr_format_ratingsMtx_userID_dev_ACU, ratings_rows_ACU + 1, 1 );
         // LOG("Press Enter to continue.") ;
         // std::cin.ignore();
     }
@@ -917,165 +936,168 @@ int main(int argc, char *argv[])
 
 
     bool row_major_ordering = true;
-    LOG("GU matrix row_major_ordering = " <<row_major_ordering);
+    LOG("ACU matrix row_major_ordering = " <<row_major_ordering);
 
-    float * full_ratingsMtx_dev_GU = NULL;
-    float * full_ratingsMtx_host_GU = NULL;
+    float * full_ratingsMtx_dev_ACU = NULL;
+    float * full_ratingsMtx_host_ACU = NULL;
 
-    const long long int GU_mtx_size = (long long int)ratings_rows_GU * (long long int)ratings_cols;
-    const long long int GU_mtx_size_bytes = (long long int)ratings_rows_GU * (long long int)ratings_cols * (long long int)SIZE_OF(float);
+    const long long int ACU_mtx_size = (long long int)ratings_rows_ACU * (long long int)ratings_cols;
+    const long long int ACU_mtx_size_bytes = (long long int)ratings_rows_ACU * (long long int)ratings_cols * (long long int)SIZE_OF(float);
     LOG(std::endl);
-    LOG("Will need "<<GU_mtx_size<< " floats for the GU mtx.") ;
-    LOG("Will need "<<GU_mtx_size_bytes<< " bytes for the GU mtx.") ;
-    if(allocatedMem + GU_mtx_size_bytes > (long long int)((double)devMem * (double)0.75)){
-        LOG("Conserving Memory Now --> This means that the full GU rating mtx is stored on the host ");
+    LOG("Will need "<<ACU_mtx_size<< " floats for the ACU mtx.") ;
+    LOG("Will need "<<ACU_mtx_size_bytes<< " bytes for the ACU mtx.") ;
+    if(allocatedMem + ACU_mtx_size_bytes > (long long int)((double)devMem * (double)0.75)){
+        LOG("Conserving Memory Now --> This means that the full ACU rating mtx is stored on the host ");
         Conserve_GPU_Mem = 1;
     }
     // LOG("Press Enter to continue.") ;
     // std::cin.ignore();
 
     
-    int*   csr_format_ratingsMtx_userID_host_GU = NULL;
-    int*   coo_format_ratingsMtx_itemID_host_GU = NULL;
-    float* coo_format_ratingsMtx_rating_host_GU = NULL;
+    int*   csr_format_ratingsMtx_userID_host_ACU = NULL;
+    int*   coo_format_ratingsMtx_itemID_host_ACU = NULL;
+    float* coo_format_ratingsMtx_rating_host_ACU = NULL;
     
     if(Conserve_GPU_Mem){
-        // This means that the full GU rating mtx is stored on the host
+        // This means that the full ACU rating mtx is stored on the host
         
-        full_ratingsMtx_host_GU = (float *)malloc(GU_mtx_size_bytes);
-        checkErrors(full_ratingsMtx_host_GU);
+        full_ratingsMtx_host_ACU = (float *)malloc(ACU_mtx_size_bytes);
+        checkErrors(full_ratingsMtx_host_ACU);
         
-        if(load_full_GU_from_save){
+        if(load_full_ACU_from_save){
             //load later
 
-            // std::string full_ratingsMtx_GU_filepath = save_path + "full_ratingsMtx_GU.txt";
+            // std::string full_ratingsMtx_ACU_filepath = save_path + "full_ratingsMtx_ACU.txt";
 
-            // CSVReader GU_mtx_reader(full_ratingsMtx_GU_filepath);
-            // GU_mtx_reader.getData(full_ratingsMtx_host_GU, ratings_rows_GU, ratings_cols);
+            // CSVReader ACU_mtx_reader(full_ratingsMtx_ACU_filepath);
+            // ACU_mtx_reader.getData(full_ratingsMtx_host_ACU, ratings_rows_ACU, ratings_cols);
             // if(!row_major_ordering){
             //     ABORT_IF_EQ(0, 0, "Option not ready");
             // }
 
         }else{
-            //cpu_set_all<float>(full_ratingsMtx_host_GU, GU_mtx_size, (float)0.0);
-            //host_rng_uniform(ratings_rows_GU * ratings_cols, min_training, max_training, full_ratingsMtx_host_GU);
+            //cpu_set_all<float>(full_ratingsMtx_host_ACU, ACU_mtx_size, (float)0.0);
+            //host_rng_uniform(ratings_rows_ACU * ratings_cols, min_training, max_training, full_ratingsMtx_host_ACU);
             if(random_initialization){
-                //host_rng_uniform(ratings_rows_GU * ratings_cols, (float)((-1.0)* std::sqrt(3.0)), (float)(std::sqrt(3.0)), full_ratingsMtx_host_GU);
-                host_rng_gaussian(ratings_rows_GU * ratings_cols, (float)0.0, (float)1.0, full_ratingsMtx_host_GU);
+                //host_rng_uniform(ratings_rows_ACU * ratings_cols, (float)((-1.0)* std::sqrt(3.0)), (float)(std::sqrt(3.0)), full_ratingsMtx_host_ACU);
+                host_rng_gaussian(ratings_rows_ACU * ratings_cols, (float)0.0, (float)1.0, full_ratingsMtx_host_ACU);
             }else{
-                //host_rng_uniform(ratings_rows_GU * ratings_cols, (float)((-1.0)* 0.1), (float)0.1, full_ratingsMtx_host_GU);
-                host_rng_gaussian(ratings_rows_GU * ratings_cols, (float)0.0, (float)0.1, full_ratingsMtx_host_GU);
-            }
-            
+                //host_rng_uniform(ratings_rows_ACU * ratings_cols, (float)((-1.0)* 0.1), (float)0.1, full_ratingsMtx_host_ACU);
+                //host_rng_gaussian(ratings_rows_ACU * ratings_cols, (float)0.0, (float)0.1, full_ratingsMtx_host_ACU);
+                cpu_set_all<float>(full_ratingsMtx_host_ACU, ACU_mtx_size, (float)0.0);
 
-            if(!random_initialization){
-                csr_format_ratingsMtx_userID_host_GU  = (int *)  malloc((ratings_rows_GU + 1) * SIZE_OF(int)  );
-                coo_format_ratingsMtx_itemID_host_GU  = (int *)  malloc(num_entries_GU        * SIZE_OF(int)  );
-                coo_format_ratingsMtx_rating_host_GU  = (float *)malloc(num_entries_GU        * SIZE_OF(float));
+                csr_format_ratingsMtx_userID_host_ACU  = (int *)  malloc((ratings_rows_ACU + 1) * SIZE_OF(int)  );
+                coo_format_ratingsMtx_itemID_host_ACU  = (int *)  malloc(num_entries_ACU        * SIZE_OF(int)  );
+                coo_format_ratingsMtx_rating_host_ACU  = (float *)malloc(num_entries_ACU        * SIZE_OF(float));
 
 
-                checkErrors(csr_format_ratingsMtx_userID_host_GU);
-                checkErrors(coo_format_ratingsMtx_itemID_host_GU);
-                checkErrors(coo_format_ratingsMtx_rating_host_GU);
-                checkCudaErrors(cudaMemcpy(csr_format_ratingsMtx_userID_host_GU,  csr_format_ratingsMtx_userID_dev_GU,  (ratings_rows_GU + 1) * SIZE_OF(int), cudaMemcpyDeviceToHost));
-                checkCudaErrors(cudaMemcpy(coo_format_ratingsMtx_itemID_host_GU,  coo_format_ratingsMtx_itemID_dev_GU,  num_entries_GU        * SIZE_OF(int), cudaMemcpyDeviceToHost));
-                checkCudaErrors(cudaMemcpy(coo_format_ratingsMtx_rating_host_GU,  coo_format_ratingsMtx_rating_dev_GU,  num_entries_GU        * SIZE_OF(float), cudaMemcpyDeviceToHost));
+                checkErrors(csr_format_ratingsMtx_userID_host_ACU);
+                checkErrors(coo_format_ratingsMtx_itemID_host_ACU);
+                checkErrors(coo_format_ratingsMtx_rating_host_ACU);
+                checkCudaErrors(cudaMemcpy(csr_format_ratingsMtx_userID_host_ACU,  csr_format_ratingsMtx_userID_dev_ACU,  (ratings_rows_ACU + 1) * SIZE_OF(int), cudaMemcpyDeviceToHost));
+                checkCudaErrors(cudaMemcpy(coo_format_ratingsMtx_itemID_host_ACU,  coo_format_ratingsMtx_itemID_dev_ACU,  num_entries_ACU        * SIZE_OF(int), cudaMemcpyDeviceToHost));
+                checkCudaErrors(cudaMemcpy(coo_format_ratingsMtx_rating_host_ACU,  coo_format_ratingsMtx_rating_dev_ACU,  num_entries_ACU        * SIZE_OF(float), cudaMemcpyDeviceToHost));
                 
-                cpu_fill_training_mtx((long long int)ratings_rows_GU, (long long int)ratings_cols, (long long int)num_entries_GU, 
+                cpu_fill_training_mtx((long long int)ratings_rows_ACU, (long long int)ratings_cols, (long long int)num_entries_ACU, 
                                       row_major_ordering,  
-                                      csr_format_ratingsMtx_userID_host_GU,
-                                      coo_format_ratingsMtx_itemID_host_GU,
-                                      coo_format_ratingsMtx_rating_host_GU,
-                                      full_ratingsMtx_host_GU);
+                                      csr_format_ratingsMtx_userID_host_ACU,
+                                      coo_format_ratingsMtx_itemID_host_ACU,
+                                      coo_format_ratingsMtx_rating_host_ACU,
+                                      full_ratingsMtx_host_ACU);
 
-                cpu_shuffle_mtx_rows_or_cols(ratings_rows_GU, ratings_cols, 
-                                         row_major_ordering, full_ratingsMtx_host_GU, 1);
+                if(Debug & 0){
+                    save_host_array_to_file(full_ratingsMtx_host_ACU, 1000/*ratings_cols * ratings_rows_ACU*/, "full_ratingsMtx_ACU", strPreamble(blank));
+                    return 0;
+                }
 
-                free(csr_format_ratingsMtx_userID_host_GU);
-                free(coo_format_ratingsMtx_itemID_host_GU);
-                free(coo_format_ratingsMtx_rating_host_GU); 
+                cpu_shuffle_mtx_rows_or_cols(ratings_rows_ACU, ratings_cols, 
+                                         row_major_ordering, full_ratingsMtx_host_ACU, 1);
+
+                free(csr_format_ratingsMtx_userID_host_ACU);
+                free(coo_format_ratingsMtx_itemID_host_ACU);
+                free(coo_format_ratingsMtx_rating_host_ACU); 
             }
 
         }
 
-        float R_GU_mean_abs_nonzero = (float)0.0;
-        //cpu_mean_abs_nonzero<float>(ratings_rows_GU * ratings_cols, full_ratingsMtx_host_GU, &R_GU_mean_abs_nonzero, Debug);
+        float R_ACU_mean_abs_nonzero = (float)0.0;
+        //cpu_mean_abs_nonzero<float>(ratings_rows_ACU * ratings_cols, full_ratingsMtx_host_ACU, &R_ACU_mean_abs_nonzero, Debug);
 
-        LOG("full_ratingsMtx_host_GU filled and shuffled") ;
+        LOG("full_ratingsMtx_host_ACU filled and shuffled") ;
     }else{
-        checkCudaErrors(cudaMalloc((void**)&full_ratingsMtx_dev_GU, ratings_rows_GU * ratings_cols * SIZE_OF(float)));
-        update_Mem(ratings_rows_GU * ratings_cols * SIZE_OF(float));
+        checkCudaErrors(cudaMalloc((void**)&full_ratingsMtx_dev_ACU, ratings_rows_ACU * ratings_cols * SIZE_OF(float)));
+        update_Mem(ratings_rows_ACU * ratings_cols * SIZE_OF(float));
 
-        if(load_full_GU_from_save){
+        if(load_full_ACU_from_save){
             ABORT_IF_EQ(0, 0, "Option not ready");
         }else{
-            //gpu_set_all<float>(full_ratingsMtx_dev_GU, ratings_rows_GU * ratings_cols, (float)0.0);
-            //gpu_rng_uniform<float>(dn_handle, ratings_rows_GU * ratings_cols, min_training, max_training, full_ratingsMtx_dev_GU);
-            gpu_rng_gaussian<float>(ratings_rows_GU * ratings_cols, (float)0.0, (float)0.00007, full_ratingsMtx_dev_GU);
+            //gpu_set_all<float>(full_ratingsMtx_dev_ACU, ratings_rows_ACU * ratings_cols, (float)0.0);
+            //gpu_rng_uniform<float>(dn_handle, ratings_rows_ACU * ratings_cols, min_training, max_training, full_ratingsMtx_dev_ACU);
+            gpu_rng_gaussian<float>(ratings_rows_ACU * ratings_cols, (float)0.0, (float)0.00007, full_ratingsMtx_dev_ACU);
 
             if(!random_initialization){
-                gpu_fill_training_mtx(ratings_rows_GU, ratings_cols, row_major_ordering,
-                                      csr_format_ratingsMtx_userID_dev_GU,
-                                      coo_format_ratingsMtx_itemID_dev_GU,
-                                      coo_format_ratingsMtx_rating_dev_GU,
-                                      full_ratingsMtx_dev_GU);
+                gpu_fill_training_mtx(ratings_rows_ACU, ratings_cols, row_major_ordering,
+                                      csr_format_ratingsMtx_userID_dev_ACU,
+                                      coo_format_ratingsMtx_itemID_dev_ACU,
+                                      coo_format_ratingsMtx_rating_dev_ACU,
+                                      full_ratingsMtx_dev_ACU);
 
                 if(Content_Based){ // This means that we use extra knowledge about the user preferences or about the item relationships
-                    gpu_supplement_training_mtx_with_content_based(ratings_rows_GU, 
+                    gpu_supplement_training_mtx_with_content_based(ratings_rows_ACU, 
                                                                     ratings_cols, 
                                                                     row_major_ordering,
-                                                                    csr_format_ratingsMtx_userID_dev_GU,
-                                                                    coo_format_ratingsMtx_itemID_dev_GU,
-                                                                    coo_format_ratingsMtx_rating_dev_GU,
-                                                                    full_ratingsMtx_dev_GU,
+                                                                    csr_format_ratingsMtx_userID_dev_ACU,
+                                                                    coo_format_ratingsMtx_itemID_dev_ACU,
+                                                                    coo_format_ratingsMtx_rating_dev_ACU,
+                                                                    full_ratingsMtx_dev_ACU,
                                                                     csr_format_keyWordMtx_itemID_dev,
                                                                     coo_format_keyWordMtx_keyWord_dev);
 
-                    const float max_training_supplement   = gpu_max<float>(ratings_rows_GU * ratings_cols, full_ratingsMtx_dev_GU);
+                    const float max_training_supplement   = gpu_max<float>(ratings_rows_ACU * ratings_cols, full_ratingsMtx_dev_ACU);
                     if (max_training_supplement > max_training) {
                         LOG("max_training_supplement : "<<max_training_supplement);
                     }
-                    const float min_training_supplement   = gpu_min<float>(ratings_rows_GU * ratings_cols, full_ratingsMtx_dev_GU);
+                    const float min_training_supplement   = gpu_min<float>(ratings_rows_ACU * ratings_cols, full_ratingsMtx_dev_ACU);
                     if (min_training_supplement < min_training) {
                         LOG("min_training_supplement : "<<min_training_supplement);
                     }
                 }
 
                 if(Debug && 0){
-                    save_device_mtx_to_file(full_ratingsMtx_dev_GU, ratings_cols, ratings_rows_GU, "full_ratingsMtx_dev_GU_pre_shuffle", true);
+                    save_device_mtx_to_file(full_ratingsMtx_dev_ACU, ratings_cols, ratings_rows_ACU, "full_ratingsMtx_dev_ACU_pre_shuffle", true);
                 }
 
                 checkCudaErrors(cudaDeviceSynchronize());
-                //shuffle GA rows
-                gpu_shuffle_mtx_rows_or_cols(dn_handle, ratings_rows_GU, ratings_cols,  
-                                             row_major_ordering, full_ratingsMtx_dev_GU, 1);
+                //shuffle ACU rows
+                gpu_shuffle_mtx_rows_or_cols(dn_handle, ratings_rows_ACU, ratings_cols,  
+                                             row_major_ordering, full_ratingsMtx_dev_ACU, 1);
             }
             if(Debug && 0){
-                save_device_mtx_to_file(full_ratingsMtx_dev_GU, ratings_cols, ratings_rows_GU, "full_ratingsMtx_dev_GU", true);
+                save_device_mtx_to_file(full_ratingsMtx_dev_ACU, ratings_cols, ratings_rows_ACU, "full_ratingsMtx_dev_ACU", true);
                 // LOG("Press Enter to continue.") ;
                 // std::cin.ignore();
             }
         }
-        LOG("full_ratingsMtx_dev_GU filled and shuffled"<<std::endl) ;
+        LOG("full_ratingsMtx_dev_ACU filled and shuffled"<<std::endl) ;
 
-        const float min_GU       = gpu_min<float>               (ratings_rows_GU * ratings_cols, full_ratingsMtx_dev_GU);
-        const float max_GU       = gpu_max<float>               (ratings_rows_GU * ratings_cols, full_ratingsMtx_dev_GU);
-        const float abs_max_GU   = std::max(max_GU, std::abs(min_GU));
-        const float expt_GU      = gpu_expected_value<float>    (ratings_rows_GU * ratings_cols, full_ratingsMtx_dev_GU);
-        const float expt_abs_GU  = gpu_expected_abs_value<float>(ratings_rows_GU * ratings_cols, full_ratingsMtx_dev_GU);
+        const float min_ACU       = gpu_min<float>               (ratings_rows_ACU * ratings_cols, full_ratingsMtx_dev_ACU);
+        const float max_ACU       = gpu_max<float>               (ratings_rows_ACU * ratings_cols, full_ratingsMtx_dev_ACU);
+        const float abs_max_ACU   = std::max(max_ACU, std::abs(min_ACU));
+        const float expt_ACU      = gpu_expected_value<float>    (ratings_rows_ACU * ratings_cols, full_ratingsMtx_dev_ACU);
+        const float expt_abs_ACU  = gpu_expected_abs_value<float>(ratings_rows_ACU * ratings_cols, full_ratingsMtx_dev_ACU);
 
 
-        LOG("max_GU = "     <<max_GU) ;
-        LOG("min_GU = "     <<min_GU) ;
-        LOG("abs_max_GU = " <<abs_max_GU) ;
-        LOG("expt_GU = "    <<expt_GU) ;
-        LOG("expt_abs_GU = "<<expt_abs_GU) ;
+        LOG("max_ACU = "     <<max_ACU) ;
+        LOG("min_ACU = "     <<min_ACU) ;
+        LOG("abs_max_ACU = " <<abs_max_ACU) ;
+        LOG("expt_ACU = "    <<expt_ACU) ;
+        LOG("expt_abs_ACU = "<<expt_abs_ACU) ;
 
     }
     if(!random_initialization){
-        checkCudaErrors(cudaFree(csr_format_ratingsMtx_userID_dev_GU));         update_Mem((ratings_rows_GU + 1) * SIZE_OF(int)   * (-1));
-        checkCudaErrors(cudaFree(coo_format_ratingsMtx_itemID_dev_GU));         update_Mem(num_entries_GU        * SIZE_OF(int)   * (-1));
-        checkCudaErrors(cudaFree(coo_format_ratingsMtx_rating_dev_GU));         update_Mem(num_entries_GU        * SIZE_OF(float) * (-1));
+        checkCudaErrors(cudaFree(csr_format_ratingsMtx_userID_dev_ACU));         update_Mem((ratings_rows_ACU + 1) * SIZE_OF(int)   * (-1));
+        checkCudaErrors(cudaFree(coo_format_ratingsMtx_itemID_dev_ACU));         update_Mem(num_entries_ACU        * SIZE_OF(int)   * (-1));
+        checkCudaErrors(cudaFree(coo_format_ratingsMtx_rating_dev_ACU));         update_Mem(num_entries_ACU        * SIZE_OF(float) * (-1));
     }
 
     if(Debug && 0){
@@ -1084,8 +1106,8 @@ int main(int argc, char *argv[])
         save_device_array_to_file<float>(coo_format_ratingsMtx_rating_dev_testing,  num_entries_testing,      "coo_format_ratingsMtx_rating_dev_testing" );
         // LOG("csr_format_ratingsMtx_userID_dev_training : ");
         // print_gpu_mtx_entries<int>(csr_format_ratingsMtx_userID_dev_training, ratings_rows_training + 1, 1 );
-        // LOG("csr_format_ratingsMtx_userID_dev_GU : ");
-        // print_gpu_mtx_entries<int>(csr_format_ratingsMtx_userID_dev_GU, ratings_rows_GU + 1, 1 );
+        // LOG("csr_format_ratingsMtx_userID_dev_ACU : ");
+        // print_gpu_mtx_entries<int>(csr_format_ratingsMtx_userID_dev_ACU, ratings_rows_ACU + 1, 1 );
         // LOG("Press Enter to continue.") ;
         // std::cin.ignore();
     }
@@ -1105,8 +1127,8 @@ int main(int argc, char *argv[])
     checkCudaErrors(cudaFree(user_var_testing));                          update_Mem(ratings_rows_testing * SIZE_OF(float) * (-1));
 
     //the stored means are useless now
-    checkCudaErrors(cudaFree(user_means_GU));                             update_Mem(ratings_rows_GU * SIZE_OF(float) * (-1));
-    checkCudaErrors(cudaFree(user_var_GU));                               update_Mem(ratings_rows_GU * SIZE_OF(float) * (-1));
+    checkCudaErrors(cudaFree(user_means_ACU));                             update_Mem(ratings_rows_ACU * SIZE_OF(float) * (-1));
+    checkCudaErrors(cudaFree(user_var_ACU));                               update_Mem(ratings_rows_ACU * SIZE_OF(float) * (-1));
     checkCudaErrors(cudaFree(user_means_training));                       update_Mem(ratings_rows_training * SIZE_OF(float) * (-1));
     checkCudaErrors(cudaFree(user_var_training));                         update_Mem(ratings_rows_training * SIZE_OF(float) * (-1));
 
@@ -1117,8 +1139,8 @@ int main(int argc, char *argv[])
     //============================================================================================
     // We want to find orthogonal matrices U, V such that R ~ U*V^T
     // 
-    // R is batch_size_GU by ratings_cols
-    // U is batch_size_GU by num_latent_factors
+    // R is batch_size_ACU by ratings_cols
+    // U is batch_size_ACU by num_latent_factors
     // V is ratings_cols by num_latent_factors
     //============================================================================================
     LOG(std::endl);
@@ -1132,7 +1154,7 @@ int main(int argc, char *argv[])
     float regularization_constant;         
 
     const float testing_fraction            = 0.2; //percent of known entries used for testing
-    bool        compress_when_training      = false;
+    bool        compress_when_training      = true;
     bool        compress_when_testing       = true;
     bool        update_U                    = true;
     bool        regularize_U                = true;
@@ -1148,9 +1170,9 @@ int main(int argc, char *argv[])
 
             //Dataset_Name = "MovieLens 20 million";
             meta_training_rate          = (float)0.01; 
-            micro_training_rate         = (float)0.001;      //use for movielens
-            testing_training_rate       = (float)0.00001;      //use for movielens
-            regularization_constant     = (float)0.01;         //use for movielens
+            micro_training_rate         = (float)0.0005;      //use for movielens
+            testing_training_rate       = (float)0.00001;// (float)0.00001; //*Submitted
+            regularization_constant     = (float)0.1;         //use for movielens
             update_U                    = true;
             regularize_U                = false;
             regularize_V                = true;
@@ -1161,8 +1183,17 @@ int main(int argc, char *argv[])
             break;
         }case 2:{ // code to be executed if n = 2;
             //Dataset_Name = "Rent The Runaway";
-            meta_training_rate           = (float)0.01;      //use for rent the runway
-            regularization_constant = (float)1.0;         //use for rent the runway
+            meta_training_rate          = (float)0.01; 
+            micro_training_rate         = (float)0.01;      //use for movielens
+            testing_training_rate       = (float)0.00001;      //use for movielens
+            regularization_constant     = (float)0.01;         //use for movielens
+            update_U                    = true;
+            regularize_U                = false;
+            regularize_V                = true;
+            regularize_R                = false;
+            regularize_R_distribution   = false;
+            normalize_V_rows            = false;
+            compress_when_testing       = true;
             break;
         }default: 
             ABORT_IF_EQ(0, 1, "no valid dataset selected");
@@ -1174,10 +1205,15 @@ int main(int argc, char *argv[])
         compress_when_testing = true;
     }
 
-    const int num_iterations = 10000;  // number of training iterations
-    const int num_batches    = 10;     // number of training batches per iteration (batches index into training data)
-    const int num_blocks     = ratings_rows_GU / 1000;    // number of blocks of generic users (a single block of generic users is updated in a batch)
-    const int testing_rate   = 1;      // 
+    long long int batch_size_training = 1500;
+
+    int num_iterations = 10000;  // number of training iterations
+    if(testing_only){
+        num_iterations = 181;
+    }
+    const int num_batches    = std::max((long long int)1, ratings_rows_training / (batch_size_training));     // number of training batches per iteration (batches index into training data)     // submitted version uses 10
+    const int num_blocks     = static_cast<int>(ratings_rows_ACU / (long long int)1000);    // number of blocks of AC users (a single block of AC users is updated in a batch)
+    const int testing_rate   = 20;      // 
 
     LOG("meta_training_rate : "        <<meta_training_rate);
     LOG("micro_training_rate : "       <<micro_training_rate);
@@ -1199,32 +1235,32 @@ int main(int argc, char *argv[])
 
 
 
-    const long long int batch_size_training = std::max((long long int)1, ratings_rows_training / (num_batches));
-    const long long int batch_size_GU       = std::max((long long int)1, ratings_rows_GU / (num_blocks));
-    const long long int batch_size_testing  = std::min((long long int)200, std::min(ratings_rows_testing, batch_size_GU));
+    batch_size_training = std::max((long long int)1, ratings_rows_training / (num_batches));
+    const long long int batch_size_ACU       = std::max((long long int)1, ratings_rows_ACU / (num_blocks));
+    const long long int batch_size_testing  = std::min((long long int)200, std::min(ratings_rows_testing, batch_size_ACU));
     LOG(std::endl);
     LOG("batch_size_testing : " <<batch_size_testing);
     LOG("batch_size_training : "<<batch_size_training);
-    LOG("batch_size_GU : "      <<batch_size_GU);
+    LOG("batch_size_ACU : "      <<batch_size_ACU);
     // LOG("Press Enter to continue.") ;
     // std::cin.ignore();
 
     ABORT_IF_LE(batch_size_training, (long long int)1, "batch size training is too small");
     ABORT_IF_LE(batch_size_testing, (long long int)1, "batch size testing is too small");
-    ABORT_IF_LE(batch_size_GU, (long long int)1, "batch size GU is too small");
-    // ABORT_IF_LE((long long int)3000, batch_size_GU, "batch size GU is too large");
+    ABORT_IF_LE(batch_size_ACU, (long long int)1, "batch size ACU is too small");
+    // ABORT_IF_LE((long long int)3000, batch_size_ACU, "batch size ACU is too large");
     // ABORT_IF_LE((long long int)3000, batch_size_training, "batch size training is too large");
     // ABORT_IF_LE((long long int)3000, batch_size_testing, "batch size testing is too large");
 
-    ABORT_IF_NEQ(ratings_rows_GU % batch_size_GU, (long long int)0, "ratings_rows_GU % batch_size_GU != 0"<<std::endl);
+    ABORT_IF_NEQ(ratings_rows_ACU % batch_size_ACU, (long long int)0, "ratings_rows_ACU % batch_size_ACU != 0"<<std::endl);
 
     long long int num_batches_training = (long long int)(std::ceil((float)ratings_rows_training  / (float)batch_size_training)); // = num_batches
-    //long long int num_batches_GU       = std::ceil(ratings_rows_GU       / batch_size_GU);
+    //long long int num_batches_ACU       = std::ceil(ratings_rows_ACU       / batch_size_ACU);
     long long int num_batches_testing  = (long long int)(std::ceil((float)ratings_rows_testing  / (float)batch_size_testing));
 
-    LOG("ratings_rows_GU : " <<ratings_rows_GU);
-    LOG("num_entries_GU : "<<num_entries_GU);
-    LOG("batch_size_GU : " <<batch_size_GU);
+    LOG("ratings_rows_ACU : " <<ratings_rows_ACU);
+    LOG("num_entries_ACU : "<<num_entries_ACU);
+    LOG("batch_size_ACU : " <<batch_size_ACU);
     LOG("num_blocks : " <<num_blocks<<std::endl);
 
     LOG("ratings_rows_training : " <<ratings_rows_training);
@@ -1240,30 +1276,30 @@ int main(int argc, char *argv[])
 
     LOG("ratings_cols : " <<ratings_cols<<std::endl);
     
-    const float percent              = (float)0.999999999999;  // How much of the full SV spectrum do you want to keep as latent factors?
-    long long int num_latent_factors = (long long int)((float)ratings_rows_GU * percent);
-    long long int max_num_latent_factors = std::min(ratings_rows_GU , (long long int)((float)ratings_rows_GU * (float)0.20));
+    const float percent              = (float)0.05;  // How much of the full SV spectrum do you want to keep as latent factors?
+    long long int num_latent_factors = ratings_rows_ACU;
+    long long int max_num_latent_factors = (long long int)((float)ratings_rows_ACU * percent);
 
 
     /*
         There are a couple different factorization possibilities:
-            - You could factor the whole R_GU (When R_GU is large this is done by factoring blocks and agregating the factored results)
-            - You could factor only a horizontal strip of R_GU containing a subset of the GU users 
+            - You could factor the whole R_ACU (When R_ACU is large this is done by factoring blocks and agregating the factored results)
+            - You could factor only a horizontal strip of R_ACU containing a subset of the ACU users 
     */
 
-    long long int min_dim_block = std::min(batch_size_GU, ratings_cols); // minimum dimension when factoring only a block of R_GU
-    long long int min_dim_ = std::min(ratings_rows_GU, ratings_cols);    // minimum dimension when factoring the entire R_GU mtx
+    long long int min_dim_block = std::min(batch_size_ACU, ratings_cols); // minimum dimension when factoring only a block of R_ACU
+    long long int min_dim_ = std::min(ratings_rows_ACU, ratings_cols);    // minimum dimension when factoring the entire R_ACU mtx
 
 
-    float * old_R_GU = NULL;         // R_GU is ratings_rows_GU * ratings_cols
-    float * U_GU_host = NULL;        // U_GU is ratings_rows_GU * ratings_rows_GU
-    float * U_GU_dev = NULL;         // U_GU is ratings_rows_GU * ratings_rows_GU
-    float * V_host = NULL;           // V_GU is ratings_cols * ratings_cols
-    float * V_dev = NULL;            // V_GU is ratings_cols * ratings_cols
+    float * old_R_ACU = NULL;         // R_ACU is ratings_rows_ACU * ratings_cols
+    float * U_ACU_host = NULL;        // U_ACU is ratings_rows_ACU * ratings_rows_ACU
+    float * U_ACU_dev = NULL;         // U_ACU is ratings_rows_ACU * ratings_rows_ACU
+    float * V_host = NULL;           // V_ACU is ratings_cols * ratings_cols
+    float * V_dev = NULL;            // V_ACU is ratings_cols * ratings_cols
 
 
     bool temp = Conserve_GPU_Mem;
-    const long long int Training_bytes = (ratings_rows_GU     * min_dim_ +
+    const long long int Training_bytes = (ratings_rows_ACU     * min_dim_ +
                                           batch_size_training * std::max(min_dim_block, batch_size_training) + 
                                           batch_size_testing  * std::max(min_dim_, batch_size_testing) + 
                                           ratings_cols        * min_dim_ +
@@ -1277,13 +1313,13 @@ int main(int argc, char *argv[])
 
     if(!temp && Conserve_GPU_Mem){
         LOG("Conserving Memory Now");
-        //put the GA ratings mtx on the CPU;
-        full_ratingsMtx_host_GU = (float *)malloc(GU_mtx_size_bytes);
-        checkErrors(full_ratingsMtx_host_GU);
+        //put the ACU ratings mtx on the CPU;
+        full_ratingsMtx_host_ACU = (float *)malloc(ACU_mtx_size_bytes);
+        checkErrors(full_ratingsMtx_host_ACU);
         
-        checkCudaErrors(cudaMemcpy(full_ratingsMtx_host_GU, full_ratingsMtx_dev_GU, GU_mtx_size_bytes, cudaMemcpyDeviceToHost));
-        checkCudaErrors(cudaFree(full_ratingsMtx_dev_GU));
-        update_Mem((float)(-1.0) * GU_mtx_size_bytes );
+        checkCudaErrors(cudaMemcpy(full_ratingsMtx_host_ACU, full_ratingsMtx_dev_ACU, ACU_mtx_size_bytes, cudaMemcpyDeviceToHost));
+        checkCudaErrors(cudaFree(full_ratingsMtx_dev_ACU));
+        update_Mem((float)(-1.0) * ACU_mtx_size_bytes );
     };
 
     int *   csr_format_ratingsMtx_userID_host_testing = NULL;
@@ -1306,7 +1342,7 @@ int main(int argc, char *argv[])
         coo_format_ratingsMtx_itemID_host_training = (int *)  malloc(num_entries_training  *  SIZE_OF(int)); 
         coo_format_ratingsMtx_rating_host_training = (float *)malloc(num_entries_training  *  SIZE_OF(float));
 
-        old_R_GU  = (float *)malloc(ratings_rows_GU * ratings_cols  *  SIZE_OF(float));
+        old_R_ACU  = (float *)malloc(ratings_rows_ACU * ratings_cols  *  SIZE_OF(float));
 
         checkErrors(csr_format_ratingsMtx_userID_host_testing);
         checkErrors(coo_format_ratingsMtx_itemID_host_testing);
@@ -1314,7 +1350,7 @@ int main(int argc, char *argv[])
         checkErrors(csr_format_ratingsMtx_userID_host_training);
         checkErrors(coo_format_ratingsMtx_itemID_host_training);
         checkErrors(coo_format_ratingsMtx_rating_host_training); 
-        checkErrors(old_R_GU); 
+        checkErrors(old_R_ACU); 
 
         checkCudaErrors(cudaMemcpy(csr_format_ratingsMtx_userID_host_testing,  csr_format_ratingsMtx_userID_dev_testing,  (ratings_rows_testing + 1) *  SIZE_OF(int),   cudaMemcpyDeviceToHost));
         checkCudaErrors(cudaMemcpy(coo_format_ratingsMtx_itemID_host_testing, coo_format_ratingsMtx_itemID_dev_testing, num_entries_testing  *  SIZE_OF(int),   cudaMemcpyDeviceToHost));
@@ -1336,41 +1372,41 @@ int main(int argc, char *argv[])
             save_host_array_to_file<float>  (coo_format_ratingsMtx_rating_host_testing,  num_entries_testing, "coo_format_ratingsMtx_rating_host_testing");
         }
 
-        U_GU_host = (float *)malloc(ratings_rows_GU * ratings_rows_GU * SIZE_OF(float));
-        V_host = (float *)malloc(ratings_cols * ratings_rows_GU * SIZE_OF(float));
-        checkErrors(U_GU_host);
+        U_ACU_host = (float *)malloc(ratings_rows_ACU * ratings_rows_ACU * SIZE_OF(float));
+        V_host = (float *)malloc(ratings_cols * ratings_rows_ACU * SIZE_OF(float));
+        checkErrors(U_ACU_host);
         checkErrors(V_host);
 
         
-        num_latent_factors = std::min(ratings_rows_GU, max_num_latent_factors);
+        num_latent_factors = std::min(ratings_rows_ACU, max_num_latent_factors);
         if(Debug && 0) {
             checkCudaErrors(cudaDeviceSynchronize()); 
             LOG("num_latent_factors = "<< num_latent_factors);
             LOG("min_dim_ = "<< min_dim_);
         }
 
-        CUDA_CHECK(cudaMalloc((void**)&V_dev, ratings_cols * (compress_when_testing ? num_latent_factors : ratings_rows_GU) * SIZE_OF(float)));
-        update_Mem(ratings_cols * (compress_when_testing ? num_latent_factors : ratings_rows_GU) * SIZE_OF(float) );
-        LOG("ratings_cols * (compress_when_testing ? num_latent_factors : ratings_rows_GU) : " << ratings_cols * (compress_when_testing ? num_latent_factors : ratings_rows_GU));
+        CUDA_CHECK(cudaMalloc((void**)&V_dev, ratings_cols * std::max(min_dim_block, (compress_when_testing ? num_latent_factors : ratings_rows_ACU)) * SIZE_OF(float)));
+        update_Mem(ratings_cols * (compress_when_testing ? num_latent_factors : ratings_rows_ACU) * SIZE_OF(float) );
+        LOG("ratings_cols * (compress_when_testing ? num_latent_factors : ratings_rows_ACU) : " << ratings_cols * (compress_when_testing ? num_latent_factors : ratings_rows_ACU));
         
         if(!row_major_ordering){
             ABORT_IF_EQ(0,1,"try again with row_major_ordering = true.")
         }
 
-        // checkCudaErrors(cudaMalloc((void**)&full_ratingsMtx_dev_GU, batch_size_GU * ratings_cols * SIZE_OF(float)));
-        // update_Mem(batch_size_GU * ratings_cols* SIZE_OF(float) );
+        // checkCudaErrors(cudaMalloc((void**)&full_ratingsMtx_dev_ACU, batch_size_ACU * ratings_cols * SIZE_OF(float)));
+        // update_Mem(batch_size_ACU * ratings_cols* SIZE_OF(float) );
 
-        SV = (float *)malloc(ratings_rows_GU *  SIZE_OF(float)); 
+        SV = (float *)malloc(ratings_rows_ACU *  SIZE_OF(float)); 
         checkErrors(SV);
     }else{
         if(num_blocks > 1){
             ABORT_IF_EQ(0, 1, "Does not train blocks when Conserve_GPU_Mem is false.")
         }
-        checkCudaErrors(cudaMalloc((void**)&U_GU_dev,       ratings_rows_GU     * min_dim_                     * SIZE_OF(float)));
+        checkCudaErrors(cudaMalloc((void**)&U_ACU_dev,       ratings_rows_ACU     * min_dim_                     * SIZE_OF(float)));
         checkCudaErrors(cudaMalloc((void**)&V_dev,          ratings_cols        * min_dim_                     * SIZE_OF(float)));
-        update_Mem((ratings_rows_GU * min_dim_ + ratings_cols * min_dim_) * SIZE_OF(float) );
-        checkCudaErrors(cudaMalloc((void**)&old_R_GU, ratings_rows_GU * ratings_cols * SIZE_OF(float)));
-        update_Mem(ratings_rows_GU * ratings_cols * SIZE_OF(float));
+        update_Mem((ratings_rows_ACU * min_dim_ + ratings_cols * min_dim_) * SIZE_OF(float) );
+        checkCudaErrors(cudaMalloc((void**)&old_R_ACU, ratings_rows_ACU * ratings_cols * SIZE_OF(float)));
+        update_Mem(ratings_rows_ACU * ratings_cols * SIZE_OF(float));
     }
 
 
@@ -1384,30 +1420,19 @@ int main(int argc, char *argv[])
 
 
 
-
-
-
-    if(Conserve_GPU_Mem && load_full_GU_from_save){
-        LOG("Loading full_ratingsMtx_host_GU from saved batches.");
-        for(int block = 0; block < num_blocks; block++){
-            std::string full_ratingsMtx_GU_filepath = save_path + "full_ratingsMtx_GU_block_" + ToString<int>(block)+ ".txt";
-
-            long long int first_row_in_batch_GU = (batch_size_GU * (long long int)block) ;
-
-            if(!row_major_ordering){
-                ABORT_IF_EQ(0, 0, "Option not ready");
-            }else{
-                CSVReader GU_mtx_reader(full_ratingsMtx_GU_filepath);
-                GU_mtx_reader.getData(full_ratingsMtx_host_GU + ratings_cols * first_row_in_batch_GU, batch_size_GU, ratings_cols, row_major_ordering);
-                //GU_mtx_reader.getData(full_ratingsMtx_host_GU + ratings_cols * first_row_in_batch_GU, (long long int)1, batch_size_GU * ratings_cols, row_major_ordering);
-                if(Debug){
-                    print_host_array(full_ratingsMtx_host_GU + ratings_cols * first_row_in_batch_GU, 5, full_ratingsMtx_GU_filepath, 
-                        strPreamble(blank));
-                }
+    if(Conserve_GPU_Mem){
+        if(row_major_ordering && !load_full_ACU_from_save){
+            //remember that R_ACU is stored in row major ordering
+            LOG("swap matrix indexing from row major to column major");
+            for(int block = 0; block < num_blocks; block++){
+                long long int first_row_in_batch_ACU = (batch_size_ACU * (long long int)block) ;
+                cpu_swap_ordering<float>(batch_size_ACU, ratings_cols, full_ratingsMtx_host_ACU + ratings_cols * first_row_in_batch_ACU, row_major_ordering);
             }
         }
-        LOG("Done loading full_ratingsMtx_host_GU from saved batches.");
+        row_major_ordering = false;
     }
+    
+
 
 
 
@@ -1447,14 +1472,17 @@ int main(int argc, char *argv[])
     float * testing_error_on_testing_entries = NULL;
     float * testing_iterations = NULL;
     float * meta_km_errors = NULL;
+    int * num_latent_factors_ = NULL;
 
     float * training_error_v = NULL;
     float * training_error_u = NULL;
     float * training_iterations = NULL;
 
-    float * delta_R_GU_exp = NULL;
-    float * R_GU_abs_max = NULL;
-    float * R_GU_max_sv = NULL;
+    float * delta_R_ACU_exp = NULL;
+    float * R_ACU_abs_max = NULL;
+    float * R_ACU_max_sv = NULL;
+    float * R_ACU_exp = NULL;
+    float * R_ACU_var = NULL;
     
     testing_error_on_training_entries = (float *)malloc((num_iterations / testing_rate) * SIZE_OF(float)); 
     checkErrors(testing_error_on_training_entries);
@@ -1468,6 +1496,9 @@ int main(int argc, char *argv[])
     meta_km_errors = (float *)malloc((num_iterations / testing_rate) * SIZE_OF(float)); 
     checkErrors(meta_km_errors);
     cpu_set_all<float>(meta_km_errors, (num_iterations / testing_rate), (float)0.0);
+    num_latent_factors_ = (int *)malloc((num_iterations / testing_rate) * SIZE_OF(int)); 
+    checkErrors(num_latent_factors_);
+    cpu_set_all<int>(num_latent_factors_, (num_iterations / testing_rate), 0);
 
     training_error_v = (float *)malloc(num_iterations * SIZE_OF(float)); 
     checkErrors(training_error_v);
@@ -1479,16 +1510,22 @@ int main(int argc, char *argv[])
     checkErrors(training_iterations);
     cpu_set_all<float>(training_iterations, num_iterations, (float)0.0);
 
-    delta_R_GU_exp = (float *)malloc(num_iterations * SIZE_OF(float)); 
-    checkErrors(delta_R_GU_exp);
-    cpu_set_all<float>(delta_R_GU_exp, num_iterations, (float)0.0);
+    delta_R_ACU_exp = (float *)malloc(num_iterations * SIZE_OF(float)); 
+    checkErrors(delta_R_ACU_exp);
+    cpu_set_all<float>(delta_R_ACU_exp, num_iterations, (float)0.0);
     
-    R_GU_abs_max = (float *)malloc((num_iterations / testing_rate)  * SIZE_OF(float)); 
-    checkErrors(R_GU_abs_max);
-    cpu_set_all<float>(R_GU_abs_max, (num_iterations / testing_rate) , (float)0.0);
-    R_GU_max_sv = (float *)malloc((num_iterations / testing_rate)  * SIZE_OF(float)); 
-    checkErrors(R_GU_max_sv);
-    cpu_set_all<float>(R_GU_max_sv, (num_iterations / testing_rate) , (float)0.0);
+    R_ACU_abs_max = (float *)malloc((num_iterations / testing_rate)  * SIZE_OF(float)); 
+    checkErrors(R_ACU_abs_max);
+    cpu_set_all<float>(R_ACU_abs_max, (num_iterations / testing_rate) , (float)0.0);
+    R_ACU_max_sv = (float *)malloc((num_iterations / testing_rate)  * SIZE_OF(float)); 
+    checkErrors(R_ACU_max_sv);
+    cpu_set_all<float>(R_ACU_max_sv, (num_iterations / testing_rate) , (float)0.0);
+    R_ACU_exp = (float *)malloc((num_iterations / testing_rate)  * SIZE_OF(float)); 
+    checkErrors(R_ACU_exp);
+    cpu_set_all<float>(R_ACU_exp, (num_iterations / testing_rate) , (float)0.0);
+    R_ACU_var = (float *)malloc((num_iterations / testing_rate)  * SIZE_OF(float)); 
+    checkErrors(R_ACU_var);
+    cpu_set_all<float>(R_ACU_var, (num_iterations / testing_rate) , (float)0.0);
 
 
     float* logarithmic_histogram = (float *)malloc(7 * (num_iterations / testing_rate)  * SIZE_OF(float)); 
@@ -1502,7 +1539,7 @@ int main(int argc, char *argv[])
 
 
     //============================================================================================
-    // Assume the rows of R_GU are the ratings_rows_GU-means for the training users - what is the error?
+    // Assume the rows of R_ACU are the ratings_rows_ACU-means for the training users - what is the error?
     //============================================================================================ 
 
     if(0){
@@ -1514,7 +1551,7 @@ int main(int argc, char *argv[])
             selection  = (int *)malloc(ratings_rows_training * SIZE_OF(int));
             checkErrors(errors);
             checkErrors(selection);
-            cpu_sparse_nearest_row<float>(ratings_rows_GU, ratings_cols, full_ratingsMtx_host_GU, 
+            cpu_sparse_nearest_row<float>(ratings_rows_ACU, ratings_cols, full_ratingsMtx_host_ACU, 
                                          ratings_rows_training, num_entries_training, 
                                          csr_format_ratingsMtx_userID_host_training, 
                                          coo_format_ratingsMtx_itemID_host_training,
@@ -1531,7 +1568,7 @@ int main(int argc, char *argv[])
             checkCudaErrors(cudaMalloc((void**)&errors, ratings_rows_training * SIZE_OF(float)));
             checkCudaErrors(cudaMalloc((void**)&selection, ratings_rows_training * SIZE_OF(int)));
             update_Mem(2 * ratings_rows_training * SIZE_OF(int));
-            gpu_sparse_nearest_row<float>(ratings_rows_GU, ratings_cols, full_ratingsMtx_dev_GU, 
+            gpu_sparse_nearest_row<float>(ratings_rows_ACU, ratings_cols, full_ratingsMtx_dev_ACU, 
                                      ratings_rows_training, num_entries_training, 
                                      csr_format_ratingsMtx_userID_dev_training, 
                                      coo_format_ratingsMtx_itemID_dev_training,
@@ -1550,12 +1587,10 @@ int main(int argc, char *argv[])
 
 
 
-
     //============================================================================================
     // Begin Training
     //============================================================================================  
     LOG(std::endl<<std::endl<<"                              Begin Training..."<<std::endl); 
-    gettimeofday(&training_start, NULL);
     int num_tests = 0;
     
         bool not_done = true;
@@ -1563,17 +1598,49 @@ int main(int argc, char *argv[])
     int first_it = 0;
     int first_training_batch__ = 0;
 
-    if(load_full_GU_from_save){
-        first_it = 15;
+    if(load_full_ACU_from_save && !testing_only){
+        first_it = 60;
         first_training_batch__ = 0;
     }
     int it = first_it;
 
+    double avg_testing_time = (double)0.0;
+    double avg_training_time = (double)0.0;
+
+
+
+    if(Conserve_GPU_Mem && load_full_ACU_from_save && !testing_only){
+        LOG("Loading full_ratingsMtx_host_ACU from saved batches.");
+        for(int block = 0; block < num_blocks; block++){
+            std::string full_ratingsMtx_ACU_filepath = save_path + "full_ratingsMtx_ACU_block_" + ToString<int>(block)+ "_it_"+ToString<int>(it - 1)+".txt";
+
+            long long int first_row_in_batch_ACU = (batch_size_ACU * (long long int)block) ;
+
+
+            CSVReader ACU_mtx_reader(full_ratingsMtx_ACU_filepath);
+            ACU_mtx_reader.getData(full_ratingsMtx_host_ACU + ratings_cols * first_row_in_batch_ACU, batch_size_ACU, ratings_cols, row_major_ordering);
+            //ACU_mtx_reader.getData(full_ratingsMtx_host_ACU + ratings_cols * first_row_in_batch_ACU, (long long int)1, batch_size_ACU * ratings_cols, row_major_ordering);
+            if(Debug){
+                print_host_array(full_ratingsMtx_host_ACU + ratings_cols * first_row_in_batch_ACU, 5, full_ratingsMtx_ACU_filepath, 
+                    strPreamble(blank));
+            }
+            
+        }
+        LOG("Done loading full_ratingsMtx_host_ACU from saved batches.");
+    }
+
+    checkCudaErrors(cudaDeviceSynchronize());
+    gettimeofday(&program_end, NULL);
+    program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
+    //printf("program_time: %f\n", program_time);   
+    LOG("RUN TIME SO FAR: "<<readable_time(program_time));
+
     while(not_done && it < num_iterations && meta_training_rate >= min_training_rate){
         //for(int it = 0; it < num_iterations; it ++){
+        LOG("it : "<<it);
 
         bool mid_it = false;
-        if(load_full_GU_from_save && it == first_it && first_training_batch__ > 0){
+        if(load_full_ACU_from_save && it == first_it /*&& first_training_batch__ > 0*/){
             mid_it = true;
         }
         
@@ -1581,7 +1648,9 @@ int main(int argc, char *argv[])
         // TESTING
         //============================================================================================ 
         bool do_ = true;
+        
         if( it % testing_rate == 0 && !mid_it /*&& it != 0*/){
+            gettimeofday(&testing_start, NULL);
             LOG(std::endl<<"                                                                                        ~~~ TESTING ~~~ "); 
             if(Debug){
                 LOG(memLeft<<" available bytes left on the device");
@@ -1589,37 +1658,63 @@ int main(int argc, char *argv[])
             }
             
             float * SV_dev;
-            checkCudaErrors(cudaMalloc((void**)&SV_dev, ratings_rows_GU * SIZE_OF(float)));
-            update_Mem(ratings_rows_GU * SIZE_OF(float));
+            checkCudaErrors(cudaMalloc((void**)&SV_dev, ratings_rows_ACU * SIZE_OF(float)));
+            update_Mem(ratings_rows_ACU * SIZE_OF(float));
+            if(load_full_ACU_from_save && testing_only){
+                if(Conserve_GPU_Mem){
+                    LOG("Loading full_ratingsMtx_host_ACU from saved batches.");
+                    for(int block = 0; block < num_blocks; block++){
+                        std::string full_ratingsMtx_ACU_filepath = save_path + "6_13/full_ratingsMtx_GU_block_" + ToString<int>(block)+ "_it_"+ToString<int>(it - 1)+".txt";
+
+                        long long int first_row_in_batch_ACU = (batch_size_ACU * (long long int)block) ;
+
+
+                        CSVReader ACU_mtx_reader(full_ratingsMtx_ACU_filepath);
+                        ACU_mtx_reader.getData(full_ratingsMtx_host_ACU + ratings_cols * first_row_in_batch_ACU, batch_size_ACU, ratings_cols, row_major_ordering);
+                        //ACU_mtx_reader.getData(full_ratingsMtx_host_ACU + ratings_cols * first_row_in_batch_ACU, (long long int)1, batch_size_ACU * ratings_cols, row_major_ordering);
+                        if(Debug){
+                            print_host_array(full_ratingsMtx_host_ACU + ratings_cols * first_row_in_batch_ACU, 5, full_ratingsMtx_ACU_filepath, 
+                                strPreamble(blank));
+                        }
+                        
+                    }
+                    LOG("Done loading full_ratingsMtx_host_ACU from saved batches.");
+                }
+            }
             if(Conserve_GPU_Mem){
                 /*
-                    cpu_orthogonal_decomp<float>(ratings_rows_GU, ratings_cols, row_major_ordering,
+                    cpu_orthogonal_decomp<float>(ratings_rows_ACU, ratings_cols, row_major_ordering,
                                             &num_latent_factors, percent,
-                                            full_ratingsMtx_host_GU, U_GU, V_host, SV_with_U, SV);
+                                            full_ratingsMtx_host_ACU, U_ACU, V_host, SV_with_U, SV);
                 */
                 LOG("num_blocks = "<< num_blocks);
-                LOG("batch_size_GU = "<< batch_size_GU);
+                LOG("batch_size_ACU = "<< batch_size_ACU);
                 
                 gpu_block_orthogonal_decomp_from_host<float>(dn_handle, dn_solver_handle,
-                                                             ratings_rows_GU, ratings_cols,
-                                                             &num_latent_factors, percent,
-                                                             full_ratingsMtx_host_GU, U_GU_host, 
-                                                             V_host, batch_size_GU, SV_with_U, SV);
-                R_GU_max_sv[it] = SV[0];                                             
+                                                             ratings_rows_ACU, ratings_cols,
+                                                             &num_latent_factors, (float)1.0,
+                                                             full_ratingsMtx_host_ACU, U_ACU_host, 
+                                                             V_host, row_major_ordering,
+                                                             batch_size_ACU, SV_with_U, SV);
+                R_ACU_max_sv[num_tests] = SV[0];                                             
                                                              
-                LOG("num_latent_factors = "<< num_latent_factors << " ( / "<< ratings_rows_GU<< " )");
+                LOG("num_latent_factors = "<< num_latent_factors << " ( / "<< ratings_rows_ACU<< " )");
+                num_latent_factors_[num_tests] = static_cast<int>(std::min(num_latent_factors, std::min(ratings_rows_ACU , max_num_latent_factors)));
 
-                num_latent_factors = std::min(num_latent_factors, std::min(ratings_rows_GU , max_num_latent_factors));
+                num_latent_factors = max_num_latent_factors;//std::min(num_latent_factors, std::min(ratings_rows_ACU , max_num_latent_factors));
 
-                LOG("num_latent_factors = "<< num_latent_factors << " ( / "<< ratings_rows_GU<< " )");
+                LOG("num_latent_factors = "<< num_latent_factors << " ( / "<< ratings_rows_ACU<< " )");
 
-                checkCudaErrors(cudaMemcpy(V_dev, V_host, ratings_cols * (compress_when_testing ? num_latent_factors : ratings_rows_GU) * SIZE_OF(float), cudaMemcpyHostToDevice));
+                LOG("MEMORY REDUCTION OF ACU USERS : "      <<static_cast<double>((ratings_rows_ACU + ratings_cols) * (compress_when_testing ? num_latent_factors : ratings_rows_ACU)) / static_cast<double>(ratings_rows + (long long int)2 * num_entries)<<std::endl<<std::endl<<std::endl);
+                LOG("MEMORY REDUCTION OF ACU Item Vectors : "      <<static_cast<double>(ratings_cols * (compress_when_testing ? num_latent_factors : ratings_rows_ACU)) / static_cast<double>(ratings_rows + (long long int)2 * num_entries)<<std::endl<<std::endl<<std::endl);
+
+                checkCudaErrors(cudaMemcpy(V_dev, V_host, ratings_cols * (compress_when_testing ? num_latent_factors : ratings_rows_ACU) * SIZE_OF(float), cudaMemcpyHostToDevice));
                 //if(Debug) {checkCudaErrors(cudaDeviceSynchronize()); LOG("Here");}
                 
                 if(Debug && 0){
                     float mean_abs_nonzero_ = (float)0.0;
-                    cpu_mean_abs_nonzero(ratings_cols * (compress_when_testing ? num_latent_factors : ratings_rows_GU), V_host, &mean_abs_nonzero_, true, "V_host");
-                    gpu_mean_abs_nonzero(ratings_cols * (compress_when_testing ? num_latent_factors : ratings_rows_GU), V_dev, &mean_abs_nonzero_, true, "V_dev");
+                    cpu_mean_abs_nonzero(ratings_cols * (compress_when_testing ? num_latent_factors : ratings_rows_ACU), V_host, &mean_abs_nonzero_, true, "V_host");
+                    gpu_mean_abs_nonzero(ratings_cols * (compress_when_testing ? num_latent_factors : ratings_rows_ACU), V_dev, &mean_abs_nonzero_, true, "V_dev");
                 }
                 
                 
@@ -1628,56 +1723,62 @@ int main(int argc, char *argv[])
                     //gpu_swap_ordering<float>(ratings_cols, num_latent_factors, V_dev, true);
                 }
                 if(Debug) {
-                    //save_host_array_to_file<float>(SV, ratings_rows_GU, "singular_values", strPreamble(blank));
-                    //save_host_mtx_to_file<float>(U_GU_host, ratings_rows_GU, num_latent_factors, "U_GU_compressed");
+                    //save_host_array_to_file<float>(SV, ratings_rows_ACU, "singular_values", strPreamble(blank));
+                    //save_host_mtx_to_file<float>(U_ACU_host, ratings_rows_ACU, num_latent_factors, "U_ACU_compressed");
                     
-                    //save_host_array_side_by_side_with_device_array<float>(V_host, V_dev, static_cast<int>(ratings_cols * (compress_when_testing ? num_latent_factors : ratings_rows_GU)), "V_host_dev", strPreamble(blank));
-                    //save_host_mtx_to_file<float>(V_host, ratings_cols, (compress_when_testing ? num_latent_factors : ratings_rows_GU), "V_host", false, strPreamble(blank));
-                    //save_device_mtx_to_file<float>(V_dev, ratings_cols, (compress_when_testing ? num_latent_factors : ratings_rows_GU), "V_dev", false, strPreamble(blank));
+                    //save_host_array_side_by_side_with_device_array<float>(V_host, V_dev, static_cast<int>(ratings_cols * (compress_when_testing ? num_latent_factors : ratings_rows_ACU)), "V_host_dev", strPreamble(blank));
+                    //save_host_mtx_to_file<float>(V_host, ratings_cols, (compress_when_testing ? num_latent_factors : ratings_rows_ACU), "V_host", false, strPreamble(blank));
+                    //save_device_mtx_to_file<float>(V_dev, ratings_cols, (compress_when_testing ? num_latent_factors : ratings_rows_ACU), "V_dev", false, strPreamble(blank));
                 }
-                checkCudaErrors(cudaMemcpy(SV_dev, SV, ratings_rows_GU * SIZE_OF(float), cudaMemcpyHostToDevice));
+                save_host_array_to_file<float>(SV, ratings_rows_ACU, save_path + "6_13/singular_values_it_"+ ToString<int>(it), strPreamble(blank));
+                checkCudaErrors(cudaMemcpy(SV_dev, SV, ratings_rows_ACU * SIZE_OF(float), cudaMemcpyHostToDevice));
                 /*
-                    At this point U_GU is ratings_rows_GU by ratings_rows_GU in memory stored in row major
-                    ordering and V is ratings_cols by ratings_rows_GU stored in column major ordering
+                    At this point U_ACU is ratings_rows_ACU by ratings_rows_ACU in memory stored in row major
+                    ordering and V is ratings_cols by ratings_rows_ACU stored in column major ordering
 
                     There is no extra work to compress to compress V into ratings_cols by num_latent_factors, 
                     just take the first num_latent_factors columns of each matrix.  
-                    The columns of U_GU are mixed in memory.
+                    The columns of U_ACU are mixed in memory.
                 */
+
+                if(1){
+                    R_ACU_exp[num_tests] = cpu_expected_value(ratings_rows_ACU * ratings_cols,  full_ratingsMtx_host_ACU);
+                    R_ACU_var[num_tests] = cpu_variance(ratings_rows_ACU * ratings_cols,  full_ratingsMtx_host_ACU);
+                }
                 
             }else{
                 if(row_major_ordering){
-                    //remember that R_GU is stored in row major ordering
+                    //remember that R_ACU is stored in row major ordering
                     LOG("swap matrix indexing from row major to column major");
-                    gpu_swap_ordering<float>(ratings_rows_GU, ratings_cols, full_ratingsMtx_dev_GU, row_major_ordering);
+                    gpu_swap_ordering<float>(ratings_rows_ACU, ratings_cols, full_ratingsMtx_dev_ACU, row_major_ordering);
                     
                 }
                 if(Debug){
-                    //save_device_mtx_to_file(full_ratingsMtx_dev_GU, ratings_rows_GU, ratings_cols, "full_ratingsMtx_dev_GU", false);
+                    //save_device_mtx_to_file(full_ratingsMtx_dev_ACU, ratings_rows_ACU, ratings_cols, "full_ratingsMtx_dev_ACU", false);
 
-                    float R_GU_abs_exp = gpu_expected_abs_value<float>(ratings_rows_GU * ratings_cols, full_ratingsMtx_dev_GU);
-                    R_GU_abs_max[it] = gpu_abs_max<float>           (ratings_rows_GU * ratings_cols, full_ratingsMtx_dev_GU); 
-                    LOG("full_ratingsMtx_dev_GU_abs_max = "<<R_GU_abs_max[it]) ;
-                    LOG("full_ratingsMtx_dev_GU_abs_exp = "<<R_GU_abs_exp) ;
-                    ABORT_IF_EQ(R_GU_abs_exp, R_GU_abs_max[it], "R_GU is constant");
-                    ABORT_IF_LESS((float)10.0 * abs_max_training, std::abs(R_GU_abs_max[it]), "unstable growth");
-                    ABORT_IF_LESS( std::abs(R_GU_abs_max[it]), abs_max_training / (float)10.0 , "unstable shrinking");
+                    float R_ACU_abs_exp = gpu_expected_abs_value<float>(ratings_rows_ACU * ratings_cols, full_ratingsMtx_dev_ACU);
+                    R_ACU_abs_max[it] = gpu_abs_max<float>           (ratings_rows_ACU * ratings_cols, full_ratingsMtx_dev_ACU); 
+                    LOG("full_ratingsMtx_dev_ACU_abs_max = "<<R_ACU_abs_max[it]) ;
+                    LOG("full_ratingsMtx_dev_ACU_abs_exp = "<<R_ACU_abs_exp) ;
+                    ABORT_IF_EQ(R_ACU_abs_exp, R_ACU_abs_max[it], "R_ACU is constant");
+                    ABORT_IF_LESS((float)10.0 * abs_max_training, std::abs(R_ACU_abs_max[it]), "unstable growth");
+                    ABORT_IF_LESS( std::abs(R_ACU_abs_max[it]), abs_max_training / (float)10.0 , "unstable shrinking");
                     // LOG("Press Enter to continue.") ;
                     // std::cin.ignore();
                 }
 
                 gpu_orthogonal_decomp<float>(dn_handle, dn_solver_handle,
-                                            ratings_rows_GU, ratings_cols, 
+                                            ratings_rows_ACU, ratings_cols, 
                                             &num_latent_factors, percent,
-                                            full_ratingsMtx_dev_GU, U_GU_dev, 
+                                            full_ratingsMtx_dev_ACU, U_ACU_dev, 
                                             V_dev, SV_with_U, SV_dev);
 
-                //save_device_mtx_to_file<float>(U_GU_dev, ratings_rows_GU, num_latent_factors, "U_GU_compressed");
+                //save_device_mtx_to_file<float>(U_ACU_dev, ratings_rows_ACU, num_latent_factors, "U_ACU_compressed");
                 /*
-                    At this point U_GU is ratings_rows_GU by ratings_rows_GU in memory stored in column major
-                    ordering and V is ratings_cols by ratings_rows_GU stored in column major ordering
+                    At this point U_ACU is ratings_rows_ACU by ratings_rows_ACU in memory stored in column major
+                    ordering and V is ratings_cols by ratings_rows_ACU stored in column major ordering
 
-                    There is no extra work to compress U_GU into ratings_rows_GU by num_latent_factors, or
+                    There is no extra work to compress U_ACU into ratings_rows_ACU by num_latent_factors, or
                     to compress V into ratings_cols by num_latent_factors, just take the first num_latent_factors
                     columns of each matrix
                 */
@@ -1686,9 +1787,9 @@ int main(int argc, char *argv[])
 
             // float y;
             // LOG("V_dev : ");
-            // gpu_msq_nonzero(ratings_cols * (compress_when_testing ? num_latent_factors : ratings_rows_GU), V_dev, &y, true);
+            // gpu_msq_nonzero(ratings_cols * (compress_when_testing ? num_latent_factors : ratings_rows_ACU), V_dev, &y, true);
             // LOG("SV_dev : ");
-            // gpu_msq_nonzero((compress_when_testing ? num_latent_factors : ratings_rows_GU), SV_dev, &y, true);
+            // gpu_msq_nonzero((compress_when_testing ? num_latent_factors : ratings_rows_ACU), SV_dev, &y, true);
 
             // return 0;
             
@@ -1704,12 +1805,13 @@ int main(int argc, char *argv[])
             }
             float * U_testing;
             float * R_testing;
-            checkCudaErrors(cudaMalloc((void**)&U_testing,  batch_size_testing  * (compress_when_testing ? num_latent_factors : ratings_rows_GU)  * SIZE_OF(float)));
+            checkCudaErrors(cudaMalloc((void**)&U_testing,  batch_size_testing  * (compress_when_testing ? num_latent_factors : ratings_rows_ACU)  * SIZE_OF(float)));
             checkCudaErrors(cudaMalloc((void**)&R_testing,  batch_size_testing  * ratings_cols                        * SIZE_OF(float)));
-            update_Mem(batch_size_testing  * (compress_when_testing ? num_latent_factors : ratings_rows_GU)  * SIZE_OF(float));
+            update_Mem(batch_size_testing  * (compress_when_testing ? num_latent_factors : ratings_rows_ACU)  * SIZE_OF(float));
             update_Mem(batch_size_testing  * ratings_cols                        * SIZE_OF(float));
 
-            int val_ = std::min(30, (int)num_batches_testing);
+            int val_ = std::min(20, (int)num_batches_testing);
+            val_ = 0;
             for(int batch__ = 0; batch__ < val_; batch__++){
                 //for(int batch = 0; batch < num_batches_testing; batch++){
 
@@ -1810,7 +1912,7 @@ int main(int argc, char *argv[])
                 //============================================================================================ 
 
                 // gpu_R_error<float>(dn_handle, sp_handle, sp_descr,
-                //                    batch_size_testing_temp, ratings_rows_GU, num_latent_factors, ratings_cols,
+                //                    batch_size_testing_temp, ratings_rows_ACU, num_latent_factors, ratings_cols,
                 //                    nnz_testing, first_coo_ind_testing, compress, 
                 //                    testing_entries, coo_testing_errors, testing_fraction,
                 //                    coo_format_ratingsMtx_rating_dev_testing + first_coo_ind_testing, 
@@ -1820,7 +1922,7 @@ int main(int argc, char *argv[])
 
 
                 gpu_R_error<float>(dn_handle, sp_handle, sp_descr, dn_solver_handle, 
-                                   batch_size_testing_temp, ratings_rows_GU, num_latent_factors, ratings_cols,
+                                   batch_size_testing_temp, ratings_rows_ACU, num_latent_factors, ratings_cols,
                                    nnz_testing, first_coo_ind_testing, compress_when_testing, 
                                    testing_entries, coo_testing_errors, testing_fraction,
                                    coo_format_ratingsMtx_rating_dev_testing_batch, 
@@ -1847,22 +1949,23 @@ int main(int argc, char *argv[])
                     update_Mem(nnz_testing * SIZE_OF(int) * (-1));
                     update_Mem(nnz_testing * SIZE_OF(float) * (-1));
                 }
-                LOG("Iteration "<<it<<" testing error per testing entry: "<< testing_error_on_testing_entries[num_tests]);
+                if(1){
+                    LOG("Iteration "<<it<<" testing error per testing entry: "<< testing_error_on_testing_entries[num_tests]);
+                    LOG("Iteration "<<it<<" testing error per training entry: "<< testing_error_on_training_entries[num_tests]<<std::endl);
+
+                    LOG("Iteration "<<it<<" expected number of training iterations when testing: "<< testing_iterations[num_tests]);
+                    print_host_array(logarithmic_histogram + 7 * num_tests, 7, "Logarithmic Histogram of Errors From 10^(-3) to 10^3", strPreamble(blank));
+                    // LOG("Press Enter to continue.") ;
+                    // std::cin.ignore();
+                }
             }//for loop on test batches
 
             checkCudaErrors(cudaFree(U_testing));
             checkCudaErrors(cudaFree(R_testing));
-            update_Mem(batch_size_testing  * (compress_when_testing ? num_latent_factors : ratings_rows_GU)  * SIZE_OF(float) * (-1));
+            update_Mem(batch_size_testing  * (compress_when_testing ? num_latent_factors : ratings_rows_ACU)  * SIZE_OF(float) * (-1));
             update_Mem(batch_size_testing  * ratings_cols                                                    * SIZE_OF(float) * (-1));
 
-            if(1){
-                LOG("Iteration "<<it<<" testing error per training entry: "<< testing_error_on_training_entries[num_tests]);
-                LOG("Iteration "<<it<<" expected number of training iterations when testing: "<< testing_iterations[num_tests]);
-                LOG("Iteration "<<it<<" testing error per testing entry: "<< testing_error_on_testing_entries[num_tests]);
-                print_host_array(logarithmic_histogram + 7 * num_tests, 7, "Logarithmic Histogram of Errors From 10^(-3) to 10^3", strPreamble(blank));
-                // LOG("Press Enter to continue.") ;
-                // std::cin.ignore();
-            }
+
             //testing_error[num_tests] /= ((float)num_entries_testing * testing_fraction);
             //LOG("Iteration "<<it<<" MSQ testing error per testing entry: "<< testing_error[num_tests]);
 
@@ -1871,22 +1974,51 @@ int main(int argc, char *argv[])
                 update_Mem((batch_size_testing + 1) * SIZE_OF(int) * (-1));
             }else{
                 if(row_major_ordering){
-                    //remember that R_GU is stored in row major ordering
+                    //remember that R_ACU is stored in row major ordering
                     LOG("swap matrix indexing from row major to column major");
-                    gpu_swap_ordering<float>(ratings_rows_GU, ratings_cols, full_ratingsMtx_dev_GU, !row_major_ordering);
+                    gpu_swap_ordering<float>(ratings_rows_ACU, ratings_cols, full_ratingsMtx_dev_ACU, !row_major_ordering);
                     
                 }
             }
             checkCudaErrors(cudaFree(SV_dev));
-            update_Mem(ratings_rows_GU * SIZE_OF(float) * (-1));
+            update_Mem(ratings_rows_ACU * SIZE_OF(float) * (-1));
             //LOG("HERE!"); checkCudaErrors(cudaDeviceSynchronize()); LOG("HERE!");
 
         
 
             //============================================================================================
-            // Assume the rows of R_GU are the ratings_rows_GU-means for the training users - what is the error?
+            // Assume the rows of R_ACU are the ratings_rows_ACU-means for the training users - what is the error?
             //============================================================================================ 
 
+            if(testing_only && Conserve_GPU_Mem){
+                // gpu_gemm<float>(dn_handle, true, false, 
+                // ratings_cols, batch_size_ACU, 
+                // compress ? num_latent_factors : batch_size_ACU,
+                // (float)1.0,
+                // V, U_ACU, 
+                // (float)0.0,
+                // R_ACU);
+
+                  /*
+                    M, N, K
+                    M number of rows of matrix op(A) and C.
+                    N is number of columns of matrix op(B) and C.]
+                    K is number of rows of op(B) and columns of op(A).
+
+                    op(A) is M by K
+                    op(B) is K by N
+                    C is M by N
+                    cblas_sgemm(CblasRowMajor, transa, transb, M, N, K, alpha, A, lda, B, ldb, beta, C, ldc) 
+                    performs C=alpha op ( A )op ( B ) + beta C
+                  */
+
+                //V is in column major ordering
+                //U_ACU_host
+                cpu_gemm<float>(0, 0, 
+                         ratings_rows_ACU, ratings_cols, num_latent_factors,
+                         (float)1.0, U_ACU_host, V_host, (float)0.0,
+                         full_ratingsMtx_host_ACU);
+            }
 
             if(1){
                 float* errors;
@@ -1896,7 +2028,7 @@ int main(int argc, char *argv[])
                     selection  = (int *)malloc(ratings_rows_testing * SIZE_OF(int));
                     checkErrors(errors);
                     checkErrors(selection);
-                    cpu_sparse_nearest_row<float>(ratings_rows_GU, ratings_cols, full_ratingsMtx_host_GU, 
+                    cpu_sparse_nearest_row<float>(ratings_rows_ACU, ratings_cols, full_ratingsMtx_host_ACU, 
                                                  ratings_rows_testing, num_entries_testing, 
                                                  csr_format_ratingsMtx_userID_host_testing, 
                                                  coo_format_ratingsMtx_itemID_host_testing,
@@ -1910,7 +2042,7 @@ int main(int argc, char *argv[])
                         save_host_array_to_file<float>(errors, ratings_rows_testing, "meta_km_errors_single_it");
                         save_host_array_to_file<int>(selection, ratings_rows_testing, "meta_km_selection_single_it");
                     }
-                    cpu_logarithmic_histogram_abs_val<float>(ratings_rows_GU, ratings_cols, full_ratingsMtx_host_GU, 
+                    cpu_logarithmic_histogram_abs_val<float>(ratings_rows_ACU, ratings_cols, full_ratingsMtx_host_ACU, 
                                                              ratings_rows_testing, num_entries_testing, 
                                                              csr_format_ratingsMtx_userID_host_testing, 
                                                              coo_format_ratingsMtx_itemID_host_testing,
@@ -1923,7 +2055,7 @@ int main(int argc, char *argv[])
                     checkCudaErrors(cudaMalloc((void**)&errors, ratings_rows_testing * SIZE_OF(float)));
                     checkCudaErrors(cudaMalloc((void**)&selection, ratings_rows_testing * SIZE_OF(int)));
                     update_Mem(2 * ratings_rows_testing * SIZE_OF(int));
-                    gpu_sparse_nearest_row<float>(ratings_rows_GU, ratings_cols, full_ratingsMtx_dev_GU, 
+                    gpu_sparse_nearest_row<float>(ratings_rows_ACU, ratings_cols, full_ratingsMtx_dev_ACU, 
                                              ratings_rows_testing, num_entries_testing, 
                                              csr_format_ratingsMtx_userID_dev_testing, 
                                              coo_format_ratingsMtx_itemID_dev_testing,
@@ -1945,7 +2077,7 @@ int main(int argc, char *argv[])
             //printf("program_time: %f\n", program_time);   
             LOG("program_time so far: "<<readable_time(program_time));
             LOG("      ~~~ DONE TESTING ~~~ "<<std::endl<<std::endl<<std::endl<<std::endl<<std::endl<<std::endl<<std::endl); 
-            if(it > 0){
+            if(it > 0 && 0){
               if(testing_error_on_testing_entries[num_tests] < epsilon || ::isinf(testing_error_on_testing_entries[num_tests]) || ::isnan(testing_error_on_testing_entries[num_tests])){
                 LOG("Finished at iteration : "<<it);
                 do_ = false;
@@ -1964,10 +2096,10 @@ int main(int argc, char *argv[])
                 }
                 if(Debug && 0){
                     if(Conserve_GPU_Mem){
-                        host_copy(ratings_rows_GU * ratings_cols, old_R_GU, full_ratingsMtx_host_GU);
+                        host_copy(ratings_rows_ACU * ratings_cols, old_R_ACU, full_ratingsMtx_host_ACU);
                     }else{
-                        checkCudaErrors(cudaMemcpy(full_ratingsMtx_dev_GU, old_R_GU,
-                                                ratings_rows_GU * ratings_cols * SIZE_OF(float), cudaMemcpyDeviceToDevice));
+                        checkCudaErrors(cudaMemcpy(full_ratingsMtx_dev_ACU, old_R_ACU,
+                                                ratings_rows_ACU * ratings_cols * SIZE_OF(float), cudaMemcpyDeviceToDevice));
                     }
                     //do_ = false;
                 }
@@ -1991,16 +2123,19 @@ int main(int argc, char *argv[])
             cpu_isBad<float>(testing_error_on_testing_entries + num_tests, (long long int)1, "testing_error_on_testing_entries", strPreamble(blank));
             cpu_isBad<float>(testing_error_on_training_entries + num_tests, (long long int)1, "testing_error_on_training_entries", strPreamble(blank));
             cpu_isBad<float>(testing_iterations + num_tests, (long long int)1, "testing_iterations", strPreamble(blank));
-            //cpu_isBad<float>(R_GU_abs_max + num_tests, (long long int)1, "R_GU_abs_max", strPreamble(blank));
-            cpu_isBad<float>(R_GU_max_sv + num_tests, (long long int)1, "R_GU_max_sv", strPreamble(blank));
+            //cpu_isBad<float>(R_ACU_abs_max + num_tests, (long long int)1, "R_ACU_abs_max", strPreamble(blank));
+            cpu_isBad<float>(R_ACU_max_sv + num_tests, (long long int)1, "R_ACU_max_sv", strPreamble(blank));
 
-            if(load_full_GU_from_save){
+            if(load_full_ACU_from_save && ! testing_only){
                 append_host_array_to_file(testing_error_on_testing_entries + num_tests, 1, "testing_error_on_testing_entries", strPreamble(blank));
                 append_host_array_to_file(testing_error_on_training_entries + num_tests, 1, "testing_error_on_training_entries", strPreamble(blank));
                 append_host_array_to_file(testing_iterations + num_tests, 1, "testing_iterations", strPreamble(blank));
-                //append_host_array_to_file(R_GU_abs_max + num_tests, 1, "R_GU_abs_max", strPreamble(blank));
-                append_host_array_to_file(R_GU_max_sv + num_tests, 1, "R_GU_max_sv", strPreamble(blank));
+                //append_host_array_to_file(R_ACU_abs_max + num_tests, 1, "R_ACU_abs_max", strPreamble(blank));
+                append_host_array_to_file(R_ACU_max_sv + num_tests, 1, "R_ACU_max_sv", strPreamble(blank));
+                append_host_array_to_file(R_ACU_exp + num_tests, 1, "R_ACU_exp", strPreamble(blank));
+                append_host_array_to_file(R_ACU_var + num_tests, 1, "R_ACU_var", strPreamble(blank));
                 append_host_array_to_file(meta_km_errors + num_tests, 1, "meta_km_errors", strPreamble(blank));
+                append_host_array_to_file(num_latent_factors_ + num_tests, 1, "num_latent_factors", strPreamble(blank));
                 append_host_mtx_to_file(logarithmic_histogram + num_tests * 7, 1, 7, "logarithmic_histogram", true, strPreamble(blank));
                 append_host_mtx_to_file(logarithmic_histogram_km + num_tests * 7, 1, 7, "logarithmic_histogram_km", true, strPreamble(blank)); 
                 num_tests += 1;
@@ -2009,824 +2144,868 @@ int main(int argc, char *argv[])
                 save_host_array_to_file(testing_error_on_testing_entries, num_tests, "testing_error_on_testing_entries", strPreamble(blank));
                 save_host_array_to_file(testing_error_on_training_entries, num_tests, "testing_error_on_training_entries", strPreamble(blank));
                 save_host_array_to_file(testing_iterations, num_tests, "testing_iterations", strPreamble(blank));
-                //save_host_array_to_file(R_GU_abs_max, num_tests, "R_GU_abs_max", strPreamble(blank));
-                save_host_array_to_file(R_GU_max_sv, num_tests, "R_GU_max_sv", strPreamble(blank));
+                //save_host_array_to_file(R_ACU_abs_max, num_tests, "R_ACU_abs_max", strPreamble(blank));
+                save_host_array_to_file(R_ACU_max_sv, num_tests, "R_ACU_max_sv", strPreamble(blank));
+                save_host_array_to_file(R_ACU_exp, num_tests, "R_ACU_exp", strPreamble(blank));
+                save_host_array_to_file(R_ACU_var, num_tests, "R_ACU_var", strPreamble(blank));
                 save_host_array_to_file(meta_km_errors, num_tests, "meta_km_errors", strPreamble(blank));
+                save_host_array_to_file(num_latent_factors_, num_tests, "num_latent_factors", strPreamble(blank));
                 save_host_mtx_to_file(logarithmic_histogram, num_tests, 7, "logarithmic_histogram", true, strPreamble(blank)); 
                 save_host_mtx_to_file(logarithmic_histogram_km, num_tests, 7, "logarithmic_histogram_km", true, strPreamble(blank));                
             }
+            gettimeofday(&testing_end, NULL);
+            program_time = (testing_end.tv_sec * 1000 +(testing_end.tv_usec/1000.0))-(testing_start.tv_sec * 1000 +(testing_start.tv_usec/1000.0));   
+            cpu_incremental_average((long long int)num_tests, &avg_testing_time, program_time);
+            LOG("average testing time: "<<readable_time(avg_testing_time));
+            LOG("average testing time per test: "<<readable_time(avg_testing_time /static_cast<double>(val_)));
 
-
+            if(num_tests > 2){
+                if(meta_km_errors[num_tests - 1] > meta_km_errors[num_tests - 2]){
+                    LOG("WARNING: meta_km_errors is growing");
+                    //ABORT_IF_EQ(0, 0, "meta_km_errors is growing"); 
+                }
+            }
         }//end is testing?
         
 
-        //============================================================================================
-        // TRAINING
-        //============================================================================================ 
-
-        if(meta_training_rate < min_training_rate || do_ == false) break;
-        if(micro_training_rate < min_training_rate || do_ == false) break;
-
-        int count_GU_rounds = 0;
-
-        long long int total_training_nnz = (long long int)0;
-
-        float max_abs_delta_R_GU = (float)0.0;
-        float exp_abs_delta_R_GU = (float)0.0;
-
-        float max_abs_R_GU = (float)0.0;
-        float exp_abs_R_GU = (float)0.0;
-
-        float largest_sv = (float)0.0;
-
-        int *   csr_format_ratingsMtx_userID_dev_training_      = NULL;
-        int *   coo_format_ratingsMtx_itemID_dev_training_      = NULL;
-        float * coo_format_ratingsMtx_rating_dev_training_      = NULL;
-        int*    csr_format_ratingsMtx_userID_dev_training_batch = NULL;
-        int*    coo_format_ratingsMtx_itemID_dev_training_batch = NULL;
-        float*  coo_format_ratingsMtx_rating_dev_training_batch = NULL;
-        float*  full_ratingsMtx_dev_GU_current_batch            = NULL;
-
-        float * U_training = NULL;
-        checkCudaErrors(cudaMalloc((void**)&U_training, batch_size_training * (compress_when_training ? num_latent_factors : min_dim_block) * SIZE_OF(float)));
-        update_Mem(batch_size_training * (compress_when_training ? num_latent_factors : min_dim_block) * SIZE_OF(float));
-        float * R_training = NULL;
-        checkCudaErrors(cudaMalloc((void**)&R_training, batch_size_training * ratings_cols * SIZE_OF(float)));
-        update_Mem(batch_size_training * ratings_cols * SIZE_OF(float));
-        float * SV_dev = NULL;
-        checkCudaErrors(cudaMalloc((void**)&SV_dev, batch_size_GU * SIZE_OF(float)));  
-
-        if(Conserve_GPU_Mem){
-            checkCudaErrors(cudaMalloc((void**)&csr_format_ratingsMtx_userID_dev_training_,  (batch_size_training + 1) * SIZE_OF(int)));
-            update_Mem((batch_size_training + 1) * SIZE_OF(int) );
-
-            checkCudaErrors(cudaMalloc((void**)&full_ratingsMtx_dev_GU_current_batch, batch_size_GU * ratings_cols * SIZE_OF(float)));
-            update_Mem(batch_size_GU * ratings_cols* SIZE_OF(float) );
-
-            checkCudaErrors(cudaMalloc((void**)&U_GU_dev,  batch_size_GU  * min_dim_block  * SIZE_OF(float)));
-            update_Mem(batch_size_GU  * min_dim_block  * SIZE_OF(float));
-        }
-
-        bool calc_delta_R_GU = true;
-        for(int batch__ = 0; batch__ < num_blocks; batch__++){
-            if(load_full_GU_from_save && it == first_it && batch__ == 0){
-                batch__ = first_training_batch__;
-            }
-            //for(int batch = 0; batch < num_batches; batch++){
+        if(!testing_only){
+            //============================================================================================
+            // TRAINING
+            //============================================================================================ 
+            gettimeofday(&training_start, NULL);
 
             if(meta_training_rate < min_training_rate || do_ == false) break;
-            if( print_training_error){
-                //LOG(std::endl<<"                                       ~ITERATION "<<it<<", BATCH "<<batch__<<"~"<<std::endl);
-                LOG(std::endl<<std::endl<<"                                                           ITERATION "<<it<<" ( / "<<num_iterations<<" ), BATCH "<<batch__<<" ( / "<<num_blocks<<" )"/*<<", GU Round "<<count_GU_rounds<<" ( / "<<num_batches / num_blocks<<" )"*/);
+            if(micro_training_rate < min_training_rate || do_ == false) break;
+
+            int count_ACU_rounds = 0;
+
+            long long int total_training_nnz = (long long int)0;
+
+            float max_abs_delta_R_ACU = (float)0.0;
+            float exp_abs_delta_R_ACU = (float)0.0;
+
+            float max_abs_R_ACU = (float)0.0;
+            float exp_abs_R_ACU = (float)0.0;
+
+            float largest_sv = (float)0.0;
+
+            int *   csr_format_ratingsMtx_userID_dev_training_      = NULL;
+            int *   coo_format_ratingsMtx_itemID_dev_training_      = NULL;
+            float * coo_format_ratingsMtx_rating_dev_training_      = NULL;
+            int*    csr_format_ratingsMtx_userID_dev_training_batch = NULL;
+            int*    coo_format_ratingsMtx_itemID_dev_training_batch = NULL;
+            float*  coo_format_ratingsMtx_rating_dev_training_batch = NULL;
+            float*  full_ratingsMtx_dev_ACU_current_batch            = NULL;
+
+            float * U_training = NULL;
+            checkCudaErrors(cudaMalloc((void**)&U_training, batch_size_training * min_dim_block * SIZE_OF(float)));
+            update_Mem(batch_size_training * min_dim_block * SIZE_OF(float));
+            float * R_training = NULL;
+            checkCudaErrors(cudaMalloc((void**)&R_training, batch_size_training * ratings_cols * SIZE_OF(float)));
+            update_Mem(batch_size_training * ratings_cols * SIZE_OF(float));
+            float * SV_dev = NULL;
+            checkCudaErrors(cudaMalloc((void**)&SV_dev, batch_size_ACU * SIZE_OF(float)));  
+
+            if(Conserve_GPU_Mem){
+                checkCudaErrors(cudaMalloc((void**)&csr_format_ratingsMtx_userID_dev_training_,  (batch_size_training + 1) * SIZE_OF(int)));
+                update_Mem((batch_size_training + 1) * SIZE_OF(int) );
+
+                checkCudaErrors(cudaMalloc((void**)&full_ratingsMtx_dev_ACU_current_batch, batch_size_ACU * ratings_cols * SIZE_OF(float)));
+                update_Mem(batch_size_ACU * ratings_cols* SIZE_OF(float) );
+
+                checkCudaErrors(cudaMalloc((void**)&U_ACU_dev,  batch_size_ACU  * min_dim_block  * SIZE_OF(float)));
+                update_Mem(batch_size_ACU  * min_dim_block  * SIZE_OF(float));
             }
-            if(Debug && 0){
-                //LOG(std::endl<<"                              ITERATION "<<it<<", BATCH "<<batch__);
-                LOG(std::endl<<std::endl<<"                              ITERATION "<<it<<" ( / "<<num_iterations<<" ), BATCH "<<batch__<<" ( / "<<num_blocks<<" ), GU Round "<<count_GU_rounds<<" ( / "<<num_batches / num_blocks<<" )");
-            }
- 
-            int batch = 0;
-            getRandIntsBetween(&batch , 0 , (int)num_batches, 1);
-            LOG("batch id : "<<batch);
-            
-            long long int batch_size_training_temp = batch_size_training;
-            long long int first_row_in_batch_training = batch_size_training * (long long int)batch; /* % ratings_rows_testing*/;
-            if(first_row_in_batch_training + batch_size_training >= ratings_rows_training) {
-                batch_size_training_temp = batch_size_training - first_row_in_batch_training;
-                if(Debug){
-                    LOG("left over batch_size_training : "<<batch_size_training_temp);
+
+            bool calc_delta_R_ACU = true;
+            for(int batch__ = 0; batch__ < num_blocks; batch__++){
+                if(load_full_ACU_from_save && it == first_it && batch__ == 0){
+                    batch__ = first_training_batch__;
                 }
-            }             
-            long long int GU_batch = (long long int)batch__ % num_blocks;
-            long long int first_row_in_batch_GU = (batch_size_GU * (long long int)GU_batch) ;            
-            //============================================================================================
-            // Find U_GU, V such that U_GU * V^T ~ R_GU 
-            //============================================================================================  
-            
-            LOG("batch_size_training : "<<batch_size_training_temp);
+                //for(int batch = 0; batch < num_batches; batch++){
 
-
-
-
-            if(Debug){
-                LOG("GU_batch : "<< GU_batch <<" ( / "<<num_blocks<<" )");
-                LOG(memLeft<<" available bytes left on the device");
-                //LOG("num_latent_factors = "<< num_latent_factors);
-
-                LOG("first_row_in_batch_training : "<<first_row_in_batch_training<< " ( / "<<ratings_rows_training<<" )");
-                LOG("batch_size_training : "<<batch_size_training_temp);
-                //LOG("( next first_row_in_batch_training : "<<first_row_in_batch_training + batch_size_training_temp<<" )");
-                LOG("first_row_in_batch_GU : "<<first_row_in_batch_GU<<  " ( / "<<ratings_rows_GU<<" )");
-                LOG("batch_size_GU : "<<batch_size_GU);
-                //LOG("( next first_row_in_batch_GU : "<<first_row_in_batch_GU + batch_size_GU<<" )");
-            };
-
-
-            if(!row_major_ordering && num_blocks > (long long int)1){
-                ABORT_IF_EQ(0, 0, "cannot store in column major ordering with more than one block");
-            }
-            if(Conserve_GPU_Mem){
-                // old way
-                checkCudaErrors(cudaMemcpy(full_ratingsMtx_dev_GU_current_batch, full_ratingsMtx_host_GU + ratings_cols * first_row_in_batch_GU, 
-                                            batch_size_GU * ratings_cols * SIZE_OF(float), cudaMemcpyHostToDevice));
-            }else{
-                full_ratingsMtx_dev_GU_current_batch = full_ratingsMtx_dev_GU + ratings_cols * first_row_in_batch_GU;
-            }
-
-            if(row_major_ordering){
-                //remember that ratings_GU is stored in row major ordering
-                LOG("swap matrix indexing from row major to column major");
-                gpu_swap_ordering<float>(batch_size_GU, ratings_cols, full_ratingsMtx_dev_GU_current_batch, row_major_ordering);
-            }
-
-            long long int nnz_training;
-            long long int first_coo_ind_training;
-            if(Conserve_GPU_Mem){
+                if(meta_training_rate < min_training_rate || do_ == false) break;
+                if( print_training_error){
+                    //LOG(std::endl<<"                                       ~ITERATION "<<it<<", BATCH "<<batch__<<"~"<<std::endl);
+                    LOG(std::endl<<std::endl<<"                                                           ITERATION "<<it<<" ( / "<<num_iterations<<" ), BATCH "<<batch__<<" ( / "<<num_blocks<<" )"/*<<", ACU Round "<<count_ACU_rounds<<" ( / "<<num_batches / num_blocks<<" )"*/);
+                }
                 if(Debug && 0){
-                    save_host_array_to_file<int>  (csr_format_ratingsMtx_userID_host_training,  ratings_rows_training + 1, "csr_format_ratingsMtx_userID_host_training_2");
+                    //LOG(std::endl<<"                              ITERATION "<<it<<", BATCH "<<batch__);
+                    LOG(std::endl<<std::endl<<"                              ITERATION "<<it<<" ( / "<<num_iterations<<" ), BATCH "<<batch__<<" ( / "<<num_blocks<<" ), ACU Round "<<count_ACU_rounds<<" ( / "<<num_batches / num_blocks<<" )");
                 }
-                csr_format_ratingsMtx_userID_dev_training_batch = csr_format_ratingsMtx_userID_host_training +  first_row_in_batch_training;
-                first_coo_ind_training = csr_format_ratingsMtx_userID_dev_training_batch[0];
-                int last_entry_index = (csr_format_ratingsMtx_userID_dev_training_batch + batch_size_training_temp)[0];
-
-                nnz_training = (long long int)last_entry_index - first_coo_ind_training;
-                if(Debug){
-                    LOG("first_coo_ind_training : "<<first_coo_ind_training);
-                    LOG("last_entry_index : "<<last_entry_index);
-                    LOG("nnz_training : "<<nnz_training);
-                }
-
-                if(nnz_training <= 0){
-                    LOG("nnz_training : "<<nnz_training);
-                    ABORT_IF_EQ(0, 0, "nnz_training <= 0");
-                }
+     
+                int batch = 0;
+                getRandIntsBetween(&batch , 0 , (int)num_batches, 1);
+                if(Debug && 0)LOG("batch id : "<<batch);
                 
-                checkCudaErrors(cudaMalloc((void**)&coo_format_ratingsMtx_itemID_dev_training_,  nnz_training        * SIZE_OF(int)));
-                checkCudaErrors(cudaMalloc((void**)&coo_format_ratingsMtx_rating_dev_training_,  nnz_training        * SIZE_OF(float)));
-                update_Mem(nnz_training * SIZE_OF(int) );
-                update_Mem(nnz_training * SIZE_OF(float) );
-
-                checkCudaErrors(cudaMemcpy(csr_format_ratingsMtx_userID_dev_training_,  csr_format_ratingsMtx_userID_dev_training_batch,  (batch_size_training_temp + 1) *  SIZE_OF(int),   cudaMemcpyHostToDevice));
-                checkCudaErrors(cudaMemcpy(coo_format_ratingsMtx_itemID_dev_training_,  coo_format_ratingsMtx_itemID_host_training + first_coo_ind_training, nnz_training  *  SIZE_OF(int),   cudaMemcpyHostToDevice));
-                checkCudaErrors(cudaMemcpy(coo_format_ratingsMtx_rating_dev_training_,  coo_format_ratingsMtx_rating_host_training + first_coo_ind_training,  nnz_training  *  SIZE_OF(float), cudaMemcpyHostToDevice));
-                
-                csr_format_ratingsMtx_userID_dev_training_batch = csr_format_ratingsMtx_userID_dev_training_;
-                coo_format_ratingsMtx_itemID_dev_training_batch = coo_format_ratingsMtx_itemID_dev_training_;
-                coo_format_ratingsMtx_rating_dev_training_batch = coo_format_ratingsMtx_rating_dev_training_;
-            }else{
-                csr_format_ratingsMtx_userID_dev_training_batch = csr_format_ratingsMtx_userID_dev_training +  first_row_in_batch_training;
-                nnz_training = gpu_get_num_entries_in_rows(0, batch_size_training_temp - 1, csr_format_ratingsMtx_userID_dev_training_batch);
-                if(nnz_training <=0){
-                    LOG("nnz_training : "<<nnz_training);
-                    ABORT_IF_EQ(0, 0, "nnz_training <= 0");
-                }
-                first_coo_ind_training = gpu_get_first_coo_index(0, csr_format_ratingsMtx_userID_dev_training_batch);
-                
-                coo_format_ratingsMtx_itemID_dev_training_batch = coo_format_ratingsMtx_itemID_dev_training + first_coo_ind_training;
-                coo_format_ratingsMtx_rating_dev_training_batch = coo_format_ratingsMtx_rating_dev_training + first_coo_ind_training;
-            }
-            ABORT_IF_LESS(nnz_training, 1, "nnz < 1");
-            total_training_nnz += nnz_training;
-
-
-            float* coo_training_errors;
-            //float* testing_entries;
-            checkCudaErrors(cudaMalloc((void**)&coo_training_errors, nnz_training * SIZE_OF(float)));
-            //checkCudaErrors(cudaMalloc((void**)&testing_entries, nnz_training * SIZE_OF(float)));
-            update_Mem(nnz_training * SIZE_OF(float));
-
-            if(Debug && 0){
-                LOG("training requires " <<nnz_training * SIZE_OF(float) + batch_size_training  * std::max(min_dim_block, batch_size_training) * SIZE_OF(float) 
-                            + batch_size_training  * ratings_cols * SIZE_OF(float) +
-                            (batch_size_training + 1) * SIZE_OF(int) + nnz_training * SIZE_OF(int) + nnz_training * SIZE_OF(float) << " bytes of memory");
-
-                LOG("first_coo_ind in this training batch : "<<first_coo_ind_training<< " ( / "<<num_entries_training<<" )");
-                LOG("nnz in this training batch : "<<nnz_training);
-                LOG("( next first_coo_ind in training batch : "<<first_coo_ind_training + nnz_training <<" )");
-                // save_device_array_to_file<int>(csr_format_ratingsMtx_userID_dev_training_batch, batch_size_training + 1, "csr_format_ratingsMtx_userID_dev_training_batch");
-                // LOG("first entry of csr_format_ratingsMtx_userID_dev_training_batch: ");
-                // print_gpu_array_entries<int>(csr_format_ratingsMtx_userID_dev_training_batch, 1);
-                // save_device_array_to_file<float>(coo_format_ratingsMtx_rating_dev_training + (int)first_coo_ind_training, nnz_training, "coo_format_ratingsMtx_rating_dev_training_batch");
-                // save_device_array_to_file<int>(coo_format_ratingsMtx_itemID_dev_training + (int)first_coo_ind_training, nnz_training, "coo_format_ratingsMtx_itemID_dev_training");
-                // LOG("Press Enter to continue.") ;
-                // std::cin.ignore();
-            }
-
-
-
-
-            for(int round_ = 0; round_ < 1; round_++){
-                //LOG(std::endl<<"                                                      ROUND : "<<round_);
-
-                gpu_orthogonal_decomp<float>(dn_handle, dn_solver_handle,
-                                            batch_size_GU, ratings_cols, 
-                                            &num_latent_factors, percent,
-                                            full_ratingsMtx_dev_GU_current_batch, 
-                                            U_GU_dev, V_dev, SV_with_U, SV_dev);
-
-                //checkCudaErrors(cudaMemcpy(U_GU_host, U_GU_dev, batch_size_GU * min_dim_block * SIZE_OF(float), cudaMemcpyDeviceToHost));
-
-                //save_device_mtx_to_file<float>(U_GU, ratings_rows_GU, num_latent_factors, "U_GU_compressed");
-
-                /*
-                    At this point U_GU is batch_size_GU by batch_size_GU in memory stored in column major
-                    ordering and V is ratings_cols by batch_size_GU stored in column major ordering
-
-                    There is no extra work to compress U_GU into batch_size_GU by num_latent_factors, or
-                    to compress V into ratings_cols by num_latent_factors, just take the first num_latent_factors
-                    columns of each matrix
-                */
-                 
-
-                //============================================================================================
-                // Compute  R_training * V = U_training
-                // Compute  Error = R_training -  U_training * V^T  <-- sparse
-                //============================================================================================ 
-                //if(Debug) LOG("iteration "<<it<<" made it to check point");
-
-
-                
-                bool calc_delta_V = false;
-                float* delta_V;
-
-                if(calc_delta_V){
-                    checkCudaErrors(cudaMalloc((void**)&delta_V, ratings_cols * min_dim_block * SIZE_OF(float)));
-                    checkCudaErrors(cudaMemcpy(delta_V, V_dev, ratings_cols * min_dim_block * SIZE_OF(float), cudaMemcpyDeviceToDevice));
-                    update_Mem(ratings_cols * min_dim_block * SIZE_OF(float));
-                } 
-
-                bool calc_delta_U = false;
-                float* delta_U_GU;
-                if(calc_delta_U){
-                    checkCudaErrors(cudaMalloc((void**)&delta_U_GU, batch_size_GU * min_dim_block * SIZE_OF(int)));
-                    checkCudaErrors(cudaMemcpy(delta_U_GU, U_GU_dev, batch_size_GU * min_dim_block * SIZE_OF(float), cudaMemcpyDeviceToDevice));
-                }
-
-                calc_delta_R_GU = true;
-                float* delta_R_GU;
-                if(calc_delta_R_GU){
-                    checkCudaErrors(cudaMalloc((void**)&delta_R_GU, batch_size_GU * ratings_cols * SIZE_OF(float)));
-                    update_Mem(batch_size_GU * ratings_cols * SIZE_OF(float));
-                    checkCudaErrors(cudaMemcpy(delta_R_GU, full_ratingsMtx_dev_GU_current_batch, 
-                                                batch_size_GU * ratings_cols * SIZE_OF(float), cudaMemcpyDeviceToDevice));
-                    
-                    if(Debug  && 0){
-                        //save_device_mtx_to_file<float>(delta_R_GU, batch_size_GU, 1, "delta_R_GU_0", true, strPreamble(blank));
-                        //save_device_mtx_to_file<float>(full_ratingsMtx_dev_GU, batch_size_GU, 1, "R_GU_0", true, strPreamble(blank));
+                long long int batch_size_training_temp = batch_size_training;
+                long long int first_row_in_batch_training = batch_size_training * (long long int)batch; /* % ratings_rows_testing*/;
+                if(first_row_in_batch_training + batch_size_training - (long long int)1 >= ratings_rows_training) {
+                    //batch_size_training_temp = ratings_rows_training - first_row_in_batch_training;
+                    first_row_in_batch_training = ratings_rows_training - batch_size_training_temp;
+                    ABORT_IF_LE(first_row_in_batch_training, (long long int)0, "first_row_in_batch_training too small");
+                    if(Debug && 0){
+                        LOG("left over batch_size_training : "<<batch_size_training_temp);
+                        LOG("first_row_in_batch_training : "<<first_row_in_batch_training<< " ( / "<<ratings_rows_training<<" )");
                     }
                     
                 }
-                gpu_R_error<float>(dn_handle, sp_handle, sp_descr,dn_solver_handle, 
-                                   batch_size_training_temp, batch_size_GU, num_latent_factors, ratings_cols,
-                                   nnz_training, first_coo_ind_training, compress_when_training, 
-                                   NULL, coo_training_errors, (float)0.0,
-                                   coo_format_ratingsMtx_rating_dev_training_batch, 
-                                   csr_format_ratingsMtx_userID_dev_training_batch, 
-                                   coo_format_ratingsMtx_itemID_dev_training_batch,
-                                   V_dev, U_training, R_training, U_GU_dev, full_ratingsMtx_dev_GU_current_batch,
-                                   micro_training_rate, regularization_constant, batch__, it,
-                                   training_error_v + it, training_error_u + it, 
-                                   training_iterations + it, SV_with_U, SV_dev);
-
+                // int temp_first_row_in_batch_training = 0;
+                // getRandIntsBetween(&temp_first_row_in_batch_training , 0 , (int)(ratings_rows_training - batch_size_training_temp) + 1, 1); 
+                // first_row_in_batch_training = (long long int)temp_first_row_in_batch_training;  
+                // LOG("first_row_in_batch_training : "<<first_row_in_batch_training<< " ( / "<<ratings_rows_training<<" )");      
+                long long int ACU_batch = (long long int)batch__ % num_blocks;
+                long long int first_row_in_batch_ACU = (batch_size_ACU * (long long int)ACU_batch) ;            
+                //============================================================================================
+                // Find U_ACU, V such that U_ACU * V^T ~ R_ACU 
+                //============================================================================================  
                 
-
-                // gpu_R_error_training<float>(dn_handle, sp_handle, sp_descr,
-                //                            batch_size_training_temp, batch_size_GU, num_latent_factors, ratings_cols,
-                //                            nnz_training, first_coo_ind_training, false /*compress_when_training*/, coo_training_errors,
-                //                            coo_format_ratingsMtx_rating_dev_training_batch, 
-                //                            csr_format_ratingsMtx_userID_dev_training_batch,         // <-- already has shifted to correct start
-                //                            coo_format_ratingsMtx_itemID_dev_training_batch,
-                //                            V_dev, U_training, R_training, training_rate, regularization_constant, SV_with_U, SV_dev);
+                //LOG("batch_size_training : "<<batch_size_training_temp);
 
 
-                
 
-                
-                if(num_blocks - 1 == GU_batch){
-                    if( print_training_error ){
-                        //LOG("           ~Finished round "<<count_GU_rounds<<" of GA training~"<<std::endl); 
-                        LOG("TRAINING AVERAGE SQUARED ERROR : "<< ToString<float>(training_error_v[it])); 
-
-                        // float temp = gpu_sum_of_squares<float>(nnz_training, testing_entries);
-                        // float temp = gpu_sum_of_squares_of_diff(dn_handle, nnz_training, 
-                        //                                         coo_format_ratingsMtx_rating_dev_training + first_coo_ind_training, 
-                        //                                         testing_entries);
-                        
-                        // LOG("training error over range of ratings: "<< training_error_temp / ((float)(nnz_) * range_training));
-                        // LOG("training error normalized: "<< training_error_temp / temp<<std::endl); 
-                        // LOG("training error : "<< training_error_temp / (float)(nnz_* 2.0)); 
-
-                    } 
-                    count_GU_rounds += 1;  
-                    total_training_nnz = (long long int)0;
-                    
-                }
 
                 if(Debug && 0){
+                    LOG("ACU_batch : "<< ACU_batch <<" ( / "<<num_blocks<<" )");
+                    LOG(memLeft<<" available bytes left on the device");
+                    //LOG("num_latent_factors = "<< num_latent_factors);
 
-                    //save_device_arrays_side_by_side_to_file<float>(coo_format_ratingsMtx_rating_dev_training + first_coo_ind_training, testing_entries, coo_training_errors, nnz_training, "ratings_testing_errors");
+                    LOG("first_row_in_batch_training : "<<first_row_in_batch_training<< " ( / "<<ratings_rows_training<<" )");
+                    LOG("batch_size_training : "<<batch_size_training_temp);
+                    //LOG("( next first_row_in_batch_training : "<<first_row_in_batch_training + batch_size_training_temp<<" )");
+                    LOG("first_row_in_batch_ACU : "<<first_row_in_batch_ACU<<  " ( / "<<ratings_rows_ACU<<" )");
+                    LOG("batch_size_ACU : "<<batch_size_ACU);
+                    //LOG("( next first_row_in_batch_ACU : "<<first_row_in_batch_ACU + batch_size_ACU<<" )");
+                };
+
+
+                // if(!row_major_ordering && num_blocks > (long long int)1){
+                //     ABORT_IF_EQ(0, 0, "cannot store in column major ordering with more than one block");
+                // }
+                if(Conserve_GPU_Mem){
+                    // old way
+                    checkCudaErrors(cudaMemcpy(full_ratingsMtx_dev_ACU_current_batch, full_ratingsMtx_host_ACU + ratings_cols * first_row_in_batch_ACU, 
+                                                batch_size_ACU * ratings_cols * SIZE_OF(float), cudaMemcpyHostToDevice));
+                }else{
+                    full_ratingsMtx_dev_ACU_current_batch = full_ratingsMtx_dev_ACU + ratings_cols * first_row_in_batch_ACU;
+                }
+
+                if(row_major_ordering){
+                    //remember that ratings_ACU is stored in row major ordering
+                    LOG("swap matrix indexing from row major to column major");
+                    gpu_swap_ordering<float>(batch_size_ACU, ratings_cols, full_ratingsMtx_dev_ACU_current_batch, row_major_ordering);
+                }
+
+                long long int nnz_training;
+                long long int first_coo_ind_training;
+                if(Conserve_GPU_Mem){
+                    if(Debug && 0){
+                        save_host_array_to_file<int>  (csr_format_ratingsMtx_userID_host_training,  ratings_rows_training + 1, "csr_format_ratingsMtx_userID_host_training_2");
+                    }
+                    csr_format_ratingsMtx_userID_dev_training_batch = csr_format_ratingsMtx_userID_host_training +  first_row_in_batch_training;
+                    first_coo_ind_training = csr_format_ratingsMtx_userID_dev_training_batch[0];
+                    int last_entry_index = (csr_format_ratingsMtx_userID_dev_training_batch + batch_size_training_temp)[0];
+
+                    nnz_training = (long long int)last_entry_index - first_coo_ind_training;
+                    if(Debug  && 0){
+                        LOG("first_coo_ind_training : "<<first_coo_ind_training);
+                        LOG("last_entry_index : "<<last_entry_index);
+                        LOG("nnz_training : "<<nnz_training);
+                    }
+
+                    if(nnz_training <= 0){
+                        LOG("nnz_training : "<<nnz_training);
+                        ABORT_IF_EQ(0, 0, "nnz_training <= 0");
+                    }
                     
-                    float coo_training_errors_abs_exp = gpu_expected_abs_value<float>(nnz_training, coo_training_errors);
-                    float coo_training_errors_abs_max = gpu_abs_max<float>           (nnz_training, coo_training_errors);
-                    LOG("coo_training_errors_abs_max = "<<ToString<float>(coo_training_errors_abs_max)) ;
-                    //LOG("coo_training_errors_abs_max over range of ratings = "<<coo_training_errors_abs_max / range_training) ;
-                    LOG("coo_training_errors_abs_exp = "<<ToString<float>(coo_training_errors_abs_exp)) ;
-                    //LOG("coo_training_errors_abs_exp over range of ratings = "<<coo_training_errors_abs_exp / range_training) ;
+                    checkCudaErrors(cudaMalloc((void**)&coo_format_ratingsMtx_itemID_dev_training_,  nnz_training        * SIZE_OF(int)));
+                    checkCudaErrors(cudaMalloc((void**)&coo_format_ratingsMtx_rating_dev_training_,  nnz_training        * SIZE_OF(float)));
+                    update_Mem(nnz_training * SIZE_OF(int) );
+                    update_Mem(nnz_training * SIZE_OF(float) );
 
-                    // coo_training_errors_abs_exp = gpu_expected_abs_value<float>(nnz_training, coo_format_ratingsMtx_rating_dev_training + first_coo_ind_training);
-                    // coo_training_errors_abs_max = gpu_abs_max<float>           (nnz_training, coo_format_ratingsMtx_rating_dev_training + first_coo_ind_training);
-                    // LOG("coo_training_abs_max = "<<coo_training_errors_abs_max) ;
-                    // LOG("coo_training_abs_exp = "<<coo_training_errors_abs_exp) ;
+                    checkCudaErrors(cudaMemcpy(csr_format_ratingsMtx_userID_dev_training_,  csr_format_ratingsMtx_userID_dev_training_batch,  (batch_size_training_temp + 1) *  SIZE_OF(int),   cudaMemcpyHostToDevice));
+                    checkCudaErrors(cudaMemcpy(coo_format_ratingsMtx_itemID_dev_training_,  coo_format_ratingsMtx_itemID_host_training + first_coo_ind_training, nnz_training  *  SIZE_OF(int),   cudaMemcpyHostToDevice));
+                    checkCudaErrors(cudaMemcpy(coo_format_ratingsMtx_rating_dev_training_,  coo_format_ratingsMtx_rating_host_training + first_coo_ind_training,  nnz_training  *  SIZE_OF(float), cudaMemcpyHostToDevice));
+                    
+                    csr_format_ratingsMtx_userID_dev_training_batch = csr_format_ratingsMtx_userID_dev_training_;
+                    coo_format_ratingsMtx_itemID_dev_training_batch = coo_format_ratingsMtx_itemID_dev_training_;
+                    coo_format_ratingsMtx_rating_dev_training_batch = coo_format_ratingsMtx_rating_dev_training_;
+                }else{
+                    csr_format_ratingsMtx_userID_dev_training_batch = csr_format_ratingsMtx_userID_dev_training +  first_row_in_batch_training;
+                    nnz_training = gpu_get_num_entries_in_rows(0, batch_size_training_temp - 1, csr_format_ratingsMtx_userID_dev_training_batch);
+                    if(nnz_training <=0){
+                        LOG("nnz_training : "<<nnz_training);
+                        ABORT_IF_EQ(0, 0, "nnz_training <= 0");
+                    }
+                    first_coo_ind_training = gpu_get_first_coo_index(0, csr_format_ratingsMtx_userID_dev_training_batch);
+                    
+                    coo_format_ratingsMtx_itemID_dev_training_batch = coo_format_ratingsMtx_itemID_dev_training + first_coo_ind_training;
+                    coo_format_ratingsMtx_rating_dev_training_batch = coo_format_ratingsMtx_rating_dev_training + first_coo_ind_training;
+                }
+                ABORT_IF_LESS(nnz_training, 1, "nnz < 1");
+                total_training_nnz += nnz_training;
 
+
+                float* coo_training_errors;
+                //float* testing_entries;
+                checkCudaErrors(cudaMalloc((void**)&coo_training_errors, nnz_training * SIZE_OF(float)));
+                //checkCudaErrors(cudaMalloc((void**)&testing_entries, nnz_training * SIZE_OF(float)));
+                update_Mem(nnz_training * SIZE_OF(float));
+
+                if(Debug && 0){
+                    LOG("training requires " <<nnz_training * SIZE_OF(float) + batch_size_training  * std::max(min_dim_block, batch_size_training) * SIZE_OF(float) 
+                                + batch_size_training  * ratings_cols * SIZE_OF(float) +
+                                (batch_size_training + 1) * SIZE_OF(int) + nnz_training * SIZE_OF(int) + nnz_training * SIZE_OF(float) << " bytes of memory");
+
+                    LOG("first_coo_ind in this training batch : "<<first_coo_ind_training<< " ( / "<<num_entries_training<<" )");
+                    LOG("nnz in this training batch : "<<nnz_training);
+                    LOG("( next first_coo_ind in training batch : "<<first_coo_ind_training + nnz_training <<" )");
+                    // save_device_array_to_file<int>(csr_format_ratingsMtx_userID_dev_training_batch, batch_size_training + 1, "csr_format_ratingsMtx_userID_dev_training_batch");
+                    // LOG("first entry of csr_format_ratingsMtx_userID_dev_training_batch: ");
+                    // print_gpu_array_entries<int>(csr_format_ratingsMtx_userID_dev_training_batch, 1);
+                    // save_device_array_to_file<float>(coo_format_ratingsMtx_rating_dev_training + (int)first_coo_ind_training, nnz_training, "coo_format_ratingsMtx_rating_dev_training_batch");
+                    // save_device_array_to_file<int>(coo_format_ratingsMtx_itemID_dev_training + (int)first_coo_ind_training, nnz_training, "coo_format_ratingsMtx_itemID_dev_training");
                     // LOG("Press Enter to continue.") ;
                     // std::cin.ignore();
                 }
 
-                //checkCudaErrors(cudaFree(testing_entries));
 
-                bool update_U_temp = update_U;
 
-                if(training_error_v[it] < (float)0.01 && update_U_temp){
-                    update_U = true;
-                }else{
-                    //update_U = false;
-                }
 
-                float alpha =  meta_training_rate;
-                float beta = (float)1.0 - meta_training_rate * regularization_constant;
-                //if( round_ % 2 == 0 || !update_U ) 
-                {
+                for(int round_ = 0; round_ < 1; round_++){
+                    //LOG(std::endl<<"                                                      ROUND : "<<round_);
+
+                    gpu_orthogonal_decomp<float>(dn_handle, dn_solver_handle,
+                                                batch_size_ACU, ratings_cols, 
+                                                &num_latent_factors, (float)0.999,
+                                                full_ratingsMtx_dev_ACU_current_batch, 
+                                                U_ACU_dev, V_dev, SV_with_U, SV_dev);
+
+                    //LOG("num_latent_factors = "<< num_latent_factors << " ( / "<< batch_size_ACU<< " )");
+
+                    num_latent_factors = std::min(num_latent_factors, (long long int)((percent + (float)0.1) * (float)batch_size_ACU));
+
+                    LOG("num_latent_factors = "<< num_latent_factors << " ( / "<< batch_size_ACU<< " )");
+
+                    //checkCudaErrors(cudaMemcpy(U_ACU_host, U_ACU_dev, batch_size_ACU * min_dim_block * SIZE_OF(float), cudaMemcpyDeviceToHost));
+
+                    //save_device_mtx_to_file<float>(U_ACU, ratings_rows_ACU, num_latent_factors, "U_ACU_compressed");
+
+                    /*
+                        At this point U_ACU is batch_size_ACU by batch_size_ACU in memory stored in column major
+                        ordering and V is ratings_cols by batch_size_ACU stored in column major ordering
+
+                        There is no extra work to compress U_ACU into batch_size_ACU by num_latent_factors, or
+                        to compress V into ratings_cols by num_latent_factors, just take the first num_latent_factors
+                        columns of each matrix
+                    */
+                     
 
                     //============================================================================================
-                    // Update  V = V * (1 - alpha * lambda) + alpha * Error^T * U_training 
-                    // (Update  U = U * (1 - alpha * lambda) + alpha * Error * V ) <- random error?????
+                    // Compute  R_training * V = U_training
+                    // Compute  Error = R_training -  U_training * V^T  <-- sparse
                     //============================================================================================ 
                     //if(Debug) LOG("iteration "<<it<<" made it to check point");
-                    /*
-                        m,n,k
-                        This function performs one of the following matrix-matrix operations:
-
-                        C = α ∗ op ( A ) ∗ op ( B ) + β ∗ C
-
-                        A is an m×k sparse matrix that is defined in CSR storage format by the three arrays csrValA, csrRowPtrA, and csrColIndA); B and C are dense matrices; α  and  β are scalars; and
-
-                        op ( A ) = A if transA == CUSPARSE_OPERATION_NON_TRANSPOSE, A^T if transA == CUSPARSE_OPERATION_TRANSPOSE, A^H if transA == CUSPARSE_OPERATION_CONJUGATE_TRANSPOSE
-                        and
-
-                        op ( B ) = B if transB == CUSPARSE_OPERATION_NON_TRANSPOSE, B^T if transB == CUSPARSE_OPERATION_TRANSPOSE, B^H not supported
-                        array of dimensions (ldb, n) if op(B)=B and (ldb, k) otherwise.
-
-                        n is the number of columns of dense matrix op(B) and C.
-                    */
 
 
-                    if(regularize_V){
+                    
+                    bool calc_delta_V = false;
+                    float* delta_V;
+
+                    if(calc_delta_V){
+                        checkCudaErrors(cudaMalloc((void**)&delta_V, ratings_cols * min_dim_block * SIZE_OF(float)));
+                        checkCudaErrors(cudaMemcpy(delta_V, V_dev, ratings_cols * min_dim_block * SIZE_OF(float), cudaMemcpyDeviceToDevice));
+                        update_Mem(ratings_cols * min_dim_block * SIZE_OF(float));
+                    } 
+
+                    bool calc_delta_U = false;
+                    float* delta_U_ACU;
+                    if(calc_delta_U){
+                        checkCudaErrors(cudaMalloc((void**)&delta_U_ACU, batch_size_ACU * min_dim_block * SIZE_OF(int)));
+                        checkCudaErrors(cudaMemcpy(delta_U_ACU, U_ACU_dev, batch_size_ACU * min_dim_block * SIZE_OF(float), cudaMemcpyDeviceToDevice));
+                    }
+
+                    calc_delta_R_ACU = false;
+                    float* delta_R_ACU;
+                    if(calc_delta_R_ACU){
+                        checkCudaErrors(cudaMalloc((void**)&delta_R_ACU, batch_size_ACU * ratings_cols * SIZE_OF(float)));
+                        update_Mem(batch_size_ACU * ratings_cols * SIZE_OF(float));
+                        checkCudaErrors(cudaMemcpy(delta_R_ACU, full_ratingsMtx_dev_ACU_current_batch, 
+                                                    batch_size_ACU * ratings_cols * SIZE_OF(float), cudaMemcpyDeviceToDevice));
+                        
+                        if(Debug  && 0){
+                            //save_device_mtx_to_file<float>(delta_R_ACU, batch_size_ACU, 1, "delta_R_ACU_0", true, strPreamble(blank));
+                            //save_device_mtx_to_file<float>(full_ratingsMtx_dev_ACU, batch_size_ACU, 1, "R_ACU_0", true, strPreamble(blank));
+                        }
+                        
+                    }
+                    gpu_R_error<float>(dn_handle, sp_handle, sp_descr,dn_solver_handle, 
+                                       batch_size_training_temp, batch_size_ACU, num_latent_factors, ratings_cols,
+                                       nnz_training, first_coo_ind_training, compress_when_training, 
+                                       NULL, coo_training_errors, (float)0.0,
+                                       coo_format_ratingsMtx_rating_dev_training_batch, 
+                                       csr_format_ratingsMtx_userID_dev_training_batch, 
+                                       coo_format_ratingsMtx_itemID_dev_training_batch,
+                                       V_dev, U_training, R_training, U_ACU_dev, full_ratingsMtx_dev_ACU_current_batch,
+                                       micro_training_rate, regularization_constant, batch__, it,
+                                       training_error_v + it, training_error_u + it, 
+                                       training_iterations + it, SV_with_U, SV_dev);
+
+                    
+
+                    // gpu_R_error_training<float>(dn_handle, sp_handle, sp_descr,
+                    //                            batch_size_training_temp, batch_size_ACU, num_latent_factors, ratings_cols,
+                    //                            nnz_training, first_coo_ind_training, false /*compress_when_training*/, coo_training_errors,
+                    //                            coo_format_ratingsMtx_rating_dev_training_batch, 
+                    //                            csr_format_ratingsMtx_userID_dev_training_batch,         // <-- already has shifted to correct start
+                    //                            coo_format_ratingsMtx_itemID_dev_training_batch,
+                    //                            V_dev, U_training, R_training, training_rate, regularization_constant, SV_with_U, SV_dev);
+
+
+                    
+
+                    
+                    if(num_blocks - 1 == ACU_batch){
+                        if( print_training_error ){
+                            //LOG("           ~Finished round "<<count_ACU_rounds<<" of ACU training~"<<std::endl); 
+                            LOG("TRAINING AVERAGE SQUARED ERROR : "<< ToString<float>(training_error_v[it])); 
+
+                            // float temp = gpu_sum_of_squares<float>(nnz_training, testing_entries);
+                            // float temp = gpu_sum_of_squares_of_diff(dn_handle, nnz_training, 
+                            //                                         coo_format_ratingsMtx_rating_dev_training + first_coo_ind_training, 
+                            //                                         testing_entries);
+                            
+                            // LOG("training error over range of ratings: "<< training_error_temp / ((float)(nnz_) * range_training));
+                            // LOG("training error normalized: "<< training_error_temp / temp<<std::endl); 
+                            // LOG("training error : "<< training_error_temp / (float)(nnz_* 2.0)); 
+
+                        } 
+                        count_ACU_rounds += 1;  
+                        total_training_nnz = (long long int)0;
+                        
+                    }
+
+                    if(Debug && 0){
+
+                        //save_device_arrays_side_by_side_to_file<float>(coo_format_ratingsMtx_rating_dev_training + first_coo_ind_training, testing_entries, coo_training_errors, nnz_training, "ratings_testing_errors");
+                        
+                        float coo_training_errors_abs_exp = gpu_expected_abs_value<float>(nnz_training, coo_training_errors);
+                        float coo_training_errors_abs_max = gpu_abs_max<float>           (nnz_training, coo_training_errors);
+                        LOG("coo_training_errors_abs_max = "<<ToString<float>(coo_training_errors_abs_max)) ;
+                        //LOG("coo_training_errors_abs_max over range of ratings = "<<coo_training_errors_abs_max / range_training) ;
+                        LOG("coo_training_errors_abs_exp = "<<ToString<float>(coo_training_errors_abs_exp)) ;
+                        //LOG("coo_training_errors_abs_exp over range of ratings = "<<coo_training_errors_abs_exp / range_training) ;
+
+                        // coo_training_errors_abs_exp = gpu_expected_abs_value<float>(nnz_training, coo_format_ratingsMtx_rating_dev_training + first_coo_ind_training);
+                        // coo_training_errors_abs_max = gpu_abs_max<float>           (nnz_training, coo_format_ratingsMtx_rating_dev_training + first_coo_ind_training);
+                        // LOG("coo_training_abs_max = "<<coo_training_errors_abs_max) ;
+                        // LOG("coo_training_abs_exp = "<<coo_training_errors_abs_exp) ;
+
+                        // LOG("Press Enter to continue.") ;
+                        // std::cin.ignore();
+                    }
+
+                    //checkCudaErrors(cudaFree(testing_entries));
+
+                    bool update_U_temp = update_U;
+
+                    if(training_error_v[it] < (float)0.01 && update_U_temp){
+                        update_U = true;
+                    }else{
+                        //update_U = false;
+                    }
+
+                    float alpha =  meta_training_rate;
+                    float beta = (float)1.0 - meta_training_rate * regularization_constant;
+                    //if( round_ % 2 == 0 || !update_U ) 
+                    {
+
+                        //============================================================================================
+                        // Update  V = V * (1 - alpha * lambda) + alpha * Error^T * U_training 
+                        // (Update  U = U * (1 - alpha * lambda) + alpha * Error * V ) <- random error?????
+                        //============================================================================================ 
+                        //if(Debug) LOG("iteration "<<it<<" made it to check point");
+                        /*
+                            m,n,k
+                            This function performs one of the following matrix-matrix operations:
+
+                            C = α ∗ op ( A ) ∗ op ( B ) + β ∗ C
+
+                            A is an m×k sparse matrix that is defined in CSR storage format by the three arrays csrValA, csrRowPtrA, and csrColIndA); B and C are dense matrices; α  and  β are scalars; and
+
+                            op ( A ) = A if transA == CUSPARSE_OPERATION_NON_TRANSPOSE, A^T if transA == CUSPARSE_OPERATION_TRANSPOSE, A^H if transA == CUSPARSE_OPERATION_CONGACUTE_TRANSPOSE
+                            and
+
+                            op ( B ) = B if transB == CUSPARSE_OPERATION_NON_TRANSPOSE, B^T if transB == CUSPARSE_OPERATION_TRANSPOSE, B^H not supported
+                            array of dimensions (ldb, n) if op(B)=B and (ldb, k) otherwise.
+
+                            n is the number of columns of dense matrix op(B) and C.
+                        */
+
+
+                        if(regularize_V){
+                            float beta = (float)1.0 - meta_training_rate * regularization_constant;
+                        }else{
+                            beta = (float)1.0;
+                        }
+
+                        // gpu_spXdense_MMM<float>(sp_handle, true, false, batch_size_training_temp, min_dim_block, 
+                        //                         ratings_cols, nnz_training, first_coo_ind_training, &meta_training_rate, sp_descr, 
+                        //                         coo_training_errors, 
+                        //                         csr_format_ratingsMtx_userID_dev_training_batch, 
+                        //                         coo_format_ratingsMtx_itemID_dev_training_batch,
+                        //                         U_training, batch_size_training_temp, &beta, V_dev, ratings_cols, false);
+
+                        if(normalize_V_rows && SV_with_U){
+                            LOG("Normalizing the rows of V...");
+                            gpu_normalize_mtx_rows_or_cols(ratings_cols, min_dim_block, false, V_dev, false);
+                        }
+
+                        /*
+                            N is number of rows of matrix op(B) and C.
+                            M number of columns of matrix op(A) and C.
+                            K is number of columns of op(B) and rows of op(A).
+                            
+                            op(B) is N by K
+                            op(A) is K by M
+                            C is N by M
+
+                            performs C=alpha op ( B ) op ( A ) + beta C
+                        */
+
+
+                        /*
+                            gpu_noisey_gemm<float>(dn_handle, false, false, 
+                                            batch_size_ACU, (compress_when_training == false) ? batch_size_ACU : num_latent_factors, 
+                                            ratings_cols,
+                                            beta, //(float)1.0
+                                            V, training_rate, beta,
+                                            U_ACU);
+                        */
+
+
+                        
+
+                        if(calc_delta_V){
+                            // float* copy;
+                            // checkCudaErrors(cudaMalloc((void**)&copy, ratings_cols * min_dim_block * SIZE_OF(float)));
+                            // update_Mem(ratings_cols * min_dim_block * SIZE_OF(float) );
+                            // checkCudaErrors(cudaMemcpy(copy, delta_V, ratings_cols * min_dim_block * SIZE_OF(float), cudaMemcpyDeviceToDevice));
+                            gpu_axpby<float>(dn_handle, ratings_cols * min_dim_block, 
+                                             (float)(-1.0), V_dev,
+                                             (float)(1.0), delta_V);
+                            float delta_abs_exp = gpu_expected_abs_value<float>(ratings_cols * min_dim_block, delta_V);
+                            float delta_abs_max = gpu_abs_max<float>(ratings_cols * min_dim_block, delta_V); 
+                            LOG("delta V maximum absolute value = "<<ToString<float>(delta_abs_max)) ;
+                            LOG("delta V expected absolute value = "<<ToString<float>(delta_abs_exp)) ;
+                            ABORT_IF_EQ(delta_abs_max, delta_abs_exp, "delta V is constant");
+
+                            gpu_mean_abs_nonzero((min_dim_block * ratings_cols), delta_V, &delta_abs_exp, 1, "delta_V");
+                            LOG("delta V expected absolute value over only non zero = "<<ToString<float>(delta_abs_exp)) ;
+                            // save_device_arrays_side_by_side_to_file(copy, V, delta_V, ratings_cols * min_dim_block, "old_new_delta_V");
+                            // LOG("Press Enter to continue.") ;
+                            // std::cin.ignore();
+                            if(delta_V) {
+                                checkCudaErrors(cudaFree(delta_V));
+                                update_Mem(ratings_cols * min_dim_block * SIZE_OF(float) * (-1));
+                            }
+                            // checkCudaErrors(cudaFree(copy));
+                            // update_Mem(ratings_cols * min_dim_block * SIZE_OF(float) * (-1));
+                        }
+
+                    
+                    }
+                    //else
+                    {
+
+                        if(update_U){
+                            /*
+                                LOG("Update U_ACU...");
+
+                                // if(compress_when_training){
+                                //     gpu_scale<float>(dn_handle, batch_size_ACU * num_latent_factors, beta, U_ACU_dev);
+                                // }else{
+                                //     gpu_scale<float>(dn_handle, batch_size_ACU * batch_size_ACU, beta, U_ACU_dev);
+                                // }   
+
+                            
+                                float* errors;
+                                int* selection;
+                                checkCudaErrors(cudaMalloc((void**)&errors, batch_size_training_temp * SIZE_OF(float)));
+                                checkCudaErrors(cudaMalloc((void**)&selection, batch_size_training_temp * SIZE_OF(int)));
+                                
+                                
+                                bool dense_update = true;
+                                if(dense_update){
+                                    gpu_dense_nearest_row<float>(batch_size_ACU, min_dim_block, U_ACU_dev, 
+                                                                 batch_size_training_temp, U_training, 
+                                                                 selection, errors, false);
+                                }else{
+
+                                    gpu_sparse_nearest_row<float>(batch_size_ACU, ratings_cols, full_ratingsMtx_dev_ACU_current_batch, 
+                                                                 batch_size_training_temp, nnz_training, 
+                                                                 csr_format_ratingsMtx_userID_dev_training_batch, 
+                                                                 coo_format_ratingsMtx_itemID_dev_training_batch,
+                                                                 coo_format_ratingsMtx_rating_dev_training_batch, 
+                                                                 selection, errors, false);
+                                }
+
+
+                                //int min_selection = gpu_min<int>(batch_size_training_temp, selection);
+
+                                float k_means_er_training = gpu_sum(batch_size_training_temp,  errors);
+                                //LOG("err norm when clustering U rows : "<<std::sqrt(k_means_er));
+                                k_means_er_training /= (float)(batch_size_training_temp);
+                                LOG("mean sqed err when clustering U rows : "<<ToString<float>(k_means_er_training));
+
+                                cpu_incremental_average((long long int)(it + 1), training_error_u + it, k_means_er_training);
+
+                                if(Debug){
+                                    save_device_array_to_file<float>(errors, (int)batch_size_training_temp, "km_errors", strPreamble(blank));
+                                    save_device_array_to_file<int>(selection, (int)batch_size_training_temp, "km_selection", strPreamble(blank));                        
+                                }
+                                checkCudaErrors(cudaFree(errors));
+
+
+                                //long long int skip = min_selection * batch_size_ACU;
+                                if(Debug){
+                                    //LOG("min_selection : "<<min_selection);
+                                    // save_device_mtx_to_file<float>(delta_U_ACU + skip, 3, (compress_when_training == false) ? batch_size_ACU : num_latent_factors, "U_ACU_old_0", true, strPreamble(blank));
+                                    // save_device_mtx_to_file<float>(U_ACU + skip, 3, (compress_when_training == false) ? batch_size_ACU : num_latent_factors, "U_ACU_0", true, strPreamble(blank));
+                                }
+                                gpu_calculate_KM_error_and_update(batch_size_ACU, min_dim_block, U_ACU_dev, 
+                                                                 batch_size_training_temp, U_training, csr_format_ratingsMtx_userID_dev_training_batch,
+                                                                 selection, meta_training_rate, regularization_constant, it);
+                                checkCudaErrors(cudaFree(selection));
+
+                            */
+
+                            if(calc_delta_U){
+                                // save_device_mtx_to_file<float>(delta_U_ACU + skip, 3, (compress_when_training == false) ? batch_size_ACU : num_latent_factors, "U_ACU_old_1", true, strPreamble(blank));
+                                // save_device_mtx_to_file<float>(U_ACU + skip, 3, (compress_when_training == false) ? batch_size_ACU : num_latent_factors, "U_ACU_1", true, strPreamble(blank));
+                            
+                                gpu_axpby<float>(dn_handle, (batch_size_ACU * min_dim_block), (float)(-1.0), U_ACU_dev, (float)(1.0), delta_U_ACU);
+                            
+                                // save_device_mtx_to_file<float>(delta_U_ACU + skip, 3, (compress_when_training == false) ? batch_size_ACU : num_latent_factors, "U_ACU_old_2", true, strPreamble(blank));
+                                // save_device_mtx_to_file<float>(U_ACU + skip, 3, (compress_when_training == false) ? batch_size_ACU : num_latent_factors, "U_ACU_2", true, strPreamble(blank));
+                            
+                                // LOG("first 5 entries of delta_U_ACU :") ;
+                                // print_gpu_array_entries(delta_U_ACU, 5, strPreamble(blank));
+
+                                float delta_abs_exp = gpu_expected_abs_value<float>((batch_size_ACU * min_dim_block), delta_U_ACU);
+                                float delta_abs_max = gpu_abs_max<float>((batch_size_ACU * min_dim_block), delta_U_ACU); 
+                                LOG("delta U maximum absolute value = "<<ToString<float>(delta_abs_max)) ;
+                                LOG("delta U expected absolute value over all = "<<ToString<float>(delta_abs_exp)) ;
+
+                                gpu_mean_abs_nonzero((batch_size_ACU * min_dim_block), delta_U_ACU, &delta_abs_exp, 1, "delta_U_ACU");
+                                LOG("delta U expected absolute value over only non zero = "<<ToString<float>(delta_abs_exp)) ;
+                                ABORT_IF_EQ(delta_abs_max, delta_abs_exp, "delta U is constant");                    
+                                checkCudaErrors(cudaFree(delta_U_ACU));
+                            }
+
+                        }
+                    }
+
+                    update_U = update_U_temp;
+
+                    if(Debug){
+                        //save_device_mtx_to_file<float>(V_dev, ratings_cols, num_latent_factors, "V_compressed");
+                        //save_device_mtx_to_file<float>(U_ACU_dev, batch_size_ACU, num_latent_factors, "U_ACU_compressed");
+                    }
+                    //============================================================================================
+                    // Update  R_ACU = U_ACU * V^T
+                    //============================================================================================ 
+                    //if(Debug) LOG("iteration "<<it<<" made it to check point");
+                    if(ACU_batch == 0 && 0){
+                        // store backup
+                        if(Conserve_GPU_Mem){
+                            host_copy(ratings_rows_ACU * ratings_cols, full_ratingsMtx_host_ACU, old_R_ACU);
+                        }else{
+                            checkCudaErrors(cudaMemcpy(old_R_ACU, full_ratingsMtx_dev_ACU, 
+                                                    ratings_rows_ACU * ratings_cols * SIZE_OF(float), cudaMemcpyDeviceToDevice));
+                            if(row_major_ordering) 
+                                gpu_swap_ordering<float>(batch_size_ACU, ratings_cols, old_R_ACU + ratings_cols * first_row_in_batch_ACU, !row_major_ordering);
+                        }
+                    }
+
+                    if(regularize_R){
                         float beta = (float)1.0 - meta_training_rate * regularization_constant;
                     }else{
                         beta = (float)1.0;
                     }
 
-                    // gpu_spXdense_MMM<float>(sp_handle, true, false, batch_size_training_temp, min_dim_block, 
-                    //                         ratings_cols, nnz_training, first_coo_ind_training, &meta_training_rate, sp_descr, 
-                    //                         coo_training_errors, 
-                    //                         csr_format_ratingsMtx_userID_dev_training_batch, 
-                    //                         coo_format_ratingsMtx_itemID_dev_training_batch,
-                    //                         U_training, batch_size_training_temp, &beta, V_dev, ratings_cols, false);
+                    // gpu_gemm<float>(dn_handle, true, false, 
+                    //                 ratings_cols, batch_size_ACU, 
+                    //                 compress_when_training ? num_latent_factors : min_dim_block,
+                    //                 (float)1.0,
+                    //                 V_dev, U_ACU_dev, 
+                    //                 (float)0.0,
+                    //                 full_ratingsMtx_dev_ACU_current_batch);
 
-                    if(normalize_V_rows && SV_with_U){
-                        LOG("Normalizing the rows of V...");
-                        gpu_normalize_mtx_rows_or_cols(ratings_cols, min_dim_block, false, V_dev, false);
+                    if (regularize_R_distribution){
+                        LOG("regularize_R_distribution...") ;
+                        float* user_means_ACU;
+                        float* user_var_ACU;
+                        checkCudaErrors(cudaMalloc((void**)&user_means_ACU, batch_size_ACU * SIZE_OF(float)));
+                        checkCudaErrors(cudaMalloc((void**)&user_var_ACU,   batch_size_ACU * SIZE_OF(float)));
+                        update_Mem(2 * batch_size_ACU * SIZE_OF(float));
+                        center_rows(batch_size_ACU, ratings_cols, full_ratingsMtx_dev_ACU_current_batch, 
+                                    val_when_var_is_zero, user_means_ACU,  user_var_ACU);
+                        checkCudaErrors(cudaFree(user_means_ACU));
+                        checkCudaErrors(cudaFree(user_var_ACU));
+                        update_Mem(2 * batch_size_ACU * SIZE_OF(float) * (-1));
+                        if(Debug  && 0){
+                            //save_device_mtx_to_file<float>(delta_R_ACU, batch_size_ACU, 1, "delta_R_ACU_1", true, strPreamble(blank));
+                            save_device_mtx_to_file<float>(full_ratingsMtx_dev_ACU_current_batch, batch_size_ACU, 1, "R_ACU_1", true, strPreamble(blank));
+                        }
                     }
 
-                    /*
-                        N is number of rows of matrix op(B) and C.
-                        M number of columns of matrix op(A) and C.
-                        K is number of columns of op(B) and rows of op(A).
-                        
-                        op(B) is N by K
-                        op(A) is K by M
-                        C is N by M
+                    if(calc_delta_R_ACU){
+                        //float* copy;
+                        //checkCudaErrors(cudaMalloc((void**)&copy, batch_size_ACU * ratings_cols * SIZE_OF(float)));
+                        //update_Mem(batch_size_ACU * ratings_cols * SIZE_OF(float));
+                        //checkCudaErrors(cudaMemcpy(copy, delta_R_ACU, batch_size_ACU * ratings_cols * SIZE_OF(float), cudaMemcpyDeviceToDevice));
+                        gpu_axpby<float>(dn_handle, batch_size_ACU * ratings_cols, 
+                                         (float)(-1.0), full_ratingsMtx_dev_ACU_current_batch,
+                                         (float)(1.0), delta_R_ACU);
 
-                        performs C=alpha op ( B ) op ( A ) + beta C
-                    */
+                        float delta_abs_exp = gpu_expected_abs_value<float>(batch_size_ACU * ratings_cols, delta_R_ACU);
+                        float delta_abs_max = gpu_abs_max<float>           (batch_size_ACU * ratings_cols, delta_R_ACU); 
+                        LOG("delta R_ACU maximum absolute value = "<<ToString<float>(delta_abs_max)) ;
+                        LOG("delta R_ACU expected absolute value over all = "<<ToString<float>(delta_abs_exp)) ;
 
+                        cpu_incremental_average((long long int)(batch__ + 1), delta_R_ACU_exp + it, delta_abs_exp);
 
-                    /*
-                        gpu_noisey_gemm<float>(dn_handle, false, false, 
-                                        batch_size_GU, (compress_when_training == false) ? batch_size_GU : num_latent_factors, 
-                                        ratings_cols,
-                                        beta, //(float)1.0
-                                        V, training_rate, beta,
-                                        U_GU);
-                    */
-
-
+                        gpu_mean_abs_nonzero((batch_size_ACU * ratings_cols), delta_R_ACU, &delta_abs_exp, 1, "delta_R_ACU");
+                        LOG("delta R_ACU expected absolute value over only non zero = "<<ToString<float>(delta_abs_exp)) ;
+                        max_abs_delta_R_ACU = std::max(max_abs_delta_R_ACU, delta_abs_max);
+                        if(Debug && 0){
+                            LOG("first 5 entries of delta_R_ACU :") ;
+                            print_gpu_array_entries(delta_R_ACU, 5, strPreamble(blank));
+                            // save_device_arrays_side_by_side_to_file(copy, full_ratingsMtx_dev_ACU_current_batch, delta_R_ACU, batch_size_ACU * ratings_cols, "old_new_delta");
+                            // LOG("Press Enter to continue.") ;
+                            // std::cin.ignore();
+                        }
+                        checkCudaErrors(cudaFree(delta_R_ACU));
+                        //checkCudaErrors(cudaFree(copy));
+                        update_Mem(/*2 * */batch_size_ACU * ratings_cols * SIZE_OF(float) * (-1));
+                    }
                     
-
-                    if(calc_delta_V){
-                        // float* copy;
-                        // checkCudaErrors(cudaMalloc((void**)&copy, ratings_cols * min_dim_block * SIZE_OF(float)));
-                        // update_Mem(ratings_cols * min_dim_block * SIZE_OF(float) );
-                        // checkCudaErrors(cudaMemcpy(copy, delta_V, ratings_cols * min_dim_block * SIZE_OF(float), cudaMemcpyDeviceToDevice));
-                        gpu_axpby<float>(dn_handle, ratings_cols * min_dim_block, 
-                                         (float)(-1.0), V_dev,
-                                         (float)(1.0), delta_V);
-                        float delta_abs_exp = gpu_expected_abs_value<float>(ratings_cols * min_dim_block, delta_V);
-                        float delta_abs_max = gpu_abs_max<float>(ratings_cols * min_dim_block, delta_V); 
-                        LOG("delta V maximum absolute value = "<<ToString<float>(delta_abs_max)) ;
-                        LOG("delta V expected absolute value = "<<ToString<float>(delta_abs_exp)) ;
-                        ABORT_IF_EQ(delta_abs_max, delta_abs_exp, "delta V is constant");
-
-                        gpu_mean_abs_nonzero((min_dim_block * ratings_cols), delta_V, &delta_abs_exp, 1, "delta_V");
-                        LOG("delta V expected absolute value over only non zero = "<<ToString<float>(delta_abs_exp)) ;
-                        // save_device_arrays_side_by_side_to_file(copy, V, delta_V, ratings_cols * min_dim_block, "old_new_delta_V");
-                        // LOG("Press Enter to continue.") ;
-                        // std::cin.ignore();
-                        if(delta_V) {
-                            checkCudaErrors(cudaFree(delta_V));
-                            update_Mem(ratings_cols * min_dim_block * SIZE_OF(float) * (-1));
-                        }
-                        // checkCudaErrors(cudaFree(copy));
-                        // update_Mem(ratings_cols * min_dim_block * SIZE_OF(float) * (-1));
-                    }
-
-                
-                }
-                //else
-                {
-
-                    if(update_U){
-                        /*
-                            LOG("Update U_GU...");
-
-                            // if(compress_when_training){
-                            //     gpu_scale<float>(dn_handle, batch_size_GU * num_latent_factors, beta, U_GU_dev);
-                            // }else{
-                            //     gpu_scale<float>(dn_handle, batch_size_GU * batch_size_GU, beta, U_GU_dev);
-                            // }   
-
-                        
-                            float* errors;
-                            int* selection;
-                            checkCudaErrors(cudaMalloc((void**)&errors, batch_size_training_temp * SIZE_OF(float)));
-                            checkCudaErrors(cudaMalloc((void**)&selection, batch_size_training_temp * SIZE_OF(int)));
-                            
-                            
-                            bool dense_update = true;
-                            if(dense_update){
-                                gpu_dense_nearest_row<float>(batch_size_GU, min_dim_block, U_GU_dev, 
-                                                             batch_size_training_temp, U_training, 
-                                                             selection, errors, false);
-                            }else{
-
-                                gpu_sparse_nearest_row<float>(batch_size_GU, ratings_cols, full_ratingsMtx_dev_GU_current_batch, 
-                                                             batch_size_training_temp, nnz_training, 
-                                                             csr_format_ratingsMtx_userID_dev_training_batch, 
-                                                             coo_format_ratingsMtx_itemID_dev_training_batch,
-                                                             coo_format_ratingsMtx_rating_dev_training_batch, 
-                                                             selection, errors, false);
-                            }
-
-
-                            //int min_selection = gpu_min<int>(batch_size_training_temp, selection);
-
-                            float k_means_er_training = gpu_sum(batch_size_training_temp,  errors);
-                            //LOG("err norm when clustering U rows : "<<std::sqrt(k_means_er));
-                            k_means_er_training /= (float)(batch_size_training_temp);
-                            LOG("mean sqed err when clustering U rows : "<<ToString<float>(k_means_er_training));
-
-                            cpu_incremental_average((long long int)(it + 1), training_error_u + it, k_means_er_training);
-
-                            if(Debug){
-                                save_device_array_to_file<float>(errors, (int)batch_size_training_temp, "km_errors", strPreamble(blank));
-                                save_device_array_to_file<int>(selection, (int)batch_size_training_temp, "km_selection", strPreamble(blank));                        
-                            }
-                            checkCudaErrors(cudaFree(errors));
-
-
-                            //long long int skip = min_selection * batch_size_GU;
-                            if(Debug){
-                                //LOG("min_selection : "<<min_selection);
-                                // save_device_mtx_to_file<float>(delta_U_GU + skip, 3, (compress_when_training == false) ? batch_size_GU : num_latent_factors, "U_GU_old_0", true, strPreamble(blank));
-                                // save_device_mtx_to_file<float>(U_GU + skip, 3, (compress_when_training == false) ? batch_size_GU : num_latent_factors, "U_GU_0", true, strPreamble(blank));
-                            }
-                            gpu_calculate_KM_error_and_update(batch_size_GU, min_dim_block, U_GU_dev, 
-                                                             batch_size_training_temp, U_training, csr_format_ratingsMtx_userID_dev_training_batch,
-                                                             selection, meta_training_rate, regularization_constant, it);
-                            checkCudaErrors(cudaFree(selection));
-
-                        */
-
-                        if(calc_delta_U){
-                            // save_device_mtx_to_file<float>(delta_U_GU + skip, 3, (compress_when_training == false) ? batch_size_GU : num_latent_factors, "U_GU_old_1", true, strPreamble(blank));
-                            // save_device_mtx_to_file<float>(U_GU + skip, 3, (compress_when_training == false) ? batch_size_GU : num_latent_factors, "U_GU_1", true, strPreamble(blank));
-                        
-                            gpu_axpby<float>(dn_handle, (batch_size_GU * min_dim_block), (float)(-1.0), U_GU_dev, (float)(1.0), delta_U_GU);
-                        
-                            // save_device_mtx_to_file<float>(delta_U_GU + skip, 3, (compress_when_training == false) ? batch_size_GU : num_latent_factors, "U_GU_old_2", true, strPreamble(blank));
-                            // save_device_mtx_to_file<float>(U_GU + skip, 3, (compress_when_training == false) ? batch_size_GU : num_latent_factors, "U_GU_2", true, strPreamble(blank));
-                        
-                            // LOG("first 5 entries of delta_U_GU :") ;
-                            // print_gpu_array_entries(delta_U_GU, 5, strPreamble(blank));
-
-                            float delta_abs_exp = gpu_expected_abs_value<float>((batch_size_GU * min_dim_block), delta_U_GU);
-                            float delta_abs_max = gpu_abs_max<float>((batch_size_GU * min_dim_block), delta_U_GU); 
-                            LOG("delta U maximum absolute value = "<<ToString<float>(delta_abs_max)) ;
-                            LOG("delta U expected absolute value over all = "<<ToString<float>(delta_abs_exp)) ;
-
-                            gpu_mean_abs_nonzero((batch_size_GU * min_dim_block), delta_U_GU, &delta_abs_exp, 1, "delta_U_GU");
-                            LOG("delta U expected absolute value over only non zero = "<<ToString<float>(delta_abs_exp)) ;
-                            ABORT_IF_EQ(delta_abs_max, delta_abs_exp, "delta U is constant");                    
-                            checkCudaErrors(cudaFree(delta_U_GU));
-                        }
-
-                    }
-                }
-
-                update_U = update_U_temp;
-
-                if(Debug){
-                    //save_device_mtx_to_file<float>(V_dev, ratings_cols, num_latent_factors, "V_compressed");
-                    //save_device_mtx_to_file<float>(U_GU_dev, batch_size_GU, num_latent_factors, "U_GU_compressed");
-                }
-                //============================================================================================
-                // Update  R_GU = U_GU * V^T
-                //============================================================================================ 
-                //if(Debug) LOG("iteration "<<it<<" made it to check point");
-                if(GU_batch == 0 && 0){
-                    // store backup
-                    if(Conserve_GPU_Mem){
-                        host_copy(ratings_rows_GU * ratings_cols, full_ratingsMtx_host_GU, old_R_GU);
-                    }else{
-                        checkCudaErrors(cudaMemcpy(old_R_GU, full_ratingsMtx_dev_GU, 
-                                                ratings_rows_GU * ratings_cols * SIZE_OF(float), cudaMemcpyDeviceToDevice));
-                        if(row_major_ordering) 
-                            gpu_swap_ordering<float>(batch_size_GU, ratings_cols, old_R_GU + ratings_cols * first_row_in_batch_GU, !row_major_ordering);
-                    }
-                }
-
-                if(regularize_R){
-                    float beta = (float)1.0 - meta_training_rate * regularization_constant;
-                }else{
-                    beta = (float)1.0;
-                }
-
-                // gpu_gemm<float>(dn_handle, true, false, 
-                //                 ratings_cols, batch_size_GU, 
-                //                 compress_when_training ? num_latent_factors : min_dim_block,
-                //                 (float)1.0,
-                //                 V_dev, U_GU_dev, 
-                //                 (float)0.0,
-                //                 full_ratingsMtx_dev_GU_current_batch);
-
-                if (regularize_R_distribution){
-                    LOG("regularize_R_distribution...") ;
-                    float* user_means_GU;
-                    float* user_var_GU;
-                    checkCudaErrors(cudaMalloc((void**)&user_means_GU, batch_size_GU * SIZE_OF(float)));
-                    checkCudaErrors(cudaMalloc((void**)&user_var_GU,   batch_size_GU * SIZE_OF(float)));
-                    update_Mem(2 * batch_size_GU * SIZE_OF(float));
-                    center_rows(batch_size_GU, ratings_cols, full_ratingsMtx_dev_GU_current_batch, 
-                                val_when_var_is_zero, user_means_GU,  user_var_GU);
-                    checkCudaErrors(cudaFree(user_means_GU));
-                    checkCudaErrors(cudaFree(user_var_GU));
-                    update_Mem(2 * batch_size_GU * SIZE_OF(float) * (-1));
-                    if(Debug  && 0){
-                        //save_device_mtx_to_file<float>(delta_R_GU, batch_size_GU, 1, "delta_R_GU_1", true, strPreamble(blank));
-                        save_device_mtx_to_file<float>(full_ratingsMtx_dev_GU_current_batch, batch_size_GU, 1, "R_GU_1", true, strPreamble(blank));
-                    }
-                }
-
-                if(calc_delta_R_GU){
-                    //float* copy;
-                    //checkCudaErrors(cudaMalloc((void**)&copy, batch_size_GU * ratings_cols * SIZE_OF(float)));
-                    //update_Mem(batch_size_GU * ratings_cols * SIZE_OF(float));
-                    //checkCudaErrors(cudaMemcpy(copy, delta_R_GU, batch_size_GU * ratings_cols * SIZE_OF(float), cudaMemcpyDeviceToDevice));
-                    gpu_axpby<float>(dn_handle, batch_size_GU * ratings_cols, 
-                                     (float)(-1.0), full_ratingsMtx_dev_GU_current_batch,
-                                     (float)(1.0), delta_R_GU);
-
-                    float delta_abs_exp = gpu_expected_abs_value<float>(batch_size_GU * ratings_cols, delta_R_GU);
-                    float delta_abs_max = gpu_abs_max<float>           (batch_size_GU * ratings_cols, delta_R_GU); 
-                    LOG("delta R_GU maximum absolute value = "<<ToString<float>(delta_abs_max)) ;
-                    LOG("delta R_GU expected absolute value over all = "<<ToString<float>(delta_abs_exp)) ;
-
-                    cpu_incremental_average((long long int)(batch__ + 1), delta_R_GU_exp + it, delta_abs_exp);
-
-                    gpu_mean_abs_nonzero((batch_size_GU * ratings_cols), delta_R_GU, &delta_abs_exp, 1, "delta_R_GU");
-                    LOG("delta R_GU expected absolute value over only non zero = "<<ToString<float>(delta_abs_exp)) ;
-                    max_abs_delta_R_GU = std::max(max_abs_delta_R_GU, delta_abs_max);
                     if(Debug && 0){
-                        LOG("first 5 entries of delta_R_GU :") ;
-                        print_gpu_array_entries(delta_R_GU, 5, strPreamble(blank));
-                        // save_device_arrays_side_by_side_to_file(copy, full_ratingsMtx_dev_GU_current_batch, delta_R_GU, batch_size_GU * ratings_cols, "old_new_delta");
-                        // LOG("Press Enter to continue.") ;
-                        // std::cin.ignore();
+                        LOG("first 5 entries of full_ratingsMtx_dev_ACU_current_batch :") ;
+                        print_gpu_array_entries(full_ratingsMtx_dev_ACU_current_batch, 5, strPreamble(blank));
+                        //save_device_mtx_to_file(full_ratingsMtx_dev_ACU_current_batch, batch_size_ACU, ratings_cols, "full_ratingsMtx_dev_ACU_current_batch", false);
                     }
-                    checkCudaErrors(cudaFree(delta_R_GU));
-                    //checkCudaErrors(cudaFree(copy));
-                    update_Mem(/*2 * */batch_size_GU * ratings_cols * SIZE_OF(float) * (-1));
+
+                    // if(batch > 0 || it > 0){
+                    //     float R_ACU_abs_exp = gpu_expected_abs_value<float>(batch_size_ACU * ratings_cols, full_ratingsMtx_dev_ACU_current_batch);
+                    //     float R_ACU_abs_max = gpu_abs_max<float>           (batch_size_ACU * ratings_cols, full_ratingsMtx_dev_ACU_current_batch); 
+                    //     LOG("full_ratingsMtx_dev_ACU_current_batch_abs_max = "<<ToString<float>(R_ACU_abs_max)) ;
+                    //     LOG("full_ratingsMtx_dev_ACU_current_batch_abs_exp = "<<ToString<float>(R_ACU_abs_exp)) ;
+                    //     ABORT_IF_EQ(R_ACU_abs_max, R_ACU_abs_exp, "R_ACU is constant");
+                    //     ABORT_IF_LESS((float)10.0 * abs_max_training, std::abs(R_ACU_abs_max), "unstable growth");
+                    //     ABORT_IF_LESS( std::abs(R_ACU_abs_max), abs_max_training / (float)10.0 , "unstable shrinking");
+                    //     // LOG("Press Enter to continue.") ;
+                    //     // std::cin.ignore();
+                    // }
+
+                } // end loop on rounds
+
+
+
+
+                if(row_major_ordering){
+                    //remember that ratings_ACU is stored in row major ordering
+                    LOG("swap matrix indexing from column major to row major");
+                    gpu_swap_ordering<float>(batch_size_ACU, ratings_cols, full_ratingsMtx_dev_ACU_current_batch, !row_major_ordering);
                 }
                 
-                if(Debug && 0){
-                    LOG("first 5 entries of full_ratingsMtx_dev_GU_current_batch :") ;
-                    print_gpu_array_entries(full_ratingsMtx_dev_GU_current_batch, 5, strPreamble(blank));
-                    //save_device_mtx_to_file(full_ratingsMtx_dev_GU_current_batch, batch_size_GU, ratings_cols, "full_ratingsMtx_dev_GU_current_batch", false);
+                if(Conserve_GPU_Mem){
+                    LOG("copy R_ACU to host storage");
+                    checkCudaErrors(cudaMemcpy(full_ratingsMtx_host_ACU + ratings_cols * first_row_in_batch_ACU, full_ratingsMtx_dev_ACU_current_batch, 
+                                                batch_size_ACU * ratings_cols * SIZE_OF(float), cudaMemcpyDeviceToHost));
+                    checkCudaErrors(cudaFree(coo_format_ratingsMtx_itemID_dev_training_));
+                    checkCudaErrors(cudaFree(coo_format_ratingsMtx_rating_dev_training_));
+                    
+                    update_Mem(nnz_training * SIZE_OF(int)   * (-1) );
+                    update_Mem(nnz_training * SIZE_OF(float) * (-1) ); 
+                }
+                checkCudaErrors(cudaFree(coo_training_errors));
+                update_Mem(nnz_training * SIZE_OF(float) * (-1));
+
+                if(it % testing_rate == (testing_rate - 1)){
+                
+                    std::string full_ratingsMtx_ACU_filepath = save_path + "full_ratingsMtx_ACU_block_" + ToString<int>(batch__) + "_it_"+ ToString<int>(it);
+                    if(Conserve_GPU_Mem){
+                        save_host_mtx_to_file(full_ratingsMtx_host_ACU + ratings_cols * first_row_in_batch_ACU, batch_size_ACU, ratings_cols, full_ratingsMtx_ACU_filepath, row_major_ordering, strPreamble(blank));
+                    }else{
+                        ABORT_IF_EQ(0, 0, "Option not yet available.");
+                        if(row_major_ordering){
+                            save_device_mtx_to_file(full_ratingsMtx_dev_ACU_current_batch, ratings_cols, batch_size_ACU, full_ratingsMtx_ACU_filepath, row_major_ordering, strPreamble(blank));
+                        }else{
+                            save_device_mtx_to_file(full_ratingsMtx_dev_ACU_current_batch, batch_size_ACU, ratings_cols, full_ratingsMtx_ACU_filepath, !row_major_ordering, strPreamble(blank));
+                        }
+
+                    }
                 }
 
-                // if(batch > 0 || it > 0){
-                //     float R_GU_abs_exp = gpu_expected_abs_value<float>(batch_size_GU * ratings_cols, full_ratingsMtx_dev_GU_current_batch);
-                //     float R_GU_abs_max = gpu_abs_max<float>           (batch_size_GU * ratings_cols, full_ratingsMtx_dev_GU_current_batch); 
-                //     LOG("full_ratingsMtx_dev_GU_current_batch_abs_max = "<<ToString<float>(R_GU_abs_max)) ;
-                //     LOG("full_ratingsMtx_dev_GU_current_batch_abs_exp = "<<ToString<float>(R_GU_abs_exp)) ;
-                //     ABORT_IF_EQ(R_GU_abs_max, R_GU_abs_exp, "R_GU is constant");
-                //     ABORT_IF_LESS((float)10.0 * abs_max_training, std::abs(R_GU_abs_max), "unstable growth");
-                //     ABORT_IF_LESS( std::abs(R_GU_abs_max), abs_max_training / (float)10.0 , "unstable shrinking");
-                //     // LOG("Press Enter to continue.") ;
-                //     // std::cin.ignore();
+                
+
+
+                /*
+                    //============================================================================================
+                    // Assume the rows of R_ACU are the ratings_rows_ACU-means for the training users - what is the error?
+                    //============================================================================================ 
+
+                    float* errors;
+                    int* selection;
+                    if(Conserve_GPU_Mem){
+                        errors  = (float *)malloc(ratings_rows_training * SIZE_OF(float));
+                        selection  = (int *)malloc(ratings_rows_training * SIZE_OF(int));
+                        checkErrors(errors);
+                        checkErrors(selection);
+                        cpu_sparse_nearest_row<float>(ratings_rows_ACU, ratings_cols, full_ratingsMtx_host_ACU, 
+                                                     ratings_rows_training, num_entries_training, 
+                                                     csr_format_ratingsMtx_userID_host_training, 
+                                                     coo_format_ratingsMtx_itemID_host_training,
+                                                     coo_format_ratingsMtx_rating_host_training, 
+                                                     selection, errors);
+                        float mean_ACUess_error = cpu_sum_of_squares<float>(num_entries_training, coo_format_ratingsMtx_rating_host_training);
+                        float k_means_er = cpu_sum(ratings_rows_training,  errors);
+                        LOG("err norm when clustering : "<<std::sqrt(k_means_er));
+                        LOG("err norm when clustering over err when guessing mean one cluster: "<<std::sqrt(k_means_er) / std::sqrt(mean_ACUess_error));
+                        LOG("mean sqed err when clustering : "<<k_means_er / (float)num_entries_training);
+                        if(Debug && 0){
+                            save_host_array_to_file<float>(errors, ratings_rows_training, "errors");
+                            save_host_array_to_file<int>(selection, ratings_rows_training, "selection");
+                        }
+                        free(errors);
+                        free(selection);
+                    }else{
+                        checkCudaErrors(cudaMalloc((void**)&errors, ratings_rows_training * SIZE_OF(float)));
+                        checkCudaErrors(cudaMalloc((void**)&selection, ratings_rows_training * SIZE_OF(int)));
+                        update_Mem(2 * ratings_rows_training * SIZE_OF(int));
+                        gpu_sparse_nearest_row<float>(ratings_rows_ACU, ratings_cols, full_ratingsMtx_dev_ACU, 
+                                                 ratings_rows_training, num_entries_training, 
+                                                 csr_format_ratingsMtx_userID_dev_training, 
+                                                 coo_format_ratingsMtx_itemID_dev_training,
+                                                 coo_format_ratingsMtx_rating_dev_training, 
+                                                 selection, errors, row_major_ordering);
+                        float k_means_er = gpu_sum(ratings_rows_training,  errors);
+                        LOG("err norm when clustering : "<<std::sqrt(k_means_er));
+                        LOG("mean sqed err when clustering : "<<k_means_er / (float)num_entries_training);
+                        save_device_array_to_file<float>(errors, ratings_rows_training, "errors");
+                        save_device_array_to_file<int>(selection, ratings_rows_training, "selection");
+                        checkCudaErrors(cudaFree(errors));
+                        checkCudaErrors(cudaFree(selection));
+                        update_Mem(2 * ratings_rows_training * SIZE_OF(int) * (-1));
+                    }
+                */
+                
+                //sanity check
+                // if(gpu_abs_max(nnz_training, coo_format_ratingsMtx_rating_dev_training_batch) > abs_max_training){
+                //     ABORT_IF_EQ(0, 0, "abs_max_training should not grow");
                 // }
 
-            } // end loop on rounds
-
-
-
-
-            if(row_major_ordering){
-                //remember that ratings_GU is stored in row major ordering
-                LOG("swap matrix indexing from column major to row major");
-                gpu_swap_ordering<float>(batch_size_GU, ratings_cols, full_ratingsMtx_dev_GU_current_batch, !row_major_ordering);
-            }
-            
-            if(Conserve_GPU_Mem){
-                LOG("copy R_GU to host storage");
-                checkCudaErrors(cudaMemcpy(full_ratingsMtx_host_GU + ratings_cols * first_row_in_batch_GU, full_ratingsMtx_dev_GU_current_batch, 
-                                            batch_size_GU * ratings_cols * SIZE_OF(float), cudaMemcpyDeviceToHost));
-                checkCudaErrors(cudaFree(coo_format_ratingsMtx_itemID_dev_training_));
-                checkCudaErrors(cudaFree(coo_format_ratingsMtx_rating_dev_training_));
+                checkCudaErrors(cudaDeviceSynchronize());
+                gettimeofday(&program_end, NULL);
+                program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
+                //printf("program_time: %f\n", program_time);   
+                LOG("RUN TIME SO FAR: "<<readable_time(program_time));
                 
-                update_Mem(nnz_training * SIZE_OF(int)   * (-1) );
-                update_Mem(nnz_training * SIZE_OF(float) * (-1) ); 
-            }
-            checkCudaErrors(cudaFree(coo_training_errors));
-            update_Mem(nnz_training * SIZE_OF(float) * (-1));
-            
-            std::string full_ratingsMtx_GU_filepath = save_path + "5_31/full_ratingsMtx_GU_block_" + ToString<int>(batch__);
+                // count_batches_so_far++;
+                // gettimeofday(&training_end, NULL);
+                // training_time = (training_end.tv_sec * 1000 +(training_end.tv_usec/1000.0))-(training_start.tv_sec * 1000 +(training_start.tv_usec/1000.0));  
+                // //LOG("average training iteration time : "<<readable_time(training_time / (double)(count_batches_so_far)));
+                // //LOG("predicted run time left: "<<readable_time((training_time / (double)(count_batches_so_far)) * (double)(num_iterations * num_batches - count_batches_so_far))<<std::endl);
+                // LOG("training_time : "<<readable_time(training_time));
+
+
+            }//end for loop on batches
+
+            checkCudaErrors(cudaFree(U_training));
+            update_Mem(batch_size_training  * std::max(min_dim_block, batch_size_training)  * SIZE_OF(float) * (-1));
+            checkCudaErrors(cudaFree(R_training));
+            update_Mem(batch_size_training * ratings_cols * SIZE_OF(float) * (-1));
+
+            if (SV_dev) checkCudaErrors(cudaFree(SV_dev));
+            update_Mem(min_dim_ * SIZE_OF(float) * (-1));
+
             if(Conserve_GPU_Mem){
-                save_host_mtx_to_file(full_ratingsMtx_host_GU + ratings_cols * first_row_in_batch_GU, batch_size_GU, ratings_cols, full_ratingsMtx_GU_filepath, row_major_ordering, strPreamble(blank));
-            }else{
-                ABORT_IF_EQ(0, 0, "Option not yet available.");
-                if(row_major_ordering){
-                    save_device_mtx_to_file(full_ratingsMtx_dev_GU_current_batch, ratings_cols, batch_size_GU, full_ratingsMtx_GU_filepath, row_major_ordering, strPreamble(blank));
-                }else{
-                    save_device_mtx_to_file(full_ratingsMtx_dev_GU_current_batch, batch_size_GU, ratings_cols, full_ratingsMtx_GU_filepath, !row_major_ordering, strPreamble(blank));
-                }
+                checkCudaErrors(cudaFree(full_ratingsMtx_dev_ACU_current_batch));
+                checkCudaErrors(cudaFree(U_ACU_dev));
+                update_Mem(batch_size_ACU  * min_dim_block * SIZE_OF(float) * (-1) );
+                checkCudaErrors(cudaFree(csr_format_ratingsMtx_userID_dev_training_));
+                update_Mem((batch_size_training + 1) * SIZE_OF(int) * (-1));
 
             }
 
-            
-
-
-            /*
-                //============================================================================================
-                // Assume the rows of R_GU are the ratings_rows_GU-means for the training users - what is the error?
-                //============================================================================================ 
-
-                float* errors;
-                int* selection;
+            if(num_blocks != (long long int)1){
                 if(Conserve_GPU_Mem){
-                    errors  = (float *)malloc(ratings_rows_training * SIZE_OF(float));
-                    selection  = (int *)malloc(ratings_rows_training * SIZE_OF(int));
-                    checkErrors(errors);
-                    checkErrors(selection);
-                    cpu_sparse_nearest_row<float>(ratings_rows_GU, ratings_cols, full_ratingsMtx_host_GU, 
-                                                 ratings_rows_training, num_entries_training, 
-                                                 csr_format_ratingsMtx_userID_host_training, 
-                                                 coo_format_ratingsMtx_itemID_host_training,
-                                                 coo_format_ratingsMtx_rating_host_training, 
-                                                 selection, errors);
-                    float mean_guess_error = cpu_sum_of_squares<float>(num_entries_training, coo_format_ratingsMtx_rating_host_training);
-                    float k_means_er = cpu_sum(ratings_rows_training,  errors);
-                    LOG("err norm when clustering : "<<std::sqrt(k_means_er));
-                    LOG("err norm when clustering over err when guessing mean one cluster: "<<std::sqrt(k_means_er) / std::sqrt(mean_guess_error));
-                    LOG("mean sqed err when clustering : "<<k_means_er / (float)num_entries_training);
-                    if(Debug && 0){
-                        save_host_array_to_file<float>(errors, ratings_rows_training, "errors");
-                        save_host_array_to_file<int>(selection, ratings_rows_training, "selection");
-                    }
-                    free(errors);
-                    free(selection);
+                    LOG("shuffle ACU matrix rows");
+                    // cpu_shuffle_mtx_rows_or_cols(dn_handle, ratings_rows_ACU, ratings_cols, 
+                    //                              row_major_ordering, full_ratingsMtx_host_ACU, 1);
                 }else{
-                    checkCudaErrors(cudaMalloc((void**)&errors, ratings_rows_training * SIZE_OF(float)));
-                    checkCudaErrors(cudaMalloc((void**)&selection, ratings_rows_training * SIZE_OF(int)));
-                    update_Mem(2 * ratings_rows_training * SIZE_OF(int));
-                    gpu_sparse_nearest_row<float>(ratings_rows_GU, ratings_cols, full_ratingsMtx_dev_GU, 
-                                             ratings_rows_training, num_entries_training, 
-                                             csr_format_ratingsMtx_userID_dev_training, 
-                                             coo_format_ratingsMtx_itemID_dev_training,
-                                             coo_format_ratingsMtx_rating_dev_training, 
-                                             selection, errors, row_major_ordering);
-                    float k_means_er = gpu_sum(ratings_rows_training,  errors);
-                    LOG("err norm when clustering : "<<std::sqrt(k_means_er));
-                    LOG("mean sqed err when clustering : "<<k_means_er / (float)num_entries_training);
-                    save_device_array_to_file<float>(errors, ratings_rows_training, "errors");
-                    save_device_array_to_file<int>(selection, ratings_rows_training, "selection");
-                    checkCudaErrors(cudaFree(errors));
-                    checkCudaErrors(cudaFree(selection));
-                    update_Mem(2 * ratings_rows_training * SIZE_OF(int) * (-1));
+                    LOG("shuffle ACU matrix rows");
+                    //shuffle ACU rows
+                    gpu_shuffle_mtx_rows_or_cols(dn_handle, ratings_rows_ACU, ratings_cols,  
+                                                row_major_ordering, full_ratingsMtx_dev_ACU, 1);
+
+
+                    //shuffle training rows??
                 }
-            */
-            
-            //sanity check
-            // if(gpu_abs_max(nnz_training, coo_format_ratingsMtx_rating_dev_training_batch) > abs_max_training){
-            //     ABORT_IF_EQ(0, 0, "abs_max_training should not grow");
-            // }
-
-            checkCudaErrors(cudaDeviceSynchronize());
-            gettimeofday(&program_end, NULL);
-            program_time = (program_end.tv_sec * 1000 +(program_end.tv_usec/1000.0))-(program_start.tv_sec * 1000 +(program_start.tv_usec/1000.0));
-            //printf("program_time: %f\n", program_time);   
-            LOG("RUN TIME SO FAR: "<<readable_time(program_time));
-            
-            // count_batches_so_far++;
-            // gettimeofday(&training_end, NULL);
-            // training_time = (training_end.tv_sec * 1000 +(training_end.tv_usec/1000.0))-(training_start.tv_sec * 1000 +(training_start.tv_usec/1000.0));  
-            // //LOG("average training iteration time : "<<readable_time(training_time / (double)(count_batches_so_far)));
-            // //LOG("predicted run time left: "<<readable_time((training_time / (double)(count_batches_so_far)) * (double)(num_iterations * num_batches - count_batches_so_far))<<std::endl);
-            // LOG("training_time : "<<readable_time(training_time));
-        }//end for loop on batches
-
-        checkCudaErrors(cudaFree(U_training));
-        update_Mem(batch_size_training  * std::max(min_dim_block, batch_size_training)  * SIZE_OF(float) * (-1));
-        checkCudaErrors(cudaFree(R_training));
-        update_Mem(batch_size_training * ratings_cols * SIZE_OF(float) * (-1));
-
-        if (SV_dev) checkCudaErrors(cudaFree(SV_dev));
-        update_Mem(min_dim_ * SIZE_OF(float) * (-1));
-
-        if(Conserve_GPU_Mem){
-            checkCudaErrors(cudaFree(full_ratingsMtx_dev_GU_current_batch));
-            checkCudaErrors(cudaFree(U_GU_dev));
-            update_Mem(batch_size_GU  * min_dim_block * SIZE_OF(float) * (-1) );
-            checkCudaErrors(cudaFree(csr_format_ratingsMtx_userID_dev_training_));
-            update_Mem((batch_size_training + 1) * SIZE_OF(int) * (-1));
-
-        }
-
-        if(num_blocks != (long long int)1){
-            if(Conserve_GPU_Mem){
-                LOG("shuffle GU matrix rows");
-                // cpu_shuffle_mtx_rows_or_cols(dn_handle, ratings_rows_GU, ratings_cols, 
-                //                              row_major_ordering, full_ratingsMtx_host_GU, 1);
-            }else{
-                LOG("shuffle GU matrix rows");
-                //shuffle GU rows
-                gpu_shuffle_mtx_rows_or_cols(dn_handle, ratings_rows_GU, ratings_cols,  
-                                            row_major_ordering, full_ratingsMtx_dev_GU, 1);
-
-
-                //shuffle training rows??
             }
-        }
-        if(it % (num_iterations / 4) == 0){
-           meta_training_rate =  meta_training_rate / (float)10.0;
-        }
-        if(1){
-            LOG(std::endl<<std::endl<<std::endl);
-            LOG("Iteration "<<it<<" MSQ training error (used to update V): "<< ToString<float>(training_error_v[it]));
-            LOG("Iteration "<<it<<" expected number of training iterations: "<< ToString<float>(training_iterations[it]));
-            LOG("Iteration "<<it<<" MSQ when clustering (used to update U): "<<ToString<float>(training_error_u[it]));
-            //LOG("Iteration "<<it<<" err norm when clustering : "<<std::sqrt(k_means_er));
-            
-            LOG("Iteration "<<it<<" MSQ testing error per testing entry: "<< ToString<float>(testing_error_on_testing_entries[num_tests - 1]));
-            LOG("Iteration "<<it<<" expected number of testing iterations: "<< ToString<float>(testing_iterations[num_tests - 1]));
-            
-            LOG("Iteration "<<it<<" MSQ testing error per testing entry: "<< ToString<float>(testing_error_on_testing_entries[num_tests - 1]));
-            LOG("Iteration "<<it<<" expected number of testing iterations: "<< ToString<float>(testing_iterations[num_tests - 1]));
-            
-            
-            // LOG("Press Enter to continue.") ;
-            // std::cin.ignore();
-        }
-        LOG("Finished Iteration "<<it<<"."<<std::endl<<std::endl<<std::endl<<std::endl<<std::endl<<std::endl<<std::endl);
+            if(it % (num_iterations / 4) == 0){
+               meta_training_rate =  meta_training_rate / (float)10.0;
+            }
 
-        cpu_isBad<float>(training_error_v + it, (long long int)1, "training_error_v", strPreamble(blank));
-        cpu_isBad<float>(training_iterations + it, (long long int)1, "training_iterations", strPreamble(blank));
-        cpu_isBad<float>(training_error_u + it, (long long int)1, "training_error_u", strPreamble(blank));
-        cpu_isBad<float>(delta_R_GU_exp + it, (long long int)1, "delta_R_GU_exp", strPreamble(blank));  
 
-        if(load_full_GU_from_save){
-            append_host_array_to_file(training_error_v + it, 1, "training_error_v", strPreamble(blank));
-            append_host_array_to_file(training_iterations + it, 1, "training_iterations", strPreamble(blank));
-            if(update_U) append_host_array_to_file(training_error_u + it, 1, "training_error_u", strPreamble(blank));
-            if(calc_delta_R_GU)append_host_array_to_file(delta_R_GU_exp + it, 1, "delta_R_GU_exp", strPreamble(blank));
-            it++;  
+
+            gettimeofday(&training_end, NULL);
+            program_time = (training_end.tv_sec * 1000 +(training_end.tv_usec/1000.0))-(training_start.tv_sec * 1000 +(training_start.tv_usec/1000.0));   
+            cpu_incremental_average((long long int)(it + 1), &avg_training_time, program_time);
+            LOG("average training time: "<<readable_time(avg_training_time));
+            LOG("average training time per block: "<<readable_time(avg_training_time / static_cast<double>(num_blocks)));
+            if(it % testing_rate == 0){
+                LOG(std::endl<<std::endl<<std::endl);
+                LOG("Iteration "<<it<<" MSQ training error (used to update V): "<< ToString<float>(training_error_v[it]));
+                LOG("Iteration "<<it<<" expected number of training iterations: "<< ToString<float>(training_iterations[it]));
+                LOG("Iteration "<<it<<" MSQ when clustering (used to update U): "<<ToString<float>(training_error_u[it]));
+                //LOG("Iteration "<<it<<" err norm when clustering : "<<std::sqrt(k_means_er));
+                
+                LOG("Iteration "<<it<<" MSQ testing error per testing entry: "<< ToString<float>(testing_error_on_testing_entries[num_tests - 1]));
+                LOG("Iteration "<<it<<" expected number of testing iterations: "<< ToString<float>(testing_iterations[num_tests - 1]));
+                
+                LOG("Iteration "<<it<<" MSQ testing error per testing entry: "<< ToString<float>(testing_error_on_testing_entries[num_tests - 1]));
+                LOG("Iteration "<<it<<" expected number of testing iterations: "<< ToString<float>(testing_iterations[num_tests - 1]));
+                
+                LOG("Finished Iteration "<<it<<"."<<std::endl<<std::endl<<std::endl<<std::endl<<std::endl<<std::endl<<std::endl);
+                // LOG("Press Enter to continue.") ;
+                // std::cin.ignore();
+            }
+            
+
+            cpu_isBad<float>(training_error_v + it, (long long int)1, "training_error_v", strPreamble(blank));
+            cpu_isBad<float>(training_iterations + it, (long long int)1, "training_iterations", strPreamble(blank));
+            cpu_isBad<float>(training_error_u + it, (long long int)1, "training_error_u", strPreamble(blank));
+            cpu_isBad<float>(delta_R_ACU_exp + it, (long long int)1, "delta_R_ACU_exp", strPreamble(blank));  
+
+            if(load_full_ACU_from_save){
+                append_host_array_to_file(training_error_v + it, 1, "training_error_v", strPreamble(blank));
+                append_host_array_to_file(training_iterations + it, 1, "training_iterations", strPreamble(blank));
+                if(update_U) append_host_array_to_file(training_error_u + it, 1, "training_error_u", strPreamble(blank));
+                if(calc_delta_R_ACU)append_host_array_to_file(delta_R_ACU_exp + it, 1, "delta_R_ACU_exp", strPreamble(blank));
+                it++;  
+            }else{
+                it++;
+                save_host_array_to_file(training_error_v, it, "training_error_v", strPreamble(blank));
+                save_host_array_to_file(training_iterations, it, "training_iterations", strPreamble(blank));
+                if(update_U) save_host_array_to_file(training_error_u, it, "training_error_u", strPreamble(blank));
+                if(calc_delta_R_ACU)save_host_array_to_file(delta_R_ACU_exp, it, "delta_R_ACU_exp", strPreamble(blank));            
+            }
         }else{
             it++;
-            save_host_array_to_file(training_error_v, it, "training_error_v", strPreamble(blank));
-            save_host_array_to_file(training_iterations, it, "training_iterations", strPreamble(blank));
-            if(update_U) save_host_array_to_file(training_error_u, it, "training_error_u", strPreamble(blank));
-            if(calc_delta_R_GU)save_host_array_to_file(delta_R_GU_exp, it, "delta_R_GU_exp", strPreamble(blank));            
         }
-
 
     }//end for loop on iterations
 
@@ -2835,7 +3014,7 @@ int main(int argc, char *argv[])
 
 
     //============================================================================================
-    // Assume the rows of R_GU are the ratings_rows_GU-means for the training users - what is the error?
+    // Assume the rows of R_ACU are the ratings_rows_ACU-means for the training users - what is the error?
     //============================================================================================ 
 
 
@@ -2848,7 +3027,7 @@ int main(int argc, char *argv[])
             selection  = (int *)malloc(ratings_rows_training * SIZE_OF(int));
             checkErrors(errors);
             checkErrors(selection);
-            cpu_sparse_nearest_row<float>(ratings_rows_GU, ratings_cols, full_ratingsMtx_host_GU, 
+            cpu_sparse_nearest_row<float>(ratings_rows_ACU, ratings_cols, full_ratingsMtx_host_ACU, 
                                          ratings_rows_training, num_entries_training, 
                                          csr_format_ratingsMtx_userID_host_training, 
                                          coo_format_ratingsMtx_itemID_host_training,
@@ -2865,7 +3044,7 @@ int main(int argc, char *argv[])
             checkCudaErrors(cudaMalloc((void**)&errors, ratings_rows_training * SIZE_OF(float)));
             checkCudaErrors(cudaMalloc((void**)&selection, ratings_rows_training * SIZE_OF(int)));
             update_Mem(2 * ratings_rows_training * SIZE_OF(int));
-            gpu_sparse_nearest_row<float>(ratings_rows_GU, ratings_cols, full_ratingsMtx_dev_GU, 
+            gpu_sparse_nearest_row<float>(ratings_rows_ACU, ratings_cols, full_ratingsMtx_dev_ACU, 
                                      ratings_rows_training, num_entries_training, 
                                      csr_format_ratingsMtx_userID_dev_training, 
                                      coo_format_ratingsMtx_itemID_dev_training,
@@ -2885,10 +3064,7 @@ int main(int argc, char *argv[])
 
 
 
-    checkCudaErrors(cudaDeviceSynchronize());
-    gettimeofday(&training_end, NULL);
-    training_time = (training_end.tv_sec * 1000 +(training_end.tv_usec/1000.0))-(training_start.tv_sec * 1000 +(training_start.tv_usec/1000.0));  
-    LOG("training_time : "<<readable_time(training_time));
+
     //============================================================================================
     // Destroy
     //============================================================================================
@@ -2901,20 +3077,20 @@ int main(int argc, char *argv[])
     if (training_error_v) free(training_error_v);
     if (training_error_u) free(training_error_u);
     if (training_iterations) free(training_iterations);
-    if (delta_R_GU_exp) free(delta_R_GU_exp);
-    if (R_GU_abs_max) free(R_GU_abs_max);
-    if (R_GU_max_sv) free(R_GU_max_sv);
+    if (delta_R_ACU_exp) free(delta_R_ACU_exp);
+    if (R_ACU_abs_max) free(R_ACU_abs_max);
+    if (R_ACU_max_sv) free(R_ACU_max_sv);
     if(logarithmic_histogram) free(logarithmic_histogram);
     if(logarithmic_histogram_km) free(logarithmic_histogram_km);
 
     if (user_means_testing_host) free(user_means_testing_host);
     if (user_var_testing_host) free(user_var_testing_host);
 
-    if (full_ratingsMtx_host_GU) { free(full_ratingsMtx_host_GU); }
-    if (full_ratingsMtx_dev_GU) { checkCudaErrors(cudaFree(full_ratingsMtx_dev_GU)); }
+    if (full_ratingsMtx_host_ACU) { free(full_ratingsMtx_host_ACU); }
+    if (full_ratingsMtx_dev_ACU) { checkCudaErrors(cudaFree(full_ratingsMtx_dev_ACU)); }
 
-    if (U_GU_host) free(U_GU_host);
-    if (U_GU_dev) checkCudaErrors(cudaFree(U_GU_dev));
+    if (U_ACU_host) free(U_ACU_host);
+    if (U_ACU_dev) checkCudaErrors(cudaFree(U_ACU_dev));
     if (V_dev) checkCudaErrors(cudaFree(V_dev));
     
 
@@ -2926,19 +3102,19 @@ int main(int argc, char *argv[])
         if (csr_format_ratingsMtx_userID_host_training) free(csr_format_ratingsMtx_userID_host_training);
         if (coo_format_ratingsMtx_itemID_host_training) free(coo_format_ratingsMtx_itemID_host_training);
         if (coo_format_ratingsMtx_rating_host_training) free(coo_format_ratingsMtx_rating_host_training); 
-        if (old_R_GU) free(old_R_GU);
+        if (old_R_ACU) free(old_R_ACU);
     }else{
-        if (old_R_GU) checkCudaErrors(cudaFree(old_R_GU));
+        if (old_R_ACU) checkCudaErrors(cudaFree(old_R_ACU));
     }
     
     
 
 
-    update_Mem((batch_size_GU * std::min(batch_size_GU, ratings_cols) +batch_size_training * batch_size_training + ratings_cols * std::min(batch_size_GU, ratings_cols))* static_cast<long long int>(SIZE_OF(float))* (-1));
+    update_Mem((batch_size_ACU * std::min(batch_size_ACU, ratings_cols) +batch_size_training * batch_size_training + ratings_cols * std::min(batch_size_ACU, ratings_cols))* static_cast<long long int>(SIZE_OF(float))* (-1));
     
 
-    if (user_means_GU) { checkCudaErrors(cudaFree(user_means_GU)); update_Mem(batch_size_GU * SIZE_OF(float) * (-1)); }
-    if (user_var_GU) { checkCudaErrors(cudaFree(user_var_GU));   update_Mem(batch_size_GU * SIZE_OF(float) * (-1)); }
+    if (user_means_ACU) { checkCudaErrors(cudaFree(user_means_ACU)); update_Mem(batch_size_ACU * SIZE_OF(float) * (-1)); }
+    if (user_var_ACU) { checkCudaErrors(cudaFree(user_var_ACU));   update_Mem(batch_size_ACU * SIZE_OF(float) * (-1)); }
 
 
     if (csr_format_ratingsMtx_userID_dev_training) checkCudaErrors(cudaFree(csr_format_ratingsMtx_userID_dev_training));
@@ -2952,10 +3128,10 @@ int main(int argc, char *argv[])
  
     if (SV) free(SV);
 
-    update_Mem((ratings_rows_GU * ratings_cols + /*ratings_rows_training * ratings_cols +*/ num_entries_testing + num_entries_training)* SIZE_OF(float));
+    update_Mem((ratings_rows_ACU * ratings_cols + /*ratings_rows_training * ratings_cols +*/ num_entries_testing + num_entries_training)* SIZE_OF(float));
     update_Mem(( (ratings_rows_testing + 1)  * static_cast<long long int>(SIZE_OF(int)) + num_entries_testing  * static_cast<long long int>(SIZE_OF(int)) + num_entries_testing  * static_cast<long long int>(SIZE_OF(float))
                + (ratings_rows_training + 1) * static_cast<long long int>(SIZE_OF(int)) + num_entries_training * static_cast<long long int>(SIZE_OF(int)) + num_entries_training * static_cast<long long int>(SIZE_OF(float))
-               + (ratings_rows_GU + 1)       * static_cast<long long int>(SIZE_OF(int)) + num_entries_GU       * static_cast<long long int>(SIZE_OF(int)) + num_entries_GU       * static_cast<long long int>(SIZE_OF(float))) * (-1) );
+               + (ratings_rows_ACU + 1)       * static_cast<long long int>(SIZE_OF(int)) + num_entries_ACU       * static_cast<long long int>(SIZE_OF(int)) + num_entries_ACU       * static_cast<long long int>(SIZE_OF(float))) * (-1) );
     
 
     if(Content_Based){ // This means that we use extra knowledge about the user preferences or about the item relationships

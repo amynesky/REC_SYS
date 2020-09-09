@@ -456,9 +456,10 @@ void CSVReader::getData(int* coo_format_ratingsMtx_userID_host,
 * in array.
 */
 void CSVReader::getDataJSON(int* coo_format_ratingsMtx_userID_host,
-						    int* coo_format_ratingsMtx_itemID_host,
-						    float* coo_format_ratingsMtx_rating_host,
-						    int num_entries, const int rating_if_missing)
+					    int* coo_format_ratingsMtx_itemID_host,
+					    float* coo_format_ratingsMtx_rating_host,
+					    int num_entries, const int rating_if_missing, 
+					    std::map<int, int>* Items)
 {
 	bool Debug = false;
 
@@ -481,7 +482,6 @@ void CSVReader::getDataJSON(int* coo_format_ratingsMtx_userID_host,
 		std::map<int, std::pair<int ,int > > Users;
 		int total_users = 0;
 
-		std::map<int, int> Items;
 		int total_items = 0;
 
 		BOOST_FOREACH(pt::ptree::value_type &entry, tree)
@@ -509,10 +509,10 @@ void CSVReader::getDataJSON(int* coo_format_ratingsMtx_userID_host,
 				it -> second = temp;
 			}	
 
-		    std::map<int, int >::iterator it2 = Items.find(item_id);
-		    if( it2 == Items.end() ){
+		    std::map<int, int >::iterator it2 = Items -> find(item_id);
+		    if( it2 == Items -> end() ){
 		      //add the new user
-		      Items.insert ( std::pair<int, int >(item_id,total_items) );
+		      Items -> insert ( std::pair<int, int >(item_id,total_items) );
 		      total_items++;
 		    }	
 		}
@@ -520,6 +520,8 @@ void CSVReader::getDataJSON(int* coo_format_ratingsMtx_userID_host,
 			LOG("total_users : " << total_users);
 			LOG("total_items : "<< total_items);
 		}
+
+		// an array of vectors
 		std::vector< std::pair<int ,int> > item_n_rating[total_users];
 		if(Debug) LOG("here");
 
@@ -543,7 +545,7 @@ void CSVReader::getDataJSON(int* coo_format_ratingsMtx_userID_host,
 
 
 			std::map<int, std::pair<int ,int > >::iterator it = Users.find(user_id);
-			std::map<int, int >::iterator it2 = Items.find(item_id);
+			std::map<int, int >::iterator it2 = Items -> find(item_id);
 			if(Debug && 0){
 				LOG("row : "<<it -> second.first);
 				LOG("col : "<<it2 -> second);

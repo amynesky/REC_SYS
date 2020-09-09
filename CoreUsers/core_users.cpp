@@ -1,3 +1,6 @@
+/**
+    Author: Amy Nesky
+**/
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -34,8 +37,8 @@ const char *sSDKname = "Core Users Recommender Systems";
 
 const bool Debug = 1;
 
-bool Content_Based = 0;
-bool Conserve_GPU_Mem = 1;
+bool Content_Based = 0;         // This means that we use extra knowledge about the user preferences or about the item relationships
+bool Conserve_GPU_Mem = 1;      // This means that the full GU rating mtx is stored on the host 
 bool load_from_preprocessing = 1;
 std::string preprocessing_path = "";
 bool consider_item_cosine_similarity = true;
@@ -167,7 +170,8 @@ int main(int argc, char *argv[])
     LOG("Debug = "<<Debug);
 
     /* initialize random seed: */
-    srand (time(0));
+    srand (cluster_seedgen());
+    //srand (time(0));
 
     int dev = findCudaDevice(argc, (const char **) argv);
     cudaDeviceProp devProp;
@@ -279,6 +283,7 @@ int main(int argc, char *argv[])
             Dataset_Name = "Rent The Runaway";
             csv_Ratings_Path = (preamble + "/pylon5/ac560rp/nesky/REC_SYS/datasets/renttherunway_final_data.json").c_str();
             //csv_keyWords_path = (preamble + "/pylon5/ac560rp/nesky/REC_SYS/datasets/renttherunway_final_data.json").c_str();
+            preprocessing_path = "/pylon5/ac560rp/nesky/REC_SYS/CoreUsers/preprocessing/renttherunway/";
             Content_Based = 0;
             temp_num_entries = 192544;           // use for Rent The Runaway dataset
             break;
@@ -369,7 +374,7 @@ int main(int argc, char *argv[])
             csv_Ratings.getDataJSON(coo_format_ratingsMtx_userID_host,
                                     coo_format_ratingsMtx_itemID_host,
                                     coo_format_ratingsMtx_rating_host, 
-                                    num_entries, missing_);
+                                    num_entries, missing_, &items_dictionary);
             break;
         }default: 
             ABORT_IF_EQ(0, 1, "no valid dataset selected");
@@ -659,7 +664,7 @@ int main(int argc, char *argv[])
 
 
 
-    const float probability_CU       = (float)10.0/(float)100.0;
+    const float probability_CU       = (float)40.0/(float)100.0;
     const float probability_testing  = ((float)1.0 - probability_CU);
     LOG("percentage of users for testing: " <<probability_testing);
     LOG("percentage of users for CU: "      <<(float)1.0 - probability_testing<<std::endl);
@@ -1062,7 +1067,7 @@ int main(int argc, char *argv[])
         LOG("top_users[0] : "<<top_users[0]);
         LOG("top_users[ratings_rows - 1] : "<<top_users[ratings_rows - 1]);
     }
-    LOG("here!");
+    
 
     /*
         The ratings_rows_CU core users indicies are the indicies 
@@ -1115,7 +1120,10 @@ int main(int argc, char *argv[])
 
 
     LOG("num testing entries : " <<num_entries_testing);
-    LOG("num CU entries : "      <<num_entries_CU<<std::endl);
+    LOG("num CU entries : "      <<num_entries_CU<<std::endl<<std::endl<<std::endl);
+
+    LOG("DATA REDUCTION OF CU USERS : "      <<static_cast<double>(ratings_rows_CU + (long long int)2 * num_entries_CU) / static_cast<double>(ratings_rows + (long long int)2 * num_entries)<<std::endl<<std::endl<<std::endl);
+
     
     ABORT_IF_NEQ(ratings_rows_testing  + ratings_rows_CU, ratings_rows, "The number of rows does not add up correctly.");
     if(!CU_ratingsMtx_has_hidden_values)
@@ -1262,6 +1270,7 @@ int main(int argc, char *argv[])
     int*   csr_format_ratingsMtx_userID_host_CU = NULL;
     int*   coo_format_ratingsMtx_itemID_host_CU = NULL;
     float* coo_format_ratingsMtx_rating_host_CU = NULL;
+    float CU_variance = (float)0.0;
 
     if(Conserve_GPU_Mem){
         csr_format_ratingsMtx_userID_host_CU  = (int *)  malloc((ratings_rows_CU + 1) * SIZE_OF(int)  );
@@ -1278,6 +1287,21 @@ int main(int argc, char *argv[])
         checkErrors(full_ratingsMtx_host_CU);
 
         cpu_set_all<float>(full_ratingsMtx_host_CU, CU_mtx_size, (float)0.0);
+
+        if(0){
+            // COMPARE TO SINGULAR VALUES OF RANDOM MTX
+
+            LOG("WARNING! WARNING! WARNING! MAKING RANDOM ENTRIES");
+            //CU_variance = cpu_variance<float>(ratings_rows_CU * ratings_cols,  full_ratingsMtx_host_CU);
+            //LOG("CU_variance : "<<CU_variance);
+            getRandIntsBetween(coo_format_ratingsMtx_itemID_host_CU, 0, static_cast<int>(ratings_cols), (int)num_entries_CU);
+            for(int row = 0; row < ratings_rows_CU; row++){
+                int first_index = csr_format_ratingsMtx_userID_host_CU[row];
+                int last_index = csr_format_ratingsMtx_userID_host_CU[row + 1] - 1;
+                quickSort<int>(coo_format_ratingsMtx_itemID_host_CU, first_index, last_index);
+            }
+            host_rng_gaussian(num_entries_CU, (float)0.0, (float)1.0, coo_format_ratingsMtx_rating_host_CU);
+        } 
         
         cpu_fill_training_mtx((long long int)ratings_rows_CU, (long long int)ratings_cols, (long long int)num_entries_CU, 
                               row_major_ordering,  
@@ -1285,6 +1309,11 @@ int main(int argc, char *argv[])
                               coo_format_ratingsMtx_itemID_host_CU,
                               coo_format_ratingsMtx_rating_host_CU,
                               full_ratingsMtx_host_CU);
+        if(Debug & 0){
+            save_host_array_to_file(full_ratingsMtx_host_CU, 1000/*ratings_cols * ratings_rows_CU*/, "full_ratingsMtx_CU", strPreamble(blank));
+            return 0;
+        }
+
 
         if(0 && consider_item_cosine_similarity && load_from_preprocessing){
             top_N_most_sim_itemIDs  = (int *)malloc((long long int)top_N * ratings_cols * SIZE_OF(int));
@@ -1301,7 +1330,8 @@ int main(int argc, char *argv[])
             LOG("Sanity Check : ");
             LOG("top_N_most_sim_item_similarity[0] : "<<top_N_most_sim_item_similarity[0]);
         }
-        
+
+
         free(csr_format_ratingsMtx_userID_host_CU);
         free(coo_format_ratingsMtx_itemID_host_CU);
         free(coo_format_ratingsMtx_rating_host_CU);       
@@ -1309,6 +1339,11 @@ int main(int argc, char *argv[])
         
         cpu_shuffle_mtx_rows_or_cols(ratings_rows_CU, ratings_cols, 
                                      row_major_ordering, full_ratingsMtx_host_CU, 1);
+
+        if(0){
+            LOG("WARNING! WARNING! WARNING! MAKING RANDOM ENTRIES");
+            host_rng_gaussian(ratings_rows_CU * ratings_cols, (float)0.0, (float)0.0285, full_ratingsMtx_host_CU);
+        } 
 
         LOG("full_ratingsMtx_host_CU filled and shuffled") ;
     }else{
@@ -1389,18 +1424,16 @@ int main(int argc, char *argv[])
     // float       training_rate           = 0.01;      //use for movielens
     // const float regularization_constant = 5;         //use for movielens
 
-    float       training_rate           = (float)0.0001;      //use for rent the runway
-    const float regularization_constant = (float)0.01;         //use for rent the runway
+    float       training_rate           = (float)0.00001;//0.0001;      //use for rent the runway
+    const float regularization_constant = (float)0.0;         //use for rent the runway
 
     const float testing_fraction        = 0.2; //percent of known entries used for testing
     bool        compress                = true;
     bool        SV_with_U               = false;
 
     
-    const int num_batches    = 83;     // number of training batches per iteration (batches index into training data)
-    const int num_blocks     = ratings_rows_CU / 1000;    // number of blocks of generic users (a single block of generic users is updated in a batch)
-    const int testing_rate   = 1;
-    const long long int batch_size_CU       = std::max((long long int)1, ratings_rows_CU / (num_blocks));
+    const int num_blocks     = static_cast<int>(ratings_rows_CU / (long long int)1000);    // number of blocks of generic users (a single block of generic users is updated in a batch)
+    const long long int batch_size_CU       = std::max((long long int)1, ratings_rows_CU / (long long int)(num_blocks));
     const long long int batch_size_testing  = std::min((long long int)200, std::min(ratings_rows_testing, batch_size_CU));//ratings_rows_testing / num_batches;
     long long int num_batches_testing  = (long long int)(std::ceil((float)ratings_rows_testing  / (float)batch_size_testing));
 
@@ -1408,13 +1441,12 @@ int main(int argc, char *argv[])
     LOG("regularization_constant : "<<regularization_constant);
     LOG("testing_fraction : "       <<testing_fraction);
     LOG("compress : "               <<compress);
-    LOG("num_batches : "            <<num_batches);
-    LOG("testing_rate : "           <<testing_rate);
+    LOG("num_batches : "            <<num_batches_testing);
     LOG("SV_with_U : "              <<SV_with_U);
 
 
     float * testing_error = NULL;
-    testing_error = (float *)malloc(num_batches * SIZE_OF(float)); 
+    testing_error = (float *)malloc(num_batches_testing * SIZE_OF(float)); 
     checkErrors(testing_error);
 
     
@@ -1423,12 +1455,12 @@ int main(int argc, char *argv[])
     // LOG("Press Enter to continue.") ;
     // std::cin.ignore();
 
-
-    long long int num_latent_factors = (long long int)((float)ratings_rows_CU * (float)0.95);
-    long long int max_num_latent_factors = (long long int)12000;
-    float percent_sv_mass              = (float)0.80;     // numbber of singular values to use
+    const float percent              = (float)0.02;     // for 20% CU users, consider using percent = 0.03
+    long long int num_latent_factors = (long long int)ratings_rows_CU ; //((float)ratings_rows_CU * (float)0.95);
+    long long int max_num_latent_factors = (long long int)((float)ratings_rows_CU * percent);
+    float percent_sv_mass              = (float)0.80;     // number of singular values to use
     
-    const float percent              = (float)0.20;     // numbber of singular values to use
+
 
 
     float * U_CU;       // U_CU is ratings_rows_CU * ratings_rows_CU
@@ -1575,6 +1607,8 @@ int main(int argc, char *argv[])
     SV = (float *)malloc(ratings_rows_CU *  SIZE_OF(float)); 
     checkErrors(SV);
 
+
+
     //save_device_mtx_to_file<float>(V_dev, ratings_cols, num_latent_factors, "V_compressed");
     
     if(compress){
@@ -1599,12 +1633,13 @@ int main(int argc, char *argv[])
         */
         LOG("num_blocks = "<< num_blocks);
         LOG("batch_size_CU = "<< batch_size_CU);
-        
+       
         gpu_block_orthogonal_decomp_from_host<float>(dn_handle, dn_solver_handle,
                                                      ratings_rows_CU, ratings_cols,
                                                      &num_latent_factors, percent_sv_mass,
                                                      full_ratingsMtx_host_CU, U_CU, 
-                                                     V_host, batch_size_CU, SV_with_U, SV);
+                                                     V_host, row_major_ordering,
+                                                     batch_size_CU, SV_with_U, SV);
         LOG("largest singular value = "<< SV[0]<<std::endl);                                             
                                                     
         //LOG("num_latent_factors with percent mass = "<< num_latent_factors << " ( / "<< ratings_rows_CU<< " )");
@@ -1613,11 +1648,17 @@ int main(int argc, char *argv[])
         num_latent_factors = static_cast<long long int>(percent * (float)ratings_rows_CU);
         num_latent_factors = std::min(num_latent_factors, std::min(ratings_rows_CU , max_num_latent_factors));
 
+        num_latent_factors = (long long int)650;
+
         LOG("num_latent_factors = "<< num_latent_factors << " ( / "<< ratings_rows_CU<< " )");
         LOG("percent singular vectors = "<< (((float)num_latent_factors) / ((float)ratings_rows_CU)) );
         
         cpu_get_latent_factor_mass<float>(ratings_rows_CU, SV, num_latent_factors, &percent_sv_mass);
-        LOG("percent singular value mass = "<< percent_sv_mass<<std::endl);  
+        LOG("percent singular value mass = "<< percent_sv_mass<<std::endl); 
+
+        if(compress){
+            LOG("COMPRESSING TO "<<num_latent_factors<<" LATENT FACTORS"<<std::endl); 
+        }  
 
         checkCudaErrors(cudaMemcpy(V_dev, V_host, ratings_cols * (compress ? num_latent_factors : ratings_rows_CU) * SIZE_OF(float), cudaMemcpyHostToDevice));
         //if(Debug) {checkCudaErrors(cudaDeviceSynchronize()); LOG("Here");}
@@ -1634,7 +1675,7 @@ int main(int argc, char *argv[])
             //gpu_swap_ordering<float>(ratings_cols, num_latent_factors, V_dev, true);
         }
         if(Debug) {
-            //save_host_array_to_file<float>(SV, ratings_rows_CU, "sinCUlar_values", strPreamble(blank));
+            //save_host_array_to_file<float>(SV, ratings_rows_CU, "singular_values", strPreamble(blank));
             //save_host_mtx_to_file<float>(U_CU_host, ratings_rows_CU, num_latent_factors, "U_CU_compressed");
             
             //save_host_array_side_by_side_with_device_array<float>(V_host, V_dev, static_cast<int>(ratings_cols * (compress ? num_latent_factors : ratings_rows_CU)), "V_host_dev", strPreamble(blank));
@@ -1642,6 +1683,7 @@ int main(int argc, char *argv[])
             //save_device_mtx_to_file<float>(V_dev, ratings_cols, (compress ? num_latent_factors : ratings_rows_CU), "V_dev", false, strPreamble(blank));
         }
         checkCudaErrors(cudaMemcpy(SV_dev, SV, ratings_rows_CU * SIZE_OF(float), cudaMemcpyHostToDevice));
+        save_host_array_to_file<float>(SV, ratings_rows_CU, "singular_values", strPreamble(blank));
         /*
             At this point U_CU is ratings_rows_CU by ratings_rows_CU in memory stored in row major
             ordering and V is ratings_cols by ratings_rows_CU stored in column major ordering
@@ -1650,7 +1692,7 @@ int main(int argc, char *argv[])
             just take the first num_latent_factors columns of each matrix.  
             The columns of U_CU are mixed in memory.
         */
-        
+        //return 0;
     }else{
         if(row_major_ordering){
             //remember that R_CU is stored in row major ordering
@@ -1664,6 +1706,8 @@ int main(int argc, char *argv[])
                                     &num_latent_factors, percent,
                                     full_ratingsMtx_dev_CU, U_CU, 
                                     V_dev, SV_with_U, SV_dev);
+
+        LOG("here!");
 
         //save_device_mtx_to_file<float>(U_CU_dev, ratings_rows_CU, num_latent_factors, "U_CU_compressed");
         /*
@@ -1702,13 +1746,13 @@ int main(int argc, char *argv[])
     update_Mem(batch_size_testing  * (compress ? num_latent_factors : ratings_rows_CU)  * SIZE_OF(float));
     update_Mem(batch_size_testing  * ratings_cols                        * SIZE_OF(float));
 
-    int real_num_batches = 75;
+    int real_num_batches = 20;
     for(int batch__ = 0; batch__ < std::min(real_num_batches, (int)num_batches_testing); batch__++){
         //for(int batch = 0; batch < num_batches_testing; batch++){
 
         LOG(std::endl<<"                                          ~~~ TESTING Batch "<<batch__<<" ( / "<<(std::min(real_num_batches, (int)num_batches_testing))<<" ) ~~~ "); 
         int batch = 0;
-        getRandIntsBetween(&batch , 0 , (int)num_batches_testing - 1, 1);
+        getRandIntsBetween(&batch , 0 , (int)num_batches_testing, 1);
         LOG("batch id : "<<batch);
 
 
@@ -1855,10 +1899,10 @@ int main(int argc, char *argv[])
         cpu_incremental_average((long long int)(num_tests + 1), &running_avg_testing_error_on_testing_entries, testing_error_on_testing_entries[num_tests]);
         cpu_incremental_average((long long int)(num_tests + 1), &running_avg_testing_error_on_training_entries, testing_error_on_training_entries[num_tests]);
         
+        LOG("running_avg_testing_error_on_training_entries :  "<<running_avg_testing_error_on_training_entries);
         LOG("running_avg_testing_error_on_TESTING_entries :  "<<running_avg_testing_error_on_testing_entries<<std::endl);
 
         LOG("min_training_error :  "<<min_training_error);
-        LOG("running_avg_testing_error_on_training_entries :  "<<running_avg_testing_error_on_training_entries);
         LOG("max_training_error :  "<<max_training_error<<std::endl);
         num_tests++;
     }//for loop on test batches
@@ -1894,7 +1938,7 @@ int main(int argc, char *argv[])
     //============================================================================================ 
 
 
-    if(0){
+    if(1){
         float* errors;
         int* selection;
         if(Conserve_GPU_Mem){

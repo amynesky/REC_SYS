@@ -47,9 +47,10 @@ class CSVReader
 			    std::map<int, int>* items_dictionary);
 
 	void getDataJSON(int* coo_format_ratingsMtx_userID_host,
-				    int* coo_format_ratingsMtx_itemID_host,
-				    float* coo_format_ratingsMtx_rating_host,
-				    int num_entries, const int rating_if_missing);
+					    int* coo_format_ratingsMtx_itemID_host,
+					    float* coo_format_ratingsMtx_rating_host,
+					    int num_entries, const int rating_if_missing, 
+					    std::map<int, int>* items_dictionary);
 
 	// Function to fetch data from a CSV File
 	long long int  makeContentBasedcooKeyWordMtx(int* coo_format_keyWordMtx_itemID_host,
